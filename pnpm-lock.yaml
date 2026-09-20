@@ -58,6 +58,13 @@ importers:
       '@umbra/kernels':
         specifier: workspace:*
         version: link:../kernels
+      '@umbra/psd':
+        specifier: workspace:*
+        version: link:../psd
+    devDependencies:
+      ag-psd:
+        specifier: ^31.0.2
+        version: 31.0.2
 
   packages/kernels:
     dependencies:
@@ -70,9 +77,6 @@ importers:
       '@umbra/core':
         specifier: workspace:*
         version: link:../core
-      '@umbra/engine':
-        specifier: workspace:*
-        version: link:../engine
       ag-psd:
         specifier: ^31.0.2
         version: 31.0.2

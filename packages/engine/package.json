@@ -11,6 +11,10 @@
   },
   "dependencies": {
     "@umbra/core": "workspace:*",
-    "@umbra/kernels": "workspace:*"
+    "@umbra/kernels": "workspace:*",
+    "@umbra/psd": "workspace:*"
+  },
+  "devDependencies": {
+    "ag-psd": "^31.0.2"
   }
 }

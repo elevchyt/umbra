@@ -612,6 +612,32 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
   background-position: 0 0, 0 4px, 4px -4px, -4px 0;
   background-color: #aaa;
 }
+.layer-twirl { background: transparent; border: 0; color: var(--text-dim); cursor: default; padding: 0; width: 12px; }
+.layer-twirl:hover { color: var(--text); }
+.layer-thumb.group { display: flex; align-items: center; justify-content: center; background: var(--panel-sunken); background-image: none; color: var(--text-dim); }
+.layer-mask-thumb {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-dark);
+  background: linear-gradient(to bottom, #fff 50%, #000 50%);
+}
+.layer-clip { color: var(--text-dim); margin-right: 3px; }
+.layer-badge {
+  color: var(--text-disabled);
+  font-size: 10px;
+  font-family: var(--mono);
+  flex: 0 0 auto;
+}
+.layers-warning {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  color: var(--warn);
+  border-top: 1px solid var(--border-dark);
+  font-size: 10px;
+}
 .layer-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .layer-tiles { color: var(--text-disabled); font-family: var(--mono); font-size: 10px; }
 

@@ -66,18 +66,15 @@ function Placeholder(props: { name: string; milestone: string; what: string }) {
 // ---- Layers ---------------------------------------------------------------------------
 
 function LayersPanel() {
-  const [blend, setBlend] = createSignal<BlendMode>('normal');
-  const [opacity, setOpacity] = createSignal(100);
-  const [fill, setFill] = createSignal(100);
-  const [selected, setSelected] = createSignal<number | null>(null);
-
-  // The engine stores layers bottom-first; the panel shows them top-first.
-  const rows = createMemo(() => [...(store.doc()?.layers ?? [])].reverse());
+  const rows = () => store.doc()?.layers ?? [];
+  const active = () => store.doc()?.activeLayerIds ?? [];
 
   const blendOptions = BLEND_MENU.filter((m) => m !== '-').map((m) => ({
     value: m as BlendMode,
     label: BLEND_LABEL[m as BlendMode],
   }));
+
+  const selected = () => rows().find((r) => active().includes(r.id));
 
   return (
     <div class="layers-panel">
@@ -86,7 +83,7 @@ function LayersPanel() {
         <div class="layers-filter-icons">
           <For each={['newLayer', 'adjustment', 'type', 'customShape', 'snapshot']}>
             {(ic) => (
-              <button type="button" class="mini-icon" disabled title="Filter by layer kind (M2)">
+              <button type="button" class="mini-icon" disabled title="Filter by layer kind (M11)">
                 <Icon name={ic} size={13} />
               </button>
             )}
@@ -95,8 +92,27 @@ function LayersPanel() {
       </div>
 
       <div class="layers-blend">
-        <Select value={blend()} options={blendOptions} onChange={setBlend} width={118} />
-        <NumberField label="Opacity" value={opacity()} onChange={setOpacity} min={0} max={100} suffix="%" width={34} />
+        <Select
+          value={(selected()?.blendMode ?? 'normal') as BlendMode}
+          options={blendOptions}
+          onChange={(m) => {
+            const id = selected()?.id;
+            if (id !== undefined) store.engine?.({ t: 'setLayerBlendMode', id, mode: m });
+          }}
+          width={118}
+        />
+        <NumberField
+          label="Opacity"
+          value={Math.round((selected()?.opacity ?? 1) * 100)}
+          onChange={(v) => {
+            const id = selected()?.id;
+            if (id !== undefined) store.engine?.({ t: 'setLayerOpacity', id, opacity: v / 100 });
+          }}
+          min={0}
+          max={100}
+          suffix="%"
+          width={34}
+        />
       </div>
 
       <div class="layers-locks">
@@ -105,7 +121,6 @@ function LayersPanel() {
           ['lockTransparency', 'Lock transparent pixels'],
           ['lockPixels', 'Lock image pixels'],
           ['lockPosition', 'Lock position'],
-          ['artboard', 'Prevent auto-nesting into artboards'],
           ['lock', 'Lock all'],
         ] as const}>
           {([icon, title]) => (
@@ -114,7 +129,7 @@ function LayersPanel() {
             </button>
           )}
         </For>
-        <NumberField label="Fill" value={fill()} onChange={setFill} min={0} max={100} suffix="%" width={34} />
+        <NumberField label="Fill" value={Math.round((selected()?.fill ?? 1) * 100)} onChange={() => {}} min={0} max={100} suffix="%" width={34} />
       </div>
 
       <div class="layers-list">
@@ -126,22 +141,73 @@ function LayersPanel() {
             {(l) => (
               <div
                 class="layer-row"
-                classList={{ selected: selected() === l.id }}
-                onClick={() => setSelected(l.id)}
+                classList={{ selected: active().includes(l.id) }}
+                style={{ 'padding-left': `${6 + l.depth * 14}px` }}
+                onClick={() => store.engine?.({ t: 'selectLayer', id: l.id })}
               >
-                <button type="button" class="layer-eye" title="Toggle layer visibility">
+                <button
+                  type="button"
+                  class="layer-eye"
+                  title="Toggle layer visibility"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    store.engine?.({ t: 'setLayerVisible', id: l.id, visible: !l.visible });
+                  }}
+                >
                   <Icon name={l.visible ? 'eye' : 'eyeOff'} size={14} />
                 </button>
-                <div class="layer-thumb" aria-hidden="true" />
-                <span class="layer-name">{l.name}</span>
-                <span class="layer-tiles" title="Tiles allocated for this layer">
-                  {l.tiles}
+
+                <Show when={l.kind === 'group'}>
+                  <button
+                    type="button"
+                    class="layer-twirl"
+                    title={l.expanded ? 'Collapse group' : 'Expand group'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      store.engine?.({ t: 'toggleGroup', id: l.id });
+                    }}
+                  >
+                    <Icon name={l.expanded ? 'chevronDown' : 'chevronRight'} size={11} />
+                  </button>
+                </Show>
+
+                <div class="layer-thumb" classList={{ group: l.kind === 'group' }} aria-hidden="true">
+                  <Show when={l.kind === 'group'}>
+                    <Icon name="folder" size={14} />
+                  </Show>
+                </div>
+
+                <Show when={l.hasMask}>
+                  <div class="layer-mask-thumb" title="Layer mask" aria-hidden="true" />
+                </Show>
+
+                <span class="layer-name">
+                  <Show when={l.clipped}>
+                    <span class="layer-clip" title="Clipped to the layer below">↳</span>
+                  </Show>
+                  {l.name}
                 </span>
+
+                <Show when={l.blendMode !== 'normal' && l.blendMode !== 'passThrough'}>
+                  <span class="layer-badge" title={`Blend mode: ${l.blendMode}`}>
+                    {l.blendMode.slice(0, 3)}
+                  </span>
+                </Show>
+                <Show when={l.opacity < 1}>
+                  <span class="layer-badge" title="Opacity">{Math.round(l.opacity * 100)}%</span>
+                </Show>
               </div>
             )}
           </For>
         </Show>
       </div>
+
+      <Show when={store.doc()?.warnings?.length}>
+        <div class="layers-warning" title="These layers open and render from the raster stored in the file, but are not editable yet">
+          <Icon name="warning" size={12} />
+          {store.doc()!.warnings!.length} layer(s) use features not modelled yet
+        </div>
+      </Show>
 
       <div class="panel-footer">
         <For each={[
@@ -154,7 +220,7 @@ function LayersPanel() {
           ['trash', 'Delete layer'],
         ] as const}>
           {([icon, title]) => (
-            <button type="button" class="mini-icon" title={title} disabled={icon !== 'newLayer'}>
+            <button type="button" class="mini-icon" title={title} disabled>
               <Icon name={icon} size={15} />
             </button>
           )}

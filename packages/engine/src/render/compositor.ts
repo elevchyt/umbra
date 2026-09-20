@@ -42,6 +42,8 @@ uniform float u_blendIfCount;
 uniform vec4  u_blendIfThis;
 uniform vec4  u_blendIfUnder;
 uniform float u_blendIfChannel; // 0 = gray, 1 = r, 2 = g, 3 = b
+/** 1.0 when u_source holds premultiplied alpha (the batched fast path). */
+uniform float u_srcPremul;
 
 ${BLEND_GLSL}
 ${SPECIAL_FILL_GLSL}
@@ -58,6 +60,7 @@ float channelValue(vec3 c, float which) {
 void main() {
   vec4 backdrop = texture(u_backdrop, v_uv);
   vec4 src = texture(u_source, v_uv);
+  if (u_srcPremul > 0.5 && src.a > 0.0) src.rgb /= src.a;
 
   float shape = src.a;
   if (u_hasMask > 0.5) {
@@ -157,6 +160,17 @@ export interface GpuLayer {
   drawMask?: (target: RenderTarget) => void;
   maskDensity?: number;
   children?: GpuLayer[];
+  /**
+   * True when this layer can be batched with its neighbours: a plain pixel layer in Normal
+   * mode with no mask, no Blend If, no channel restriction and Fill 100%. A run of these is
+   * accumulated into ONE scratch target with fixed-function blending and composited with a
+   * single blend pass, instead of one full-viewport pass each (spec 03 §5.2).
+   */
+  plain?: boolean;
+  /** Set by the batcher: `drawSource` emits premultiplied alpha. */
+  sourcePremultiplied?: boolean;
+  /** Draws the layer's tiles with a given opacity, premultiplied, for batching. */
+  drawBatched?: (opacity: number) => void;
 }
 
 const CHANNEL_INDEX = { gray: 0, r: 1, g: 2, b: 3 } as const;
@@ -286,6 +300,7 @@ export class LayerCompositor {
     p.u1f('u_opacity', layer.opacity);
     p.u1f('u_fill', layer.fill);
     p.u1f('u_hasMask', mask ? 1 : 0);
+    p.u1f('u_srcPremul', layer.sourcePremultiplied ? 1 : 0);
     p.u1f('u_maskDensity', layer.maskDensity ?? 1);
     p.u1f('u_seed', layer.seed ?? 0);
     p.u2f('u_origin', this.origin[0], this.origin[1]);
@@ -349,6 +364,31 @@ export class LayerCompositor {
         i++;
         continue;
       }
+      // A layer with a clipped layer above it is a clipping BASE: it must go through the
+      // clipping path, never into a batch, or its clipped layers lose what they clip to.
+      const isClipBase = (k: number) => layers[k + 1]?.clipped === true;
+
+      // Fast path: batch a run of plain Normal layers into a single blend pass.
+      if (layer.plain && layer.drawBatched && !isClipBase(i)) {
+        let end = i;
+        while (
+          end + 1 < layers.length &&
+          layers[end + 1]!.plain &&
+          layers[end + 1]!.drawBatched &&
+          layers[end + 1]!.visible &&
+          !isClipBase(end + 1)
+        ) {
+          end++;
+        }
+        if (end > i) {
+          const next = this.compositeBatch(layers.slice(i, end + 1), acc);
+          this.release(acc);
+          acc = next;
+          i = end + 1;
+          continue;
+        }
+      }
+
       let n = 0;
       while (i + 1 + n < layers.length && layers[i + 1 + n]!.clipped) n++;
 
@@ -361,6 +401,35 @@ export class LayerCompositor {
       i += 1 + n;
     }
     return acc;
+  }
+
+  /**
+   * Accumulate several plain layers into one scratch target using the hardware blender, then
+   * composite the lot with a single pass. This is what keeps a 100-layer document interactive:
+   * the per-layer cost becomes a few tile quads rather than a full-viewport shader pass.
+   */
+  private compositeBatch(run: readonly GpuLayer[], backdrop: RenderTarget): RenderTarget {
+    const gl = this.gl;
+    const src = this.acquire();
+    this.clear(src);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, src.fbo);
+    gl.viewport(0, 0, src.width, src.height);
+    gl.enable(gl.BLEND);
+    // Sources are emitted premultiplied, so this is the classic "over" operator.
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    for (const l of run) l.drawBatched!(l.opacity);
+    gl.disable(gl.BLEND);
+
+    const dst = this.acquire();
+    this.blendPass(dst, backdrop, src, null, {
+      ...run[0]!,
+      blendMode: 'normal',
+      opacity: 1,
+      fill: 1,
+      sourcePremultiplied: true,
+    });
+    this.release(src);
+    return dst;
   }
 
   private renderSource(layer: GpuLayer): RenderTarget {
@@ -532,13 +601,21 @@ void main() { fragColor = vec4(texture(u_color, v_uv).rgb, texture(u_alpha, v_uv
   }
   private _applyAlpha?: Program;
 
-  /** Composite a document and read the result back as straight-alpha RGBA8. */
-  compositeToPixels(layers: readonly GpuLayer[]): Uint8ClampedArray {
+  /**
+   * Composite a layer list onto transparency. The returned target belongs to the pool and is
+   * valid until `releaseAll()`.
+   */
+  compositeOnTransparent(layers: readonly GpuLayer[]): RenderTarget {
     const empty = this.acquire();
     this.clear(empty);
     const result = this.compositeLayers(layers, empty);
     this.release(empty);
+    return result;
+  }
 
+  /** Composite a document and read the result back as straight-alpha RGBA8. */
+  compositeToPixels(layers: readonly GpuLayer[]): Uint8ClampedArray {
+    const result = this.compositeOnTransparent(layers);
     const gl = this.gl;
     const floats = new Float32Array(this.width * this.height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, result.fbo);

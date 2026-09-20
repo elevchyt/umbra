@@ -1,25 +1,49 @@
 /**
- * PSD → tile-store reader.
+ * PSD reader — structure plus per-layer bitmaps, streamed.
  *
- * ag-psd parses a PSD from one contiguous buffer, and by default decodes every layer bitmap
- * into a canvas or an ImageData up front. For a large document that is several times the file
- * size resident at once. `useRawData` defers decoding: the reader keeps each layer's
- * compressed channel data and we decode ONE layer at a time, convert it straight into tiles,
- * then drop the raw data so it can be collected.
+ * ag-psd needs the whole file in one buffer and by default decodes every layer bitmap up
+ * front, which costs several times the file size. `useRawData` defers decoding so we can
+ * decode ONE layer, hand it to the caller, and drop it before moving on; measured peak is
+ * ~1.6x the file rather than ~2.4x (spec 03 §9.1).
  *
- * Peak memory is therefore ≈ file buffer + one decoded layer + the tiles kept so far, instead
- * of file buffer + every decoded layer (spec 07 §1.1, M0 spike 4).
+ * This package deliberately knows nothing about tiles or the engine: it calls back with plain
+ * bitmaps and the engine converts them. That keeps the dependency one-way (engine → psd) now
+ * that the engine is the thing opening files.
  */
-import { readPsd, getLayerImageData, type Layer as AgLayer, type Psd } from 'ag-psd';
-import { TILE_SIZE, TILE_SHIFT, type PlaneFormat } from '@umbra/core/pixels';
-import { Plane, Tile, PlaneWriter } from '@umbra/engine/tiles/plane';
+import {
+  readPsd,
+  getLayerImageData,
+  getLayerMaskImageData,
+  type Layer as AgLayer,
+  type Psd,
+} from 'ag-psd';
 import { initPsdEnvironment } from './environment.js';
 
-export const RGBA8: PlaneFormat = { layout: 'RGBA', sample: 'u8' };
+export interface PsdBitmap {
+  data: Uint8Array;
+  width: number;
+  height: number;
+  /** Document-space position of the bitmap's top-left corner. */
+  left: number;
+  top: number;
+}
 
-export interface PsdLayerRecord {
+export interface PsdMaskInfo extends PsdBitmap {
+  /** Value outside the stored mask rect. */
+  defaultColor: 0 | 255;
+  disabled: boolean;
+  /** 0…100 in the file; undefined means fully applied. */
+  density?: number;
+  feather?: number;
+}
+
+export interface PsdLayerInfo {
+  /** Stable index in file order. */
+  index: number;
   name: string;
+  kind: 'pixel' | 'group';
   opacity: number;
+  fillOpacity: number;
   visible: boolean;
   blendMode: string;
   clipping: boolean;
@@ -27,90 +51,133 @@ export interface PsdLayerRecord {
   top: number;
   right: number;
   bottom: number;
-  plane: Plane;
-  tileCount: number;
+  /** Nested children, for groups. */
+  children?: PsdLayerInfo[];
+  /** True when ag-psd reported features we do not model yet. */
+  unsupported?: string[];
 }
 
-export interface PsdDocument {
+export interface PsdDocInfo {
   width: number;
   height: number;
   channels: number;
   bitsPerChannel: number;
   colorMode: number;
-  layers: PsdLayerRecord[];
+  layers: PsdLayerInfo[];
 }
 
-export interface ReadProgress {
-  (done: number, total: number, layerName: string): void;
+export interface PsdReadCallbacks {
+  /**
+   * Called once per pixel layer, in file order, with the decoded bitmap. The bitmap is
+   * released as soon as this returns, so the callback must copy anything it keeps.
+   */
+  onLayerPixels?: (info: PsdLayerInfo, bitmap: PsdBitmap | null, mask: PsdMaskInfo | null) => void;
+  onProgress?: (done: number, total: number) => void;
 }
 
-/** Depth-first walk of the layer tree, leaves first, matching PSD's storage order. */
-function* walk(layers: AgLayer[] | undefined): Generator<AgLayer> {
-  for (const l of layers ?? []) {
-    if (l.children) yield* walk(l.children);
-    else yield l;
+/** Features ag-psd surfaces that we do not model yet; recorded so the UI can warn honestly. */
+function unsupportedFeatures(layer: AgLayer): string[] | undefined {
+  const out: string[] = [];
+  if (layer.text) out.push('type layer');
+  if (layer.vectorMask || layer.vectorFill) out.push('vector mask');
+  if (layer.effects) out.push('layer effects');
+  if (layer.adjustment) out.push('adjustment layer');
+  if (layer.placedLayer) out.push('smart object');
+  return out.length ? out : undefined;
+}
+
+function toBitmap(pixels: { data: ArrayLike<number> & ArrayBufferView; width: number; height: number } | undefined, left: number, top: number): PsdBitmap | null {
+  if (!pixels) return null;
+  const src = pixels.data;
+  let data: Uint8Array;
+  if (src instanceof Uint8Array) data = src;
+  else if (src instanceof Uint8ClampedArray) data = new Uint8Array(src.buffer, src.byteOffset, src.byteLength);
+  else {
+    throw new Error(
+      `PSD layer data is ${src.constructor.name}: 16- and 32-bit documents are not supported ` +
+        'yet (spec 07 §1.1, milestone M10)',
+    );
   }
+  return { data, width: pixels.width, height: pixels.height, left, top };
 }
 
-export interface ReadPsdOptions {
-  onProgress?: ReadProgress;
-  /** Cap on decoded bytes held by ag-psd at once. */
-  totalMemoryLimit?: number;
-}
-
-/**
- * Accepts a view as well as a raw ArrayBuffer. Callers should pass the Buffer/Uint8Array they
- * already have rather than slicing out an ArrayBuffer, which would double peak memory for a
- * large file.
- */
-export function readPsdIntoTiles(
+export function readPsdDocument(
   buffer: ArrayBuffer | ArrayBufferView,
-  opts: ReadPsdOptions = {},
-): PsdDocument {
+  cb: PsdReadCallbacks = {},
+): PsdDocInfo {
   initPsdEnvironment();
   const psd: Psd = readPsd(buffer as ArrayBuffer, {
     useRawData: true,
     skipCompositeImageData: true,
     skipThumbnail: true,
     skipLinkedFilesData: true,
-    totalMemoryLimit: opts.totalMemoryLimit ?? 2 * 1024 * 1024 * 1024,
   });
 
-  const all = [...walk(psd.children)];
-  const records: PsdLayerRecord[] = [];
-
-  all.forEach((layer, i) => {
-    const left = layer.left ?? 0;
-    const top = layer.top ?? 0;
-    const right = layer.right ?? 0;
-    const bottom = layer.bottom ?? 0;
-
-    let plane = Plane.empty(RGBA8);
-    if (right > left && bottom > top) {
-      // Decode exactly one layer, tile it, then release the raw channels immediately so the
-      // next layer's decode reuses the same memory rather than adding to it.
-      const pixels = getLayerImageData(layer);
-      if (pixels) plane = planeFromPixels(pixels, left, top);
-      layer.rawData = undefined;
-      layer.imageData = undefined;
-      layer.canvas = undefined;
+  let index = 0;
+  let total = 0;
+  const count = (ls: AgLayer[] | undefined): void => {
+    for (const l of ls ?? []) {
+      total++;
+      if (l.children) count(l.children);
     }
+  };
+  count(psd.children);
 
-    records.push({
-      name: layer.name ?? `Layer ${i + 1}`,
-      opacity: layer.opacity ?? 1,
-      visible: !layer.hidden,
-      blendMode: layer.blendMode ?? 'normal',
-      clipping: !!layer.clipping,
-      left,
-      top,
-      right,
-      bottom,
-      plane,
-      tileCount: plane.tileCount,
+  const convert = (layers: AgLayer[] | undefined): PsdLayerInfo[] =>
+    (layers ?? []).map((layer) => {
+      const left = layer.left ?? 0;
+      const top = layer.top ?? 0;
+      const info: PsdLayerInfo = {
+        index: index++,
+        name: layer.name ?? `Layer ${index}`,
+        kind: layer.children ? 'group' : 'pixel',
+        // ag-psd reports opacity as 0…1.
+        opacity: layer.opacity ?? 1,
+        fillOpacity: (layer as { fillOpacity?: number }).fillOpacity ?? 1,
+        visible: !layer.hidden,
+        blendMode: layer.blendMode ?? 'normal',
+        clipping: !!layer.clipping,
+        left,
+        top,
+        right: layer.right ?? 0,
+        bottom: layer.bottom ?? 0,
+        unsupported: unsupportedFeatures(layer),
+      };
+
+      if (layer.children) {
+        info.children = convert(layer.children);
+      } else {
+        let bitmap: PsdBitmap | null = null;
+        let mask: PsdMaskInfo | null = null;
+        if (info.right > info.left && info.bottom > info.top) {
+          bitmap = toBitmap(getLayerImageData(layer), left, top);
+        }
+        if (layer.mask) {
+          const m = layer.mask;
+          const mb = toBitmap(getLayerMaskImageData(layer), m.left ?? 0, m.top ?? 0);
+          if (mb) {
+            mask = {
+              ...mb,
+              defaultColor: (m.defaultColor ?? 0) as 0 | 255,
+              disabled: !!m.disabled,
+              density: (m as { density?: number }).density,
+              feather: (m as { feather?: number }).feather,
+            };
+          }
+        }
+        cb.onLayerPixels?.(info, bitmap, mask);
+        // Release the decoded data so the next layer reuses the memory.
+        layer.rawData = undefined;
+        layer.imageData = undefined;
+        layer.canvas = undefined;
+        if (layer.mask) {
+          (layer.mask as { imageData?: unknown }).imageData = undefined;
+          (layer.mask as { canvas?: unknown }).canvas = undefined;
+        }
+      }
+      cb.onProgress?.(info.index + 1, total);
+      return info;
     });
-    opts.onProgress?.(i + 1, all.length, layer.name ?? '');
-  });
 
   return {
     width: psd.width,
@@ -118,81 +185,38 @@ export function readPsdIntoTiles(
     channels: psd.channels ?? 4,
     bitsPerChannel: psd.bitsPerChannel ?? 8,
     colorMode: psd.colorMode ?? 3,
-    layers: records,
+    layers: convert(psd.children),
   };
 }
 
-export interface PixelDataLike {
-  /**
-   * ag-psd hands back Uint16Array/Float32Array for 16- and 32-bit documents. Tiling those
-   * needs u16/f32 planes, which land with high-bit-depth support in M10 — until then a
-   * non-8-bit document is rejected loudly rather than silently truncated.
-   */
-  data: ArrayLike<number> & ArrayBufferView;
-  width: number;
-  height: number;
-}
-
-function as8Bit(pixels: PixelDataLike): Uint8Array {
-  if (pixels.data instanceof Uint8Array) return pixels.data;
-  if (pixels.data instanceof Uint8ClampedArray) {
-    return new Uint8Array(pixels.data.buffer, pixels.data.byteOffset, pixels.data.byteLength);
-  }
-  throw new Error(
-    `PSD layer data is ${pixels.data.constructor.name}: 16- and 32-bit documents are not ` +
-      'supported yet (see docs/spec/07-file-formats.md §1.1, milestone M10)',
-  );
-}
-
-/**
- * Copy an RGBA bitmap positioned at (offsetX, offsetY) in document space into tiles.
- * Layers are stored at their own bounds in PSD, so a layer rarely aligns to the tile grid.
- */
-export function planeFromPixels(
-  pixels: PixelDataLike,
-  offsetX: number,
-  offsetY: number,
-): Plane {
-  const { width, height } = pixels;
-  const data = as8Bit(pixels);
-  const writer: PlaneWriter = Plane.empty(RGBA8).writer();
-
-  const tx0 = offsetX >> TILE_SHIFT;
-  const ty0 = offsetY >> TILE_SHIFT;
-  const tx1 = (offsetX + width - 1) >> TILE_SHIFT;
-  const ty1 = (offsetY + height - 1) >> TILE_SHIFT;
-
-  for (let ty = ty0; ty <= ty1; ty++) {
-    for (let tx = tx0; tx <= tx1; tx++) {
-      // Intersection of this tile with the layer's bitmap, in document coordinates.
-      const dx0 = Math.max(tx << TILE_SHIFT, offsetX);
-      const dy0 = Math.max(ty << TILE_SHIFT, offsetY);
-      const dx1 = Math.min(((tx + 1) << TILE_SHIFT) - 1, offsetX + width - 1);
-      const dy1 = Math.min(((ty + 1) << TILE_SHIFT) - 1, offsetY + height - 1);
-      if (dx1 < dx0 || dy1 < dy0) continue;
-
-      let any = false;
-      for (let y = dy0; y <= dy1 && !any; y++) {
-        const src = ((y - offsetY) * width + (dx0 - offsetX)) * 4;
-        for (let x = 0; x <= dx1 - dx0; x++) {
-          if (data[src + x * 4 + 3] !== 0) {
-            any = true;
-            break;
-          }
-        }
-      }
-      if (!any) continue;
-
-      const dst = writer.mutable(tx, ty);
-      for (let y = dy0; y <= dy1; y++) {
-        const src = ((y - offsetY) * width + (dx0 - offsetX)) * 4;
-        const out = ((y - (ty << TILE_SHIFT)) * TILE_SIZE + (dx0 - (tx << TILE_SHIFT))) * 4;
-        const len = (dx1 - dx0 + 1) * 4;
-        dst.set(data.subarray(src, src + len), out);
-      }
-    }
-  }
-  return writer.commit();
-}
-
-export { Tile };
+/** PSD blend keys → our mode ids (spec 07 §1.2). ag-psd already gives readable names. */
+export const PSD_BLEND_MODE: Record<string, string> = {
+  'pass through': 'passThrough',
+  normal: 'normal',
+  dissolve: 'dissolve',
+  darken: 'darken',
+  multiply: 'multiply',
+  'color burn': 'colorBurn',
+  'linear burn': 'linearBurn',
+  'darker color': 'darkerColor',
+  lighten: 'lighten',
+  screen: 'screen',
+  'color dodge': 'colorDodge',
+  'linear dodge': 'linearDodge',
+  'lighter color': 'lighterColor',
+  overlay: 'overlay',
+  'soft light': 'softLight',
+  'hard light': 'hardLight',
+  'vivid light': 'vividLight',
+  'linear light': 'linearLight',
+  'pin light': 'pinLight',
+  'hard mix': 'hardMix',
+  difference: 'difference',
+  exclusion: 'exclusion',
+  subtract: 'subtract',
+  divide: 'divide',
+  hue: 'hue',
+  saturation: 'saturation',
+  color: 'color',
+  luminosity: 'luminosity',
+};

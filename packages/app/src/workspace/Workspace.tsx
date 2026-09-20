@@ -77,6 +77,7 @@ export function Workspace() {
         },
       });
       client.paintMode = PAINT_TOOLS.has(store.activeTool());
+      store.setEngine(() => (m: unknown) => client!.send(m as never));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return;
@@ -141,6 +142,12 @@ export function Workspace() {
         break;
       case 'file.exit':
         window.close();
+        break;
+      case 'edit.undo':
+        send({ t: 'undo' });
+        break;
+      case 'edit.redo':
+        send({ t: 'redo' });
         break;
 
       case 'view.fit':
@@ -275,12 +282,18 @@ export function Workspace() {
   async function openFile(): Promise<void> {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = 'image/*';
+    input.accept = 'image/*,.psd,.psb';
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      const bitmap = await createImageBitmap(file);
-      client?.send({ t: 'openBitmap', bitmap, name: file.name }, [bitmap]);
+      if (/\.psb?$|\.psd$/i.test(file.name)) {
+        // PSD goes to the engine as raw bytes; the worker parses and tiles it.
+        const buffer = await file.arrayBuffer();
+        client?.send({ t: 'openPsd', buffer, name: file.name }, [buffer]);
+      } else {
+        const bitmap = await createImageBitmap(file);
+        client?.send({ t: 'openBitmap', bitmap, name: file.name }, [bitmap]);
+      }
     };
     input.click();
   }

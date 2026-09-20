@@ -75,6 +75,12 @@ const [engineReady, setEngineReady] = createSignal(false);
 const [contextLost, setContextLost] = createSignal(false);
 const [statusMessage, setStatusMessage] = createSignal<string | null>(null);
 
+/**
+ * Panels dispatch engine commands through here. The UI never imports the engine directly
+ * (spec 03 §3): the Workspace installs this once the worker is up.
+ */
+const [engine, setEngine] = createSignal<((msg: unknown) => void) | undefined>(undefined);
+
 /** Open document tabs. M1 tracks the tab strip; multi-document engines arrive with M2. */
 const [tabs, setTabs] = createStore<{ id: number; name: string; dirty: boolean }[]>([]);
 const [activeTab, setActiveTab] = createSignal<number | null>(null);
@@ -200,6 +206,10 @@ export const store = {
   setContextLost,
   statusMessage,
   setStatusMessage,
+  get engine() {
+    return engine();
+  },
+  setEngine,
   tabs,
   setTabs,
   activeTab,

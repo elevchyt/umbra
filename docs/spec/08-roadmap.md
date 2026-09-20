@@ -76,7 +76,7 @@ Arrange, panel context menus, Preferences dialog (theme is on Shift+F1/F2 for no
 and guide dragging (the ruler gutters render but are not yet graduated), and a designer pass
 over the icon set.
 
-### M2 — Layer core + compositing + PSD I (XL)
+### M2 — Layer core + compositing + PSD I (XL) — 🟡 **IN PROGRESS**
 Layer tree commands, Layers panel complete (thumbnails, drag reorder, filter bar, locks,
 opacity/fill scrubbing, context menus), all 27 blend modes, opacity/fill (incl. special-8),
 pass-through vs isolated groups, clipping masks, raster masks (density/feather, view/disable/
@@ -88,6 +88,38 @@ Image Rotation, Trim, Reveal All, Duplicate.
 **Exit:** blend-mode golden suite passes GPU≡CPU≡Photoshop (±1/255); 50-file PSD corpus
 (pixel/group/mask only) renders within threshold and round-trips losslessly; files open in
 Photoshop without warnings.
+
+**Done so far (2026-09-20).**
+- **Compositing engine, GPU ≡ CPU.** All 27 blend functions, the general compositing equation,
+  masks with density, pass-through vs isolated groups, clipping groups, Blend If, per-channel
+  participation and the special-8 Fill model exist twice: once as the CPU reference
+  (`@umbra/kernels`) and once in GLSL. `pnpm parity` diffs them over **83 cases** — each mode
+  across the full backdrop × source matrix — and passes at maxΔ=1 (rounding).
+- **Document model + history.** Immutable layer tree with groups, raster masks, locks, label
+  colours and advanced blending; structural sharing so undo is a pointer swap. Linear history
+  with snapshots, coalescing (`amend`) and a state limit.
+- **PSD open.** Streaming reader (one decoded layer resident at a time) building the tree with
+  nested groups, masks, blend modes, opacity/fill and clipping. Unsupported features are
+  recorded and surfaced rather than silently dropped.
+- **Live UI.** Layers panel drives the real document: nesting, group twirls, mask thumbnails,
+  clipping indicators, visibility, opacity and blend-mode edits, undo/redo.
+
+**Still owed for the exit criterion:** PSD *save*, the 50-file real-world corpus, Photoshop
+goldens (blocked on question 3 below), Free Transform, Move tool, and Image/Canvas Size.
+
+**Findings.**
+1. **The general compositor costs 4× the M0 renderer.** Every layer needs the backdrop as a
+   texture, so a full-viewport pass per layer took the 100-layer document from 6.4 to 27 ms.
+   Restored to **7.7 ms (129 fps)** by batching runs of plain Normal layers into one scratch
+   target with fixed-function blending and a single blend pass — the fast path spec 03 §5.2
+   anticipated.
+2. **The batcher must not swallow a clipping base.** Batching a layer that has a clipped layer
+   above it orphans the clipped layer. Caught only after the parity suite was extended to
+   exercise the fast path, which it initially did not — the first version of that extension sat
+   after a `return` and silently tested nothing.
+3. **`psd` must not depend on `engine`.** The reader originally tiled its own output, which
+   would have made a cycle once the engine opened files. It now streams plain bitmaps and the
+   engine tiles them, preserving the one-decoded-layer-at-a-time property.
 
 ### M3 — Selections + basic painting = first usable alpha (XL)
 Marquees, lassos (free, polygonal), Magic Wand, Quick Mask, full Select ▸ Modify, Transform

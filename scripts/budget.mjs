@@ -14,6 +14,12 @@ const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIST = join(ROOT, 'packages/app/dist');
 
 /** name → { limitKb, match } over gzipped bytes. */
+/**
+ * Fixtures served for manual testing are not part of the shipped payload, so they must not
+ * count against it.
+ */
+const IGNORED = (f) => /\.(psd|psb)$/i.test(f);
+
 const BUDGETS = [
   { name: 'core UI (js+css, gzip)', limitKb: 1536, match: (f) => /^assets\/index-.*\.(js|css)$/.test(f) },
   { name: 'engine worker (js, gzip)', limitKb: 1536, match: (f) => /^assets\/worker-.*\.js$/.test(f) },
@@ -32,6 +38,7 @@ function walk(dir, base = '') {
 }
 
 let files;
+
 try {
   files = walk(DIST);
 } catch {
@@ -39,7 +46,7 @@ try {
   process.exit(2);
 }
 
-const sized = files.map(({ rel, abs }) => {
+const sized = files.filter(({ rel }) => !IGNORED(rel)).map(({ rel, abs }) => {
   const raw = readFileSync(abs);
   // Compressible assets are served gzipped; images and wasm are counted as-is.
   const compressible = ['.js', '.css', '.html', '.json', '.svg', '.wasm'].includes(extname(rel));

@@ -58,6 +58,36 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'actualPixels':
         engine?.actualPixels();
         break;
+      case 'openPsd':
+        engine?.openPsdBuffer(msg.buffer, msg.name);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setLayerVisible':
+        engine?.setLayerVisible(msg.id, msg.visible);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setLayerOpacity':
+        engine?.setLayerOpacity(msg.id, msg.opacity);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setLayerBlendMode':
+        engine?.setLayerBlendMode(msg.id, msg.mode as never);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'selectLayer':
+        engine?.selectLayer(msg.id);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'toggleGroup':
+        engine?.toggleGroup(msg.id);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'undo':
+        if (engine?.undo()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'redo':
+        if (engine?.redo()) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'openBitmap':
         engine?.openBitmap(msg.bitmap, msg.name);
         if (engine) post({ t: 'doc', doc: engine.summary() });

@@ -32,11 +32,16 @@ precision highp float;
 in vec2 v_uv;
 uniform int u_kind;      // 0 = solid, 1 = horizontal ramp, 2 = vertical ramp
 uniform vec4 u_color;
+uniform float u_opacity;
+uniform float u_premultiply;
 out vec4 fragColor;
 void main() {
-  if (u_kind == 1) fragColor = vec4(vec3(v_uv.x), u_color.a);
-  else if (u_kind == 2) fragColor = vec4(vec3(v_uv.y), u_color.a);
-  else fragColor = u_color;
+  vec4 c;
+  if (u_kind == 1) c = vec4(vec3(v_uv.x), u_color.a);
+  else if (u_kind == 2) c = vec4(vec3(v_uv.y), u_color.a);
+  else c = u_color;
+  c.a *= u_opacity;
+  fragColor = u_premultiply > 0.5 ? vec4(c.rgb * c.a, c.a) : c;
 }`;
 
 type PatternKind = 'solid' | 'rampX' | 'rampY';
@@ -105,14 +110,21 @@ export class ParityRunner {
     gl.bindVertexArray(null);
   }
 
-  private paint(kind: PatternKind, color: Rgb, alpha: number): void {
+  private paint(
+    kind: PatternKind,
+    color: Rgb,
+    alpha: number,
+    opacity = 1,
+    premultiply = false,
+  ): void {
     const gl = this.gl;
     const k = kind === 'rampX' ? 1 : kind === 'rampY' ? 2 : 0;
     this.pattern.use();
     this.pattern.u1i('u_kind', k);
     this.pattern.u4f('u_color', color[0], color[1], color[2], alpha);
+    this.pattern.u1f('u_opacity', opacity);
+    this.pattern.u1f('u_premultiply', premultiply ? 1 : 0);
     gl.bindVertexArray(this.vao);
-    gl.disable(gl.BLEND);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
   }
@@ -120,7 +132,7 @@ export class ParityRunner {
   private toGpuLayer(l: CaseLayer): GpuLayer {
     const color = l.color ?? [1, 1, 1];
     const alpha = l.alpha ?? 1;
-    return {
+    const out: GpuLayer = {
       kind: l.children ? 'group' : 'pixel',
       visible: l.visible ?? true,
       opacity: l.opacity ?? 1,
@@ -133,6 +145,19 @@ export class ParityRunner {
       drawSource: l.children ? undefined : (_t: RenderTarget) => this.paint(l.pattern, color, alpha),
       drawMask: l.maskPattern ? (_t: RenderTarget) => this.paint(l.maskPattern!, [1, 1, 1], 1) : undefined,
     };
+
+    // Mirror the renderer's batching rule so the fast path is exercised here too: it is the
+    // common path in the app, so parity must cover it, not only the general one.
+    if (!l.children) {
+      out.plain =
+        (l.mode ?? 'normal') === 'normal' &&
+        !l.clipped &&
+        !l.maskPattern &&
+        (l.fill ?? 1) >= 1 &&
+        !l.blendIf;
+      out.drawBatched = (opacity: number) => this.paint(l.pattern, color, alpha, opacity, true);
+    }
+    return out;
   }
 
   private toCpuLayer(l: CaseLayer): CompositeLayer {
@@ -336,6 +361,32 @@ export function parityCases(): ParityCase[] {
     {
       name: 'hidden layer is skipped',
       layers: [{ pattern: 'rampX' }, { pattern: 'rampY', visible: false }],
+    },
+    {
+      name: 'batched run of plain Normal layers',
+      layers: [
+        { pattern: 'rampX' },
+        { pattern: 'solid', color: [1, 0, 0], alpha: 0.5 },
+        { pattern: 'rampY', alpha: 0.5 },
+        { pattern: 'solid', color: [0, 0, 1], alpha: 0.25 },
+      ],
+    },
+    {
+      name: 'batched run with per-layer opacity',
+      layers: [
+        { pattern: 'rampX' },
+        { pattern: 'solid', color: [1, 1, 0], opacity: 0.3 },
+        { pattern: 'rampY', opacity: 0.6 },
+      ],
+    },
+    {
+      name: 'batched run interrupted by a blend mode',
+      layers: [
+        { pattern: 'rampX' },
+        { pattern: 'solid', color: [0.9, 0.2, 0.2], alpha: 0.5 },
+        { pattern: 'rampY', mode: 'multiply' },
+        { pattern: 'solid', color: [0.2, 0.9, 0.2], alpha: 0.5 },
+      ],
     },
     {
       name: 'nested groups',
