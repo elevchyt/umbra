@@ -65,6 +65,9 @@ const [selectOptions, setSelectOptions] = createStore({
   sampleAllLayers: false,
 });
 
+/** Eyedropper sample square, in document pixels. 1 is Photoshop's "Point Sample". */
+const [sampleSize, setSampleSize] = createSignal(1);
+
 // ---- colours ------------------------------------------------------------------------
 
 const [foreground, setForeground] = createSignal<RGB>(BLACK);
@@ -207,6 +210,8 @@ export const store = {
   groupDefaults,
   selectOptions,
   setSelectOptions,
+  sampleSize,
+  setSampleSize,
 
   foreground,
   setForeground,

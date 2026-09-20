@@ -607,6 +607,42 @@ export class Engine {
     this.setZoom(1);
   }
 
+  /**
+   * Eyedropper. Samples the composited document rather than the active layer, because that is
+   * what the user can see — Photoshop's "Sample: All Layers", which is its default.
+   *
+   * `size` is the sample square's edge in document pixels (Point Sample is 1). Averaging is
+   * done on straight colour weighted by alpha, so a transparent neighbour does not drag the
+   * result toward black.
+   */
+  sampleColor(x: number, y: number, size: number): [number, number, number] | null {
+    const composite = this.documentPixels();
+    if (!composite) return null;
+    const p = docPointAtScreen(this.view, x, y);
+    const half = Math.max(0, Math.floor((size - 1) / 2));
+    const cx = Math.floor(p.x);
+    const cy = Math.floor(p.y);
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let weight = 0;
+    for (let sy = cy - half; sy <= cy + half; sy++) {
+      if (sy < 0 || sy >= composite.height) continue;
+      for (let sx = cx - half; sx <= cx + half; sx++) {
+        if (sx < 0 || sx >= composite.width) continue;
+        const o = (sy * composite.width + sx) * 4;
+        const a = composite.pixels[o + 3]! / 255;
+        r += composite.pixels[o]! * a;
+        g += composite.pixels[o + 1]! * a;
+        b += composite.pixels[o + 2]! * a;
+        weight += a;
+      }
+    }
+    // Sampling empty canvas gives white, as Photoshop does over transparency.
+    if (weight <= 0) return [1, 1, 1];
+    return [r / weight / 255, g / weight / 255, b / weight / 255];
+  }
+
   // ---- fill & stroke ------------------------------------------------------------------
 
   /**

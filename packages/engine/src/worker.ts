@@ -158,6 +158,11 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         });
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'sample': {
+        const color = engine?.sampleColor(msg.x, msg.y, msg.size);
+        if (color) post({ t: 'sampled', color, toBackground: msg.toBackground });
+        break;
+      }
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;

@@ -85,6 +85,7 @@ export type ToEngine =
   | { t: 'endSelect'; x?: number; y?: number }
   | { t: 'cancelSelect' }
   | { t: 'setQuickMask'; on: boolean }
+  | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean }
   | {
       t: 'fill';
       color: [number, number, number];
@@ -124,4 +125,5 @@ export type FromEngine =
   | { t: 'spikes'; pass: boolean; text: string }
   | { t: 'parity'; pass: boolean; text: string }
   | { t: 'error'; message: string }
-  | { t: 'psdSaved'; name: string; buffer: ArrayBuffer };
+  | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
+  | { t: 'sampled'; color: [number, number, number]; toBackground: boolean };

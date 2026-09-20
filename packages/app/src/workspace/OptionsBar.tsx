@@ -60,7 +60,6 @@ export function OptionsBar(props: OptionsBarProps) {
   const [mode, setMode] = createSignal<BlendMode>('normal');
   const [autoSelect, setAutoSelect] = createSignal(false);
   const [showTransform, setShowTransform] = createSignal(false);
-  const [sampleSize, setSampleSize] = createSignal('point');
   const sel = store.selectOptions;
 
   const blendOptions = BLEND_MENU.filter((m) => m !== '-' && m !== 'passThrough').map((m) => ({
@@ -137,17 +136,7 @@ export function OptionsBar(props: OptionsBarProps) {
         <Match when={store.activeTool() === 'magicWand'}>
           <SelectionOps />
           <Separator />
-          <Select
-            label="Sample Size"
-            value={sampleSize()}
-            options={[
-              { value: 'point', label: 'Point Sample' },
-              { value: '3', label: '3 by 3 Average' },
-              { value: '5', label: '5 by 5 Average' },
-            ]}
-            onChange={setSampleSize}
-            width={132}
-          />
+          {/* Sample Size arrives with the wand's averaged seed; a dead menu is worse than none. */}
           <NumberField
             label="Tolerance"
             value={sel.tolerance}
@@ -171,9 +160,9 @@ export function OptionsBar(props: OptionsBarProps) {
         <Match when={store.activeTool() === 'eyedropper'}>
           <Select
             label="Sample Size"
-            value={sampleSize()}
+            value={String(store.sampleSize())}
             options={[
-              { value: 'point', label: 'Point Sample' },
+              { value: '1', label: 'Point Sample' },
               { value: '3', label: '3 by 3 Average' },
               { value: '5', label: '5 by 5 Average' },
               { value: '11', label: '11 by 11 Average' },
@@ -181,7 +170,7 @@ export function OptionsBar(props: OptionsBarProps) {
               { value: '51', label: '51 by 51 Average' },
               { value: '101', label: '101 by 101 Average' },
             ]}
-            onChange={setSampleSize}
+            onChange={(v) => store.setSampleSize(Number(v))}
             width={132}
           />
           <Select

@@ -92,6 +92,12 @@ export function Workspace() {
         onSpikes: (pass, text) => reportToShell(pass, text),
         onParity: (pass, text) => reportToShell(pass, text),
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
+        onSampled: (color, toBackground) => {
+          // @umbra/core/color works in 0…1, which is also what the engine samples in.
+          const rgb = { r: color[0], g: color[1], b: color[2] };
+          if (toBackground) store.setBackground(rgb);
+          else store.setForeground(rgb);
+        },
         onContextLost: () => store.setContextLost(true),
         onContextRestored: () => store.setContextLost(false),
         onError: (m) => {
@@ -123,6 +129,7 @@ export function Workspace() {
     if (!client) return;
     client.paintMode = PAINT_TOOLS.has(tool);
     client.selectTool = SELECT_TOOLS.has(tool) ? tool : null;
+    client.sampleSize = tool === 'eyedropper' ? store.sampleSize() : null;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -441,11 +448,7 @@ export function Workspace() {
 
   /** Resolve a Fill dialog's Contents choice to a 0…1 RGB triple. */
   function fillColor(contents: string): [number, number, number] {
-    const toUnit = (c: { r: number; g: number; b: number }): [number, number, number] => [
-      c.r / 255,
-      c.g / 255,
-      c.b / 255,
-    ];
+    const toUnit = (c: { r: number; g: number; b: number }): [number, number, number] => [c.r, c.g, c.b];
     switch (contents) {
       case 'background':
         return toUnit(store.background());
@@ -454,7 +457,7 @@ export function Workspace() {
       case 'white':
         return [1, 1, 1];
       case 'gray50':
-        // Photoshop's "50% Gray" is 128/255 in the working space, not 0.5 linear.
+        // Photoshop's "50% Gray" is 128/255 encoded, not 0.5 linear.
         return [128 / 255, 128 / 255, 128 / 255];
       case 'transparent':
         return [0, 0, 0];

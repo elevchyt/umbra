@@ -20,6 +20,7 @@ export interface EngineClientEvents {
   onReady?: (caps: GpuCaps) => void;
   onStats?: (stats: EngineStats) => void;
   onDoc?: (doc: DocSummary) => void;
+  onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onParity?: (pass: boolean, text: string) => void;
@@ -85,6 +86,9 @@ export class EngineClient {
       case 'doc':
         this.events.onDoc?.(msg.doc);
         break;
+      case 'sampled':
+        this.events.onSampled?.(msg.color, msg.toBackground);
+        break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);
         break;
@@ -121,6 +125,8 @@ export class EngineClient {
   paintMode = false;
   /** Active selection tool id, or null when the pointer is not making a selection. */
   selectTool: string | null = null;
+  /** Set while the Eyedropper is active; the number is the sample square's edge in doc px. */
+  sampleSize: number | null = null;
   /** Combine mode chosen in the options bar; modifier keys override it for one gesture. */
   selectOp = 'new';
   private selecting = false;
@@ -129,6 +135,8 @@ export class EngineClient {
    * it is tracked separately and only ends on a double-click, Enter, or a click on the start.
    */
   private polygon = false;
+  /** True while the Eyedropper button is held, so dragging keeps sampling. */
+  private sampling = false;
 
   /** True while a marquee/lasso gesture is in flight, so Escape can cancel it. */
   get isSelecting(): boolean {
@@ -189,6 +197,13 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      if (this.sampleSize !== null && e.button === 0) {
+        const p = toLocal(e);
+        // Alt-click sets the background colour, as everywhere in Photoshop.
+        this.send({ t: 'sample', x: p.x, y: p.y, size: this.sampleSize, toBackground: e.altKey });
+        this.sampling = true;
+        return;
+      }
       if (this.selectTool && e.button === 0) {
         const p = toLocal(e);
         if (this.selectTool === 'magicWand') {
@@ -221,6 +236,11 @@ export class EngineClient {
     // pointerrawupdate delivers samples at full tablet rate, ahead of pointermove.
     const moveEvent = 'onpointerrawupdate' in canvas ? 'pointerrawupdate' : 'pointermove';
     canvas.addEventListener(moveEvent, ((e: PointerEvent) => {
+      if (this.sampling && this.sampleSize !== null) {
+        const p = toLocal(e);
+        this.send({ t: 'sample', x: p.x, y: p.y, size: this.sampleSize, toBackground: e.altKey });
+        return;
+      }
       if (this.selecting || this.polygon) {
         // For a polygon this only previews the segment that follows the cursor.
         const p = toLocal(e);
@@ -249,6 +269,7 @@ export class EngineClient {
       }
       // A polygon gesture deliberately survives the button release.
       if (this.paintMode && this.ready) write(e, FLAG_UP);
+      this.sampling = false;
       this.panning = false;
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
     };
