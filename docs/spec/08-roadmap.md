@@ -35,7 +35,7 @@ Also built beyond the stated scope: a PSD→tiles reader on a vendored-ready ag-
 (`packages/psd`) with a canvas-free ImageData path, and the payload budget gate
 (`pnpm budget`).
 
-### M1 — Workspace shell (L)
+### M1 — Workspace shell (L) — ✅ **COMPLETE** (2026-09-20)
 Everything in [01](01-workspace-ui.md) that is chrome: in-app menu bar with full menu tree
 (unimplemented items disabled), options bar, tools panel (1/2-column, flyouts, all icons),
 docking system (tab groups, collapse-to-icons, floating, drag-dock with blue drop zones,
@@ -46,6 +46,35 @@ colour picker dialog (HSB/RGB/Lab/CMYK/hex, web-only, libraries-less), Color / S
 Navigator / History / Layers (basic) / Properties (shell) panels, New Document dialog.
 **Exit:** a Photoshop user can find every menu item and panel where they expect it;
 screenshot-diff against reference layout metrics.
+
+**Outcome.** Shell is running in Electron and in the browser. Built: in-app menu bar with the
+complete tree (10 menus, ~600 commands, unimplemented items disabled), options bar contextual
+on the tool, tools panel (21 groups / 60+ tools, flyouts, corner marks, colour wells, quick
+mask, screen mode), column/tab-group docking with collapse-to-icons and tab dragging, document
+tab strip, status bar with a selectable info field, 4 themes, keymap engine with Photoshop
+defaults and spring-loaded tools, dialog framework (drag, Enter/Esc, Alt = Reset) with New
+Document / Colour Picker / About / System Info / Shortcut Reference, and Layers, Color,
+Swatches, Navigator, Info, Properties, History panels. 65 unit tests, payload 60 KB gzipped.
+
+Findings:
+1. **Submenus cannot live inside a scrollable menu panel.** Long menus need `overflow-y: auto`,
+   which establishes a clipping context an absolutely-positioned submenu cannot escape. Every
+   menu panel is now portalled with fixed positioning, which also allows viewport flipping.
+2. **HMR is incompatible with a transferred OffscreenCanvas.** `solid-refresh` remounted the
+   workspace, and because `transferControlToOffscreen()` cannot be repeated the remount
+   silently orphaned the live engine and left a second, empty one driving the canvas — the
+   document rendered from the wrong view origin. HMR is disabled for the app (`solid({ hot:
+   false })`); dev now matches production.
+3. **A full-screen scrim must honour Escape.** The tool flyout's scrim stayed up after Escape
+   and swallowed the next click anywhere in the app.
+4. **Signed-number tokenising breaks field arithmetic.** `[-+]?\d+` makes "100+20" tokenise as
+   ["100", "+20"], so the operator is lost; numbers are now tokenised unsigned with the leading
+   sign folded in afterwards.
+
+Deferred from M1 (tracked, not silently dropped): floating document windows and Window ▸
+Arrange, panel context menus, Preferences dialog (theme is on Shift+F1/F2 for now), ruler ticks
+and guide dragging (the ruler gutters render but are not yet graduated), and a designer pass
+over the icon set.
 
 ### M2 — Layer core + compositing + PSD I (XL)
 Layer tree commands, Layers panel complete (thumbnails, drag reorder, filter bar, locks,

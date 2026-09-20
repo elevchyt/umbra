@@ -31,6 +31,8 @@ export interface EngineStats extends FrameStats {
   atlasBytes: number;
   tileBytes: number;
   zoom: number;
+  centreX: number;
+  centreY: number;
   /** Most recent input→pixels latency in ms, or null when nothing was painted. */
   lastLatencyMs: number | null;
 }

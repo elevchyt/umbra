@@ -11,7 +11,13 @@ const isolation = {
 };
 
 export default defineConfig({
-  plugins: [solid()],
+  plugins: [
+    // HMR is disabled deliberately. The workspace owns a Worker and a canvas whose control
+    // has been transferred with transferControlToOffscreen(); neither can be recreated on the
+    // same element, so a hot remount silently orphans the live engine and leaves a second,
+    // empty one driving the canvas. A full reload on edit is the correct trade here.
+    solid({ hot: false }),
+  ],
   base: './',
   server: { headers: isolation, port: 5273, strictPort: true },
   preview: { headers: isolation },

@@ -7,7 +7,15 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./*": "./src/*.ts"
+    "./dock/Dock": "./src/dock/Dock.tsx",
+    "./icons/Icon": "./src/icons/Icon.tsx",
+    "./icons/icons": "./src/icons/icons.ts",
+    "./menu/MenuBar": "./src/menu/MenuBar.tsx",
+    "./theme/tokens.css": "./src/theme/tokens.css",
+    "./widgets/NumberField": "./src/widgets/NumberField.tsx",
+    "./widgets/controls": "./src/widgets/controls.tsx",
+    "./widgets/numeric": "./src/widgets/numeric.ts",
+    "./workspace/ToolsPanel": "./src/workspace/ToolsPanel.tsx"
   },
   "dependencies": {
     "@umbra/core": "workspace:*",

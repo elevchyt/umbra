@@ -353,6 +353,8 @@ export class Engine {
       atlasBytes: a.bytes,
       tileBytes: tileMemory.liveBytes,
       zoom: this.view.zoom,
+      centreX: this.view.centre.x,
+      centreY: this.view.centre.y,
       lastLatencyMs: this.lastLatencyMs,
     };
   }

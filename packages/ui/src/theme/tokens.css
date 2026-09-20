@@ -1,0 +1,132 @@
+/*
+ * Theme tokens — spec 01 §2.
+ *
+ * Four UI brightness levels like Photoshop's Color Theme preference, selected by
+ * `data-theme` on <html>. Default is theme 2 (second darkest).
+ *
+ * Every surface colour is a STRICT NEUTRAL grey (R=G=B). A pro image editor's chrome must
+ * never bias the user's colour judgement; the accent hue appears only on focus rings,
+ * selection and a few affordances, never on a large surface next to the canvas.
+ */
+
+:root,
+:root[data-theme='dark'] {
+  --chrome: #323232;
+  --panel: #383838;
+  --panel-raised: #424242;
+  --panel-sunken: #2e2e2e;
+  --pasteboard: #282828;
+  --well: #262626;
+  --border-dark: #1f1f1f;
+  --border-light: #4a4a4a;
+  --divider: #2a2a2a;
+  --text: #d6d6d6;
+  --text-dim: #9a9a9a;
+  --text-disabled: #6a6a6a;
+  --row-hover: #454545;
+  --row-selected: #4d4d4d;
+  --row-active: #5a5a5a;
+  --tab-active: #383838;
+  --tab-inactive: #2c2c2c;
+  --scroll-thumb: #555;
+  --icon: #c8c8c8;
+  --icon-active: #ffffff;
+}
+
+:root[data-theme='darkest'] {
+  --chrome: #1e1e1e;
+  --panel: #252525;
+  --panel-raised: #2e2e2e;
+  --panel-sunken: #1a1a1a;
+  --pasteboard: #191919;
+  --well: #161616;
+  --border-dark: #111111;
+  --border-light: #363636;
+  --divider: #181818;
+  --text: #cfcfcf;
+  --text-dim: #8c8c8c;
+  --text-disabled: #5c5c5c;
+  --row-hover: #333333;
+  --row-selected: #3c3c3c;
+  --row-active: #484848;
+  --tab-active: #252525;
+  --tab-inactive: #1b1b1b;
+  --scroll-thumb: #444;
+  --icon: #bdbdbd;
+  --icon-active: #ffffff;
+}
+
+:root[data-theme='medium'] {
+  --chrome: #535353;
+  --panel: #5b5b5b;
+  --panel-raised: #656565;
+  --panel-sunken: #4d4d4d;
+  --pasteboard: #474747;
+  --well: #454545;
+  --border-dark: #3a3a3a;
+  --border-light: #6e6e6e;
+  --divider: #4a4a4a;
+  --text: #e8e8e8;
+  --text-dim: #bcbcbc;
+  --text-disabled: #8d8d8d;
+  --row-hover: #676767;
+  --row-selected: #727272;
+  --row-active: #7d7d7d;
+  --tab-active: #5b5b5b;
+  --tab-inactive: #4e4e4e;
+  --scroll-thumb: #808080;
+  --icon: #e0e0e0;
+  --icon-active: #ffffff;
+}
+
+:root[data-theme='light'] {
+  --chrome: #b8b8b8;
+  --panel: #c0c0c0;
+  --panel-raised: #cccccc;
+  --panel-sunken: #b0b0b0;
+  --pasteboard: #aeaeae;
+  --well: #d4d4d4;
+  --border-dark: #8f8f8f;
+  --border-light: #d8d8d8;
+  --divider: #a8a8a8;
+  --text: #1e1e1e;
+  --text-dim: #4d4d4d;
+  --text-disabled: #8a8a8a;
+  --row-hover: #c9c9c9;
+  --row-selected: #b4c8e4;
+  --row-active: #a8bfe0;
+  --tab-active: #c0c0c0;
+  --tab-inactive: #aeaeae;
+  --scroll-thumb: #909090;
+  --icon: #333333;
+  --icon-active: #000000;
+}
+
+:root {
+  --accent: #2f80ed;
+  --accent-dim: #24619f;
+  --focus: #4a9eff;
+  --danger: #d9534f;
+  --ok: #57a773;
+  --warn: #d6a13d;
+
+  --ui-font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Photoshop's UI Font Size preference scales these. */
+  --font-size: 11px;
+  --row-h: 22px;
+  --control-h: 20px;
+  --tool-size: 28px;
+  --menubar-h: 28px;
+  --optionsbar-h: 38px;
+  --tabbar-h: 26px;
+  --statusbar-h: 22px;
+  --panel-tab-h: 26px;
+  --icon-strip-w: 34px;
+  --radius: 2px;
+}
+
+:root[data-ui-scale='small'] { --font-size: 10px; --row-h: 20px; --control-h: 18px; }
+:root[data-ui-scale='large'] { --font-size: 12px; --row-h: 24px; --control-h: 22px; }
+:root[data-ui-scale='xlarge'] { --font-size: 14px; --row-h: 28px; --control-h: 26px; }

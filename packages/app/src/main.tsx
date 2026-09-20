@@ -1,7 +1,7 @@
 import { render } from 'solid-js/web';
-import { App } from './App';
+import { Workspace } from './workspace/Workspace';
 import './styles.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('#root missing');
-render(() => <App />, root);
+render(() => <Workspace />, root);
