@@ -226,6 +226,29 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         });
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'beginCrop':
+        engine?.beginCrop();
+        post({ t: 'transform', active: true });
+        break;
+      case 'setCropRect':
+        engine?.setCropRect(msg.x0, msg.y0, msg.x1, msg.y1);
+        break;
+      case 'commitCrop':
+        engine?.commitCrop();
+        post({ t: 'transform', active: false });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'cancelCrop':
+        engine?.cancelCrop();
+        post({ t: 'transform', active: false });
+        break;
+      case 'cropToSelection':
+        engine?.cropToSelection();
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setCropDeletes':
+        if (engine) engine.cropDeletesPixels = msg.on;
+        break;
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;

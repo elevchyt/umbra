@@ -308,7 +308,7 @@ export const MENUS: MenuDef[] = [
           { label: 'Flip Canvas Vertical', cmd: 'image.flipV', done: true },
         ],
       },
-      { label: 'Crop', cmd: 'image.crop' },
+      { label: 'Crop', cmd: 'image.crop', done: true },
       { label: 'Trim…', cmd: 'image.trim', done: true },
       { label: 'Reveal All', cmd: 'image.revealAll', done: true },
       sep,

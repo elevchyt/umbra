@@ -7,6 +7,7 @@ import { RGBA8 } from '../tiles/import.js';
 import { emptyDoc, makePixelLayer, type Doc, type PixelLayer } from '../document.js';
 import { makeSelection } from '../selection.js';
 import { shiftPlane, transformLayers, transformPlane, transformSelection } from './transform.js';
+import { crop } from './image.js';
 
 const CLIP = { x0: -512, y0: -512, x1: 1024, y1: 1024 };
 
@@ -164,5 +165,40 @@ describe('transformSelection', () => {
     for (let i = 0; i < out.mask.length; i++) if (out.mask[i]! > 0 && out.mask[i]! < 255) partial++;
     expect(partial).toBeGreaterThan(0);
     expect(out.mask[32 * 64 + 32]).toBe(255);
+  });
+});
+
+describe('crop', () => {
+  function doc(): Doc {
+    const layer = makePixelLayer('Layer 1', square(10, 10, 50, 50));
+    return { ...emptyDoc(64, 64, 't'), layers: [layer], activeLayerIds: [layer.id] };
+  }
+
+  it('moves the canvas and the layers with it', () => {
+    const out = crop(doc(), { x0: 20, y0: 20, x1: 40, y1: 40 }, false);
+    expect(out.width).toBe(20);
+    expect(out.height).toBe(20);
+    const plane = (out.layers[0] as PixelLayer).plane.base;
+    // What was at 25,25 is now at 5,5.
+    expect(at(plane, 5, 5)[3]).toBe(255);
+  });
+
+  it('keeps the outside pixels unless told to delete them', () => {
+    const kept = crop(doc(), { x0: 20, y0: 20, x1: 40, y1: 40 }, false);
+    const keptPlane = (kept.layers[0] as PixelLayer).plane.base;
+    // 45,45 in the original is 25,25 now — outside the new canvas but still there.
+    expect(at(keptPlane, 25, 25)[3]).toBe(255);
+
+    const deleted = crop(doc(), { x0: 20, y0: 20, x1: 40, y1: 40 }, true);
+    const cut = (deleted.layers[0] as PixelLayer).plane.base;
+    expect(at(cut, 25, 25)[3]).toBe(0);
+    expect(at(cut, 5, 5)[3]).toBe(255);
+  });
+
+  it('drops the selection, which was defined on the old canvas', () => {
+    const mask = createMask(64, 64);
+    rasterizeRect(mask, { width: 64, height: 64 }, { x0: 0, y0: 0, x1: 10, y1: 10 }, false);
+    const withSel: Doc = { ...doc(), selection: makeSelection(64, 64, mask) };
+    expect(crop(withSel, { x0: 20, y0: 20, x1: 40, y1: 40 }, false).selection).toBeNull();
   });
 });

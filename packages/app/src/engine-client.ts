@@ -142,6 +142,9 @@ export class EngineClient {
   selectTool: string | null = null;
   /** Set while the Eyedropper is active; the number is the sample square's edge in doc px. */
   sampleSize: number | null = null;
+  /** True while the Crop tool is selected. */
+  cropTool = false;
+  private cropFrom: { x: number; y: number } | null = null;
   /** 'bucket' or 'gradient' when one of the fill tools is active. */
   fillTool: 'bucket' | 'gradient' | null = null;
   /** Filled in by the UI so the worker gets the colours and options the options bar shows. */
@@ -222,6 +225,17 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      // Dragging on the canvas with the Crop tool redraws the rectangle from scratch; the
+      // handles on the existing one are the transform box's, handled below.
+      if (this.cropTool && e.button === 0) {
+        const p = toLocal(e);
+        if (!this.transformActive) {
+          this.cropFrom = p;
+          this.send({ t: 'beginCrop' });
+          this.transformActive = true;
+          return;
+        }
+      }
       // A live transform owns the pointer: handles first, then dragging the box body.
       if ((this.transformActive || this.moveTool) && e.button === 0) {
         const p = toLocal(e);
@@ -283,6 +297,11 @@ export class EngineClient {
     // pointerrawupdate delivers samples at full tablet rate, ahead of pointermove.
     const moveEvent = 'onpointerrawupdate' in canvas ? 'pointerrawupdate' : 'pointermove';
     canvas.addEventListener(moveEvent, ((e: PointerEvent) => {
+      if (this.cropFrom) {
+        const p = toLocal(e);
+        this.send({ t: 'setCropRect', x0: this.cropFrom.x, y0: this.cropFrom.y, x1: p.x, y1: p.y });
+        return;
+      }
       if (this.transformDragging) {
         const p = toLocal(e);
         this.send({
@@ -330,6 +349,7 @@ export class EngineClient {
         this.transformDragging = false;
         this.send({ t: 'transformDragEnd' });
       }
+      this.cropFrom = null;
       if (this.gradientFrom) {
         const from = this.gradientFrom;
         this.gradientFrom = null;

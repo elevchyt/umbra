@@ -241,6 +241,61 @@ export function canvasSize(doc: Doc, width: number, height: number, anchor: Anch
   return { ...doc, width, height, layers: mapLayers(doc.layers, (p) => translatePlane(p, dx, dy)) };
 }
 
+/**
+ * Image ▸ Crop — spec 01 §3.
+ *
+ * The canvas moves to `rect` and every layer moves with it. `deleteCropped` also throws away
+ * the pixels that fall outside; without it they are kept off-canvas, which is what lets a crop
+ * be adjusted afterwards without losing anything. Photoshop's checkbox works the same way and
+ * is off by default for exactly that reason.
+ */
+export function crop(doc: Doc, rect: Rect, deleteCropped: boolean): Doc {
+  const width = Math.max(1, Math.round(rect.x1 - rect.x0));
+  const height = Math.max(1, Math.round(rect.y1 - rect.y0));
+  const dx = -Math.round(rect.x0);
+  const dy = -Math.round(rect.y0);
+  const clip: Rect = { x0: 0, y0: 0, x1: width, y1: height };
+  return {
+    ...doc,
+    width,
+    height,
+    // The selection is defined on the old canvas; carrying it across a crop would need it
+    // resampled, and Photoshop drops it too.
+    selection: null,
+    layers: mapLayers(doc.layers, (p) => {
+      const moved = translatePlane(p, dx, dy);
+      return deleteCropped ? clipPlane(moved, clip) : moved;
+    }),
+  };
+}
+
+/** Drop every tile that lies entirely outside `clip`, and clear the part that hangs over. */
+function clipPlane(plane: Plane, clip: Rect): Plane {
+  const n = channelCount(plane.format.layout);
+  const writer = plane.writer();
+  for (const { tx, ty } of plane.tileCells()) {
+    const x0 = tx << TILE_SHIFT;
+    const y0 = ty << TILE_SHIFT;
+    const x1 = x0 + TILE_SIZE;
+    const y1 = y0 + TILE_SIZE;
+    if (x1 <= clip.x0 || y1 <= clip.y0 || x0 >= clip.x1 || y0 >= clip.y1) {
+      writer.remove(tx, ty);
+      continue;
+    }
+    if (x0 >= clip.x0 && y0 >= clip.y0 && x1 <= clip.x1 && y1 <= clip.y1) continue;
+    const data = writer.mutable(tx, ty);
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        if (x >= clip.x0 && x < clip.x1 && y >= clip.y0 && y < clip.y1) continue;
+        const o = ((y - y0) * TILE_SIZE + (x - x0)) * n;
+        // Coverage lives in the single channel for masks and in alpha for colour.
+        data[o + (n === 1 ? 0 : 3)] = 0;
+      }
+    }
+  }
+  return writer.commit();
+}
+
 /** Grow the canvas to include every pixel that currently sits outside it. */
 export function revealAll(doc: Doc): Doc {
   let bounds: Rect = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };

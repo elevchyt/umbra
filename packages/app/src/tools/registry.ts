@@ -67,7 +67,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'crop',
     key: 'c',
     tools: [
-      { id: 'crop', name: 'Crop Tool', icon: 'crop', key: 'c' },
+      { id: 'crop', name: 'Crop Tool', icon: 'crop', key: 'c', implemented: true, hint: 'Drag to set the crop, Enter to apply, Esc to cancel.' },
       { id: 'cropPerspective', name: 'Perspective Crop Tool', icon: 'cropPerspective', key: 'c' },
       { id: 'slice', name: 'Slice Tool', icon: 'slice', key: 'c' },
       { id: 'sliceSelect', name: 'Slice Select Tool', icon: 'sliceSelect', key: 'c' },

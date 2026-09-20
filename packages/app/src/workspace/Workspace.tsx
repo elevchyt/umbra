@@ -158,6 +158,7 @@ export function Workspace() {
     client.sampleSize = tool === 'eyedropper' ? size : null;
     client.moveTool = tool === 'move';
     client.fillTool = tool === 'paintBucket' ? 'bucket' : tool === 'gradient' ? 'gradient' : null;
+    client.cropTool = tool === 'crop';
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -394,10 +395,16 @@ export function Workspace() {
         break;
 
       case 'transform.commit':
-        send({ t: 'commitTransform' });
+        send(store.activeTool() === 'crop' ? { t: 'commitCrop' } : { t: 'commitTransform' });
         break;
       case 'transform.cancel':
-        send({ t: 'cancelTransform' });
+        send(store.activeTool() === 'crop' ? { t: 'cancelCrop' } : { t: 'cancelTransform' });
+        break;
+      case 'crop.syncDeletes':
+        send({ t: 'setCropDeletes', on: store.cropDeletes() });
+        break;
+      case 'image.crop':
+        send({ t: 'cropToSelection' });
         break;
       case 'edit.freeTransform':
         send({ t: 'beginTransform', transient: false });
@@ -660,16 +667,17 @@ export function Workspace() {
       if (isTextEntry(e.target)) return;
       // Any modal swallows the shell's shortcuts, including the small Select ▸ Modify dialogs.
       if (store.dialog() || amountPrompt()) return;
-      // A transform box owns Enter, Escape and the arrow keys while it is open.
+      // A transform or crop box owns Enter, Escape and the arrow keys while it is open.
       if (transforming()) {
+        const cropping = store.activeTool() === 'crop';
         if (e.key === 'Enter') {
           e.preventDefault();
-          send({ t: 'commitTransform' });
+          send(cropping ? { t: 'commitCrop' } : { t: 'commitTransform' });
           return;
         }
         if (e.key === 'Escape') {
           e.preventDefault();
-          send({ t: 'cancelTransform' });
+          send(cropping ? { t: 'cancelCrop' } : { t: 'cancelTransform' });
           return;
         }
       }

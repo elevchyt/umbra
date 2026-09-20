@@ -221,6 +221,11 @@ export function transformSelection(sel: Selection, matrix: Mat): Selection {
   return { ...sel, mask: out };
 }
 
+/** The axis-aligned rectangle a transformed box ends up occupying. */
+export function transformedRect(box: Rect, matrix: Mat): Rect {
+  return transformedBounds(matrix, box);
+}
+
 /** Tight bounds of the selection, for Transform Selection's box. */
 export function selectionBoundsOf(doc: Doc): Rect | null {
   if (!doc.selection) return null;

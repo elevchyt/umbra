@@ -75,6 +75,9 @@ const [brush, setBrush] = createStore({
   mode: 'normal' as string,
 });
 
+/** Crop tool: whether committing throws the outside pixels away (Photoshop defaults to off). */
+const [cropDeletes, setCropDeletes] = createSignal(false);
+
 /** Gradient tool options; the ramp itself is derived from the foreground/background. */
 const [gradientOptions, setGradientOptions] = createStore({
   style: 'linear' as 'linear' | 'radial' | 'angle' | 'reflected' | 'diamond',
@@ -236,6 +239,8 @@ export const store = {
   setBrush,
   gradientOptions,
   setGradientOptions,
+  cropDeletes,
+  setCropDeletes,
 
   foreground,
   setForeground,

@@ -108,6 +108,12 @@ export type ToEngine =
   | { t: 'cancelTransform' }
   | { t: 'nudge'; dx: number; dy: number }
   | { t: 'clipboard'; op: string }
+  | { t: 'beginCrop' }
+  | { t: 'setCropRect'; x0: number; y0: number; x1: number; y1: number }
+  | { t: 'commitCrop' }
+  | { t: 'cancelCrop' }
+  | { t: 'cropToSelection' }
+  | { t: 'setCropDeletes'; on: boolean }
   | {
       t: 'bucket';
       x: number;

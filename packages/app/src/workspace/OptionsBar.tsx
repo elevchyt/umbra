@@ -122,8 +122,9 @@ export function OptionsBar(props: OptionsBarProps) {
       <Separator />
 
       <Switch fallback={<UnimplementedNote name={tool()?.name ?? 'Tool'} />}>
-        {/* A live transform takes the whole row, whatever tool is selected. */}
-        <Match when={store.stats()?.transform}>
+        {/* A live transform takes the whole row — except during a crop, which has its own
+            row and its own commit, and shares only the box on screen. */}
+        <Match when={store.activeTool() !== 'crop' && store.stats()?.transform}>
           {(t) => (
             <>
               <NumberField label="X" value={Math.round(t().x)} onChange={() => {}} suffix="px" width={52} disabled />
@@ -222,6 +223,22 @@ export function OptionsBar(props: OptionsBarProps) {
           <button type="button" class="button" disabled>
             Select and Mask…
           </button>
+        </Match>
+
+        <Match when={store.activeTool() === 'crop'}>
+          <span class="dim">Drag on the canvas to set the crop, then Enter to apply.</span>
+          <Separator />
+          <Checkbox
+            checked={store.cropDeletes()}
+            onChange={(v) => {
+              store.setCropDeletes(v);
+              props.onCommand('crop.syncDeletes');
+            }}
+            label="Delete Cropped Pixels"
+          />
+          <Spacer />
+          <IconButton icon="close" title="Cancel crop (Esc)" onClick={() => props.onCommand('transform.cancel')} />
+          <IconButton icon="check" title="Commit crop (Enter)" onClick={() => props.onCommand('transform.commit')} />
         </Match>
 
         <Match when={store.activeTool() === 'gradient'}>

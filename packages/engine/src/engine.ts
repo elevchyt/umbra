@@ -737,6 +737,81 @@ export class Engine {
     return [r / weight / 255, g / weight / 255, b / weight / 255];
   }
 
+  // ---- crop -----------------------------------------------------------------------------
+
+  /**
+   * The Crop tool's rectangle, in document space. It reuses the transform box for its handles
+   * — a crop rectangle and a transform box are dragged the same way — but it commits by
+   * moving the canvas rather than the pixels.
+   */
+  private crop: { rect: Rect } | null = null;
+  cropDeletesPixels = false;
+
+  get cropActive(): boolean {
+    return this.crop !== null;
+  }
+
+  beginCrop(): void {
+    // Photoshop opens the crop on the whole canvas, or on the selection when there is one.
+    const sel = TransformCmd.selectionBoundsOf(this.doc);
+    this.crop = { rect: sel ?? { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height } };
+    this.transform = {
+      box: this.crop.rect,
+      matrix: IDENTITY,
+      ids: [],
+      selectionOnly: true,
+      baseSelection: null,
+      transient: false,
+      drag: null,
+    };
+  }
+
+  /** Drag a corner to set the crop rectangle directly, as dragging on an empty canvas does. */
+  setCropRect(x0: number, y0: number, x1: number, y1: number): void {
+    const a = docPointAtScreen(this.view, x0, y0);
+    const b = docPointAtScreen(this.view, x1, y1);
+    const rect: Rect = {
+      x0: Math.min(a.x, b.x),
+      y0: Math.min(a.y, b.y),
+      x1: Math.max(a.x, b.x),
+      y1: Math.max(a.y, b.y),
+    };
+    this.crop = { rect };
+    if (this.transform) this.transform = { ...this.transform, box: rect, matrix: IDENTITY };
+  }
+
+  commitCrop(): void {
+    const c = this.crop;
+    const t = this.transform;
+    if (!c) return;
+    // The handles moved the box through a matrix; the crop rectangle is where it ended up.
+    const rect = t ? TransformCmd.transformedRect(t.box, t.matrix) : c.rect;
+    this.crop = null;
+    this.transform = null;
+    const clipped: Rect = {
+      x0: Math.max(0, Math.round(rect.x0)),
+      y0: Math.max(0, Math.round(rect.y0)),
+      x1: Math.min(this.doc.width, Math.round(rect.x1)),
+      y1: Math.min(this.doc.height, Math.round(rect.y1)),
+    };
+    if (clipped.x1 - clipped.x0 < 1 || clipped.y1 - clipped.y0 < 1) return;
+    this.commit(ImageCmd.crop(this.doc, clipped, this.cropDeletesPixels), 'Crop');
+    this.view = fitToScreen(this.view, this.doc.width, this.doc.height);
+  }
+
+  cancelCrop(): void {
+    this.crop = null;
+    this.transform = null;
+  }
+
+  /** Image ▸ Crop: straight to the selection's bounds, with no interactive step. */
+  cropToSelection(): void {
+    const rect = TransformCmd.selectionBoundsOf(this.doc);
+    if (!rect) return;
+    this.commit(ImageCmd.crop(this.doc, rect, this.cropDeletesPixels), 'Crop');
+    this.view = fitToScreen(this.view, this.doc.width, this.doc.height);
+  }
+
   // ---- bucket & gradient ----------------------------------------------------------------
 
   /**
