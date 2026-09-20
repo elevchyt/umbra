@@ -28,6 +28,7 @@ export interface DocSummary {
   layers: LayerSummary[];
   activeLayerIds: number[];
   hasSelection: boolean;
+  channels: { id: number; name: string; visible: boolean; indicates: 'masked' | 'selected' }[];
   selectionBounds: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Features in the opened file that we do not model yet (spec 07 §1.3). */
   warnings?: { layer: string; features: string[] }[];
@@ -108,6 +109,10 @@ export type ToEngine =
   | { t: 'cancelTransform' }
   | { t: 'nudge'; dx: number; dy: number }
   | { t: 'clipboard'; op: string }
+  | { t: 'saveSelection'; targetId?: number; op?: string; name?: string }
+  | { t: 'loadSelection'; channelId: number; op?: string; invert?: boolean }
+  | { t: 'channelCommand'; command: string; id?: number; patch?: Record<string, unknown> }
+  | { t: 'setChannelView'; view: string | number }
   | { t: 'beginCrop' }
   | { t: 'setCropRect'; x0: number; y0: number; x1: number; y1: number }
   | { t: 'commitCrop' }

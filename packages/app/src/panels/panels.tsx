@@ -35,7 +35,7 @@ export function renderPanel(id: string): JSX.Element {
     case 'history':
       return <HistoryPanel />;
     case 'channels':
-      return <Placeholder name="Channels" milestone="M3" what="alpha and spot channels, save/load selection" />;
+      return <ChannelsPanel />;
     case 'paths':
       return <Placeholder name="Paths" milestone="M7" what="work path, saved paths, fill and stroke path" />;
     case 'adjustments':
@@ -225,6 +225,127 @@ function LayersPanel() {
             </button>
           )}
         </For>
+      </div>
+    </div>
+  );
+}
+
+// ---- Channels -------------------------------------------------------------------------
+
+/**
+ * Channels panel — spec 01 §4.
+ *
+ * The colour channels are derived from the document rather than stored, so they are listed
+ * from the colour mode; only the alpha channels below them are real objects. Clicking a row
+ * changes what the canvas shows, which is a view setting and deliberately not undoable.
+ */
+function ChannelsPanel() {
+  const doc = () => store.doc();
+  const view = () => store.channelView();
+  const send = (msg: unknown) => store.engine?.(msg);
+
+  const setView = (v: 'all' | 'r' | 'g' | 'b' | number) => {
+    store.setChannelView(v);
+    send({ t: 'setChannelView', view: v });
+  };
+
+  const COLOUR_ROWS = [
+    { key: 'all' as const, name: 'RGB', shortcut: 'Ctrl+2' },
+    { key: 'r' as const, name: 'Red', shortcut: 'Ctrl+3' },
+    { key: 'g' as const, name: 'Green', shortcut: 'Ctrl+4' },
+    { key: 'b' as const, name: 'Blue', shortcut: 'Ctrl+5' },
+  ];
+
+  return (
+    <div class="layers-panel">
+      <div class="layer-rows">
+        <For each={COLOUR_ROWS}>
+          {(row) => (
+            <div
+              class="layer-row"
+              classList={{ active: view() === row.key }}
+              onClick={() => setView(row.key)}
+            >
+              <button
+                type="button"
+                class="layer-eye"
+                title="Channel visibility"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setView(row.key);
+                }}
+              >
+                <Icon name={view() === row.key || view() === 'all' ? 'eye' : 'eyeOff'} size={14} />
+              </button>
+              <span class="layer-thumb channel-thumb" />
+              <span class="layer-name">{row.name}</span>
+              <span class="dim">{row.shortcut}</span>
+            </div>
+          )}
+        </For>
+        <For each={doc()?.channels ?? []}>
+          {(c) => (
+            <div
+              class="layer-row"
+              classList={{ active: view() === c.id }}
+              onClick={() => setView(c.id)}
+            >
+              <button
+                type="button"
+                class="layer-eye"
+                title="Channel visibility"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  send({ t: 'channelCommand', command: 'update', id: c.id, patch: { visible: !c.visible } });
+                }}
+              >
+                <Icon name={c.visible ? 'eye' : 'eyeOff'} size={14} />
+              </button>
+              <span class="layer-thumb channel-thumb" />
+              <span class="layer-name">{c.name}</span>
+            </div>
+          )}
+        </For>
+      </div>
+      <div class="panel-footer">
+        <button
+          type="button"
+          class="icon-button"
+          title="Load channel as selection"
+          disabled={typeof view() !== 'number'}
+          onClick={() => send({ t: 'loadSelection', channelId: view() })}
+        >
+          <Icon name="marqueeRect" size={14} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          title="Save selection as channel"
+          disabled={!doc()?.hasSelection}
+          onClick={() => send({ t: 'saveSelection' })}
+        >
+          <Icon name="quickMask" size={14} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          title="Create new channel"
+          onClick={() => send({ t: 'channelCommand', command: 'newFromSelection' })}
+        >
+          <Icon name="plus" size={14} />
+        </button>
+        <button
+          type="button"
+          class="icon-button"
+          title="Delete channel"
+          disabled={typeof view() !== 'number'}
+          onClick={() => {
+            send({ t: 'channelCommand', command: 'delete', id: view() });
+            setView('all');
+          }}
+        >
+          <Icon name="trash" size={14} />
+        </button>
       </div>
     </div>
   );

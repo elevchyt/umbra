@@ -75,6 +75,9 @@ const [brush, setBrush] = createStore({
   mode: 'normal' as string,
 });
 
+/** Which channel the canvas shows; mirrors the engine's view setting. */
+const [channelView, setChannelView] = createSignal<'all' | 'r' | 'g' | 'b' | number>('all');
+
 /** Crop tool: whether committing throws the outside pixels away (Photoshop defaults to off). */
 const [cropDeletes, setCropDeletes] = createSignal(false);
 
@@ -241,6 +244,8 @@ export const store = {
   setGradientOptions,
   cropDeletes,
   setCropDeletes,
+  channelView,
+  setChannelView,
 
   foreground,
   setForeground,

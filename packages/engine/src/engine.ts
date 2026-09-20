@@ -61,6 +61,7 @@ import type { Resample } from './commands/image.js';
 import * as FillCmd from './commands/fill.js';
 import * as TransformCmd from './commands/transform.js';
 import * as ClipCmd from './commands/clipboard.js';
+import * as ChannelCmd from './commands/channels.js';
 import {
   IDENTITY,
   about,
@@ -737,6 +738,44 @@ export class Engine {
     return [r / weight / 255, g / weight / 255, b / weight / 255];
   }
 
+  // ---- channels -------------------------------------------------------------------------
+
+  /**
+   * Which channel the canvas shows. 'all' is the normal composite; 'r'/'g'/'b' show one colour
+   * channel as greyscale; a number shows that alpha channel. Photoshop treats this as a view
+   * setting, not a document edit, so it is not on the undo stack.
+   */
+  channelView: 'all' | 'r' | 'g' | 'b' | number = 'all';
+
+  saveSelection(opts: { targetId?: number; op?: CombineOp; name?: string } = {}): void {
+    if (!this.doc.selection) return;
+    this.commit(ChannelCmd.saveSelection(this.doc, this.doc.selection, opts), 'Save Selection');
+  }
+
+  loadSelection(channelId: number, opts: { op?: CombineOp; invert?: boolean } = {}): void {
+    const sel = ChannelCmd.loadSelection(this.doc, channelId, opts);
+    if (sel) this.setSelection(sel, 'Load Selection');
+  }
+
+  channelCommand(command: string, id?: number, patch?: Record<string, unknown>): void {
+    switch (command) {
+      case 'delete':
+        if (id !== undefined) this.commit(ChannelCmd.deleteChannel(this.doc, id), 'Delete Channel');
+        break;
+      case 'duplicate':
+        if (id !== undefined) this.commit(ChannelCmd.duplicateChannel(this.doc, id), 'Duplicate Channel');
+        break;
+      case 'update':
+        if (id !== undefined && patch) {
+          this.commit(ChannelCmd.updateChannel(this.doc, id, patch as never), 'Channel Options');
+        }
+        break;
+      case 'newFromSelection':
+        this.saveSelection({});
+        break;
+    }
+  }
+
   // ---- crop -----------------------------------------------------------------------------
 
   /**
@@ -1365,6 +1404,7 @@ export class Engine {
       wantAnts,
       overlay ? { tex: overlay.tex, style: this.quickMaskStyle } : null,
       this.transformState(),
+      typeof this.channelView === 'string' ? this.channelView : 'all',
     );
     this.lastPasses = s.layerPasses;
     this.lastInstances = s.tileInstances;
@@ -1421,6 +1461,12 @@ export class Engine {
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
       hasSelection: !!this.doc.selection,
+      channels: this.doc.channels.map((c) => ({
+        id: c.id,
+        name: c.name,
+        visible: c.visible,
+        indicates: c.indicates,
+      })),
       selectionBounds: selectionBoundsOf(this.doc.selection),
       warnings: this.warnings.length ? this.warnings : undefined,
       layers: panelRows(this.doc.layers).map(({ layer, depth }) => ({

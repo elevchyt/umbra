@@ -592,8 +592,8 @@ export const MENUS: MenuDef[] = [
       sep,
       { label: 'Edit in Quick Mask Mode', cmd: 'select.quickMask', shortcut: 'Q', done: true },
       sep,
-      { label: 'Load Selection…', cmd: 'select.load' },
-      { label: 'Save Selection…', cmd: 'select.save' },
+      { label: 'Load Selection…', cmd: 'select.loadSelection', done: true },
+      { label: 'Save Selection…', cmd: 'select.saveSelection', done: true },
     ],
   },
   {

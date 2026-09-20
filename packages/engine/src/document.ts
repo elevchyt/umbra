@@ -90,6 +90,27 @@ export interface GroupLayer extends LayerBase {
 
 export type Layer = PixelLayer | GroupLayer;
 
+/**
+ * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
+ * display colour and opacity, which is all a spot channel needs too, so spot channels arrive
+ * as a flag on this rather than as a second type.
+ */
+export interface AlphaChannel {
+  readonly id: number;
+  readonly name: string;
+  readonly plane: MipPlane;
+  /** Overlay colour when the channel is shown alongside the composite. */
+  readonly color: readonly [number, number, number];
+  /** 0…1 overlay opacity. */
+  readonly opacity: number;
+  readonly visible: boolean;
+  /**
+   * Photoshop asks whether the channel's stored values mean "masked area" or "selected area".
+   * It only changes what the overlay paints and how a load interprets it, not the pixels.
+   */
+  readonly indicates: 'masked' | 'selected';
+}
+
 export interface Doc {
   readonly name: string;
   readonly width: number;
@@ -99,6 +120,8 @@ export interface Doc {
   readonly activeLayerIds: readonly number[];
   /** Active selection; null means "no selection", which edits treat as "everywhere". */
   readonly selection: Selection | null;
+  /** Saved selections and spot channels, in panel order below the colour channels. */
+  readonly channels: readonly AlphaChannel[];
   /** Bottom layer is a locked Background (no alpha, no mode). */
   readonly hasBackground: boolean;
   readonly dirty: boolean;
@@ -156,6 +179,7 @@ export function emptyDoc(width = 1920, height = 1080, name = 'Untitled-1'): Doc 
     layers: [],
     activeLayerIds: [],
     selection: null,
+    channels: [],
     hasBackground: false,
     dirty: false,
   };

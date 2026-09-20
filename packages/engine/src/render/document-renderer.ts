@@ -38,6 +38,26 @@ void main() {
   fragColor = vec4(c.rgb * c.a, c.a);
 }`;
 
+/**
+ * One colour channel as greyscale, over the canvas rect only.
+ *
+ * It uses the canvas-rect quad rather than a full-screen one so the pasteboard stays the
+ * pasteboard — a channel view that painted the whole window black would hide where the
+ * document ends. The composite is sampled by fragment position, since it is rendered at
+ * exactly the viewport's size.
+ */
+const CHANNEL_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+uniform sampler2D u_composite;
+uniform vec2 u_size;
+uniform int u_channel;   // 0 = red, 1 = green, 2 = blue
+out vec4 fragColor;
+void main() {
+  vec4 c = texture(u_composite, gl_FragCoord.xy / u_size);
+  float v = u_channel == 0 ? c.r : (u_channel == 1 ? c.g : c.b);
+  fragColor = vec4(v, v, v, 1.0);
+}`;
+
 /** A quad covering the canvas rect in document space, so it follows zoom and rotation. */
 const CANVAS_MASK_VERT = /* glsl */ `#version 300 es
 precision highp float;
@@ -87,6 +107,7 @@ export class DocumentRenderer {
   readonly handles: HandlesRenderer;
   private present: Program;
   private checker: Program;
+  private channel: Program;
   private quad: WebGLBuffer;
   private vao: WebGLVertexArrayObject;
   private stats: DocumentFrameStats = { layerPasses: 0, batchedLayers: 0, tileInstances: 0, level: 0 };
@@ -103,6 +124,7 @@ export class DocumentRenderer {
     this.handles = new HandlesRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
     this.checker = new Program(gl, CANVAS_MASK_VERT, CHECKER_FRAG, 'checker');
+    this.channel = new Program(gl, CANVAS_MASK_VERT, CHANNEL_FRAG, 'channel-view');
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -232,6 +254,7 @@ export class DocumentRenderer {
     showAnts = true,
     quickMask: { tex: WebGLTexture; style: QuickMaskStyle } | null = null,
     transformBox: { box: Rect; matrix: Mat } | null = null,
+    channelView: 'all' | 'r' | 'g' | 'b' = 'all',
   ): DocumentFrameStats {
     const gl = this.gl;
     const dpr = view.devicePixelRatio;
@@ -270,16 +293,27 @@ export class DocumentRenderer {
     gl.uniform3f(this.checker.loc('u_dark'), 0.6, 0.6, 0.6);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    // Then the artwork over it. The composite is straight alpha and zero outside the canvas,
-    // so a plain "over" leaves the pasteboard untouched.
-    this.present.use();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, composite.tex);
-    this.present.u1i('u_composite', 0);
-    gl.enable(gl.BLEND);
-    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.disable(gl.BLEND);
+
+    if (channelView === 'all') {
+      // The artwork over the checker. The composite is straight alpha and zero outside the
+      // canvas, so a plain "over" leaves the pasteboard untouched.
+      this.present.use();
+      this.present.u1i('u_composite', 0);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.disable(gl.BLEND);
+    } else {
+      this.channel.use();
+      this.channel.u1i('u_composite', 0);
+      this.channel.u2f('u_size', vw, vh);
+      this.channel.u1i('u_channel', channelView === 'r' ? 0 : channelView === 'g' ? 1 : 2);
+      this.channel.uMat3('u_docToClip', docToClip(view));
+      gl.uniform4f(this.channel.loc('u_docRect'), docRect.x0, docRect.y0, docRect.x1, docRect.y1);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
     gl.bindVertexArray(null);
 
     // The rubylith goes over the artwork but under the outline. Photoshop hides the ants in
@@ -347,6 +381,7 @@ export class DocumentRenderer {
     this.ants.dispose();
     this.present.dispose();
     this.checker.dispose();
+    this.channel.dispose();
     this.quickMask.dispose();
     this.handles.dispose();
     this.gl.deleteBuffer(this.quad);

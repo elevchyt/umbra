@@ -117,6 +117,11 @@ export const EXTRA_BINDINGS: { shortcut: string; cmd: string }[] = [
   { shortcut: '[', cmd: 'brush.sizeDown' },
   { shortcut: ']', cmd: 'brush.sizeUp' },
   { shortcut: 'Shift+[', cmd: 'brush.hardnessDown' },
+  // Photoshop's channel shortcuts; 2 is the composite and 3…5 are the colour channels.
+  { shortcut: 'Ctrl+2', cmd: 'view.channelAll' },
+  { shortcut: 'Ctrl+3', cmd: 'view.channelRed' },
+  { shortcut: 'Ctrl+4', cmd: 'view.channelGreen' },
+  { shortcut: 'Ctrl+5', cmd: 'view.channelBlue' },
   { shortcut: 'Shift+]', cmd: 'brush.hardnessUp' },
   { shortcut: 'Shift+F1', cmd: 'view.themeDarker' },
   { shortcut: 'Shift+F2', cmd: 'view.themeLighter' },

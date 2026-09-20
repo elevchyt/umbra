@@ -226,6 +226,21 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         });
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'saveSelection':
+        engine?.saveSelection({ targetId: msg.targetId, op: msg.op as never, name: msg.name });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'loadSelection':
+        engine?.loadSelection(msg.channelId, { op: msg.op as never, invert: msg.invert });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'channelCommand':
+        engine?.channelCommand(msg.command, msg.id, msg.patch);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setChannelView':
+        if (engine) engine.channelView = msg.view as never;
+        break;
       case 'beginCrop':
         engine?.beginCrop();
         post({ t: 'transform', active: true });

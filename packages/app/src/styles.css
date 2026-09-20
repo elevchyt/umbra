@@ -855,6 +855,9 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 ::-webkit-scrollbar-corner { background: var(--panel-sunken); }
 
 /* Image Size / Canvas Size */
+/* Channel rows reuse the layer row; their thumb is a plain grey block, not an image. */
+.channel-thumb { background: var(--border-light); }
+
 .gradient-preview {
   display: inline-block;
   width: 56px;

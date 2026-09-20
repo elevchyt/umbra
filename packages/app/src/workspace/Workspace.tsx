@@ -489,6 +489,25 @@ export function Workspace() {
           send({ t: 'selectCommand', command: 'border', amount: v }),
         );
         break;
+      case 'select.saveSelection':
+        send({ t: 'saveSelection' });
+        break;
+      case 'select.loadSelection': {
+        const first = store.doc()?.channels?.[0];
+        if (first) send({ t: 'loadSelection', channelId: first.id });
+        else store.setStatusMessage('No saved channels to load.');
+        break;
+      }
+      case 'view.channelAll':
+      case 'view.channelRed':
+      case 'view.channelGreen':
+      case 'view.channelBlue': {
+        const view =
+          cmd === 'view.channelRed' ? 'r' : cmd === 'view.channelGreen' ? 'g' : cmd === 'view.channelBlue' ? 'b' : 'all';
+        store.setChannelView(view);
+        send({ t: 'setChannelView', view });
+        break;
+      }
       case 'select.grow':
         send({ t: 'selectCommand', command: 'grow' });
         break;
