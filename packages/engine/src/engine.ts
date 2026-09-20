@@ -57,6 +57,7 @@ import {
 } from './selection.js';
 import * as LayerCmd from './commands/layers.js';
 import * as ImageCmd from './commands/image.js';
+import * as FillCmd from './commands/fill.js';
 import { savePsd } from './psd-save.js';
 import { openPsd } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
@@ -604,6 +605,30 @@ export class Engine {
   }
   actualPixels(): void {
     this.setZoom(1);
+  }
+
+  // ---- fill & stroke ------------------------------------------------------------------
+
+  /**
+   * Edit ▸ Fill. With nothing to fill into, a layer is created first — the same courtesy the
+   * brush extends, and the alternative is a command that silently does nothing on a new
+   * document.
+   */
+  fill(opts: FillCmd.FillOptions): void {
+    let doc = this.doc;
+    if (!doc.layers.some((l) => l.kind === 'pixel')) {
+      const layer = makePixelLayer('Layer 1', Plane.empty(RGBA8));
+      doc = { ...doc, layers: [...doc.layers, layer], activeLayerIds: [layer.id] };
+    }
+    const next = FillCmd.fill(doc, opts);
+    if (next === doc && doc === this.doc) return;
+    this.commit(next, opts.clear ? 'Clear' : 'Fill');
+  }
+
+  stroke(opts: FillCmd.StrokeOptions): void {
+    const next = FillCmd.stroke(this.doc, opts);
+    if (next === this.doc) return;
+    this.commit(next, 'Stroke');
   }
 
   // ---- painting ---------------------------------------------------------------------

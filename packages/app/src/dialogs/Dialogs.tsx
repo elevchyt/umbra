@@ -15,6 +15,7 @@ import {
   nearestWebSafe,
   type RGB,
 } from '@umbra/core/color';
+import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { store } from '../state/store';
 
 /**
@@ -578,6 +579,126 @@ export function AmountDialog(props: {
           suffix={props.unit ?? 'px'}
           width={70}
         />
+      </div>
+    </Dialog>
+  );
+}
+
+const FILL_CONTENTS = [
+  { value: 'foreground', label: 'Foreground Color' },
+  { value: 'background', label: 'Background Color' },
+  { value: 'color', label: 'Color…' },
+  { value: 'black', label: 'Black' },
+  { value: 'gray50', label: '50% Gray' },
+  { value: 'white', label: 'White' },
+  { value: 'transparent', label: 'Transparent' },
+];
+
+const BLEND_OPTIONS = BLEND_MENU.filter((m) => m !== '-' && m !== 'passThrough').map((m) => ({
+  value: m as BlendMode,
+  label: BLEND_LABEL[m as BlendMode],
+}));
+
+export interface FillRequest {
+  contents: string;
+  mode: BlendMode;
+  opacity: number;
+  preserveTransparency: boolean;
+}
+
+/** Edit ▸ Fill — spec 04 §7. Layout follows Photoshop: Contents, then Blending. */
+export function FillDialog(props: { onApply: (r: FillRequest) => void; onCancel: () => void }) {
+  const [contents, setContents] = createSignal('foreground');
+  const [mode, setMode] = createSignal<BlendMode>('normal');
+  const [opacity, setOpacity] = createSignal(100);
+  const [preserve, setPreserve] = createSignal(false);
+
+  return (
+    <Dialog
+      title="Fill"
+      width={340}
+      onCancel={props.onCancel}
+      onOk={() =>
+        props.onApply({
+          contents: contents(),
+          mode: mode(),
+          opacity: opacity() / 100,
+          preserveTransparency: preserve(),
+        })
+      }
+    >
+      <div class="dialog-section">
+        <div class="dialog-section-title">Contents</div>
+        <Select label="Use" value={contents()} options={FILL_CONTENTS} onChange={setContents} width={160} />
+      </div>
+      <div class="dialog-section">
+        <div class="dialog-section-title">Blending</div>
+        <Select label="Mode" value={mode()} options={BLEND_OPTIONS} onChange={setMode} width={160} />
+        <NumberField label="Opacity" value={opacity()} onChange={setOpacity} min={0} max={100} suffix="%" width={56} />
+        <Checkbox
+          checked={preserve()}
+          onChange={setPreserve}
+          label="Preserve Transparency"
+          // Filling transparent pixels is the only thing Transparent CAN do.
+          disabled={contents() === 'transparent'}
+        />
+      </div>
+    </Dialog>
+  );
+}
+
+export interface StrokeRequest extends FillRequest {
+  width: number;
+  location: 'inside' | 'center' | 'outside';
+}
+
+/** Edit ▸ Stroke — spec 04 §7. */
+export function StrokeDialog(props: { onApply: (r: StrokeRequest) => void; onCancel: () => void }) {
+  const [width, setWidth] = createSignal(3);
+  const [location, setLocation] = createSignal<'inside' | 'center' | 'outside'>('inside');
+  const [mode, setMode] = createSignal<BlendMode>('normal');
+  const [opacity, setOpacity] = createSignal(100);
+  const [preserve, setPreserve] = createSignal(false);
+
+  return (
+    <Dialog
+      title="Stroke"
+      width={340}
+      onCancel={props.onCancel}
+      onOk={() =>
+        props.onApply({
+          contents: 'foreground',
+          width: width(),
+          location: location(),
+          mode: mode(),
+          opacity: opacity() / 100,
+          preserveTransparency: preserve(),
+        })
+      }
+    >
+      <div class="dialog-section">
+        <div class="dialog-section-title">Stroke</div>
+        <NumberField label="Width" value={width()} onChange={setWidth} min={1} max={250} suffix="px" width={56} />
+      </div>
+      <div class="dialog-section">
+        <div class="dialog-section-title">Location</div>
+        <Select
+          label=""
+          value={location()}
+          options={[
+            { value: 'inside', label: 'Inside' },
+            { value: 'center', label: 'Center' },
+            { value: 'outside', label: 'Outside' },
+          ]}
+          onChange={(v) => setLocation(v as 'inside' | 'center' | 'outside')}
+          width={120}
+        />
+      </div>
+      <div class="dialog-section">
+        <div class="dialog-section-title">Blending</div>
+        <Select label="Mode" value={mode()} options={BLEND_OPTIONS} onChange={setMode} width={160} />
+        <NumberField label="Opacity" value={opacity()} onChange={setOpacity} min={0} max={100} suffix="%" width={56} />
+        <Checkbox checked={preserve()} onChange={setPreserve} label="Preserve Transparency" />
       </div>
     </Dialog>
   );

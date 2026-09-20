@@ -856,6 +856,17 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 
 /* Image Size / Canvas Size */
 .sizedlg { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; }
+
+/* Photoshop groups dialog controls under small captions with a rule; Fill and Stroke use it. */
+.dialog-section { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.dialog-section + .dialog-section { margin-top: 14px; }
+.dialog-section-title {
+  color: var(--text-dim);
+  font-size: 11px;
+  align-self: stretch;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-dark);
+}
 .anchor-label { margin-top: 2px; }
 .anchor-grid { display: grid; grid-template-columns: repeat(3, 26px); gap: 2px; }
 .anchor-cell {

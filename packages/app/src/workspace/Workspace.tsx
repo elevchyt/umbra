@@ -13,7 +13,7 @@ import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
 import { DocumentTabs, StatusBar } from './Chrome';
-import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog } from '../dialogs/Dialogs';
+import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
@@ -294,6 +294,23 @@ export function Workspace() {
         store.openDialog('shortcuts');
         break;
 
+      case 'edit.fill':
+        store.openDialog('fill');
+        break;
+      case 'edit.stroke':
+        store.openDialog('stroke');
+        break;
+      case 'edit.clear':
+        send({
+          t: 'fill',
+          color: [0, 0, 0],
+          mode: 'normal',
+          opacity: 1,
+          preserveTransparency: false,
+          clear: true,
+        });
+        break;
+
       // Select menu
       case 'select.all':
         send({ t: 'selectCommand', command: 'all' });
@@ -420,6 +437,30 @@ export function Workspace() {
   /** The small one-field dialogs the Select ▸ Modify commands share. */
   function promptAmount(title: string, label: string, value: number, apply: (v: number) => void): void {
     setAmountPrompt({ title, label, value, apply });
+  }
+
+  /** Resolve a Fill dialog's Contents choice to a 0…1 RGB triple. */
+  function fillColor(contents: string): [number, number, number] {
+    const toUnit = (c: { r: number; g: number; b: number }): [number, number, number] => [
+      c.r / 255,
+      c.g / 255,
+      c.b / 255,
+    ];
+    switch (contents) {
+      case 'background':
+        return toUnit(store.background());
+      case 'black':
+        return [0, 0, 0];
+      case 'white':
+        return [1, 1, 1];
+      case 'gray50':
+        // Photoshop's "50% Gray" is 128/255 in the working space, not 0.5 linear.
+        return [128 / 255, 128 / 255, 128 / 255];
+      case 'transparent':
+        return [0, 0, 0];
+      default:
+        return toUnit(store.foreground());
+    }
   }
 
   /** Current document name with a .psd extension, for the Save dialog's default. */
@@ -773,6 +814,39 @@ export function Workspace() {
             />
           );
         }}
+      </Show>
+      <Show when={store.dialog()?.id === 'fill'}>
+        <FillDialog
+          onCancel={store.closeDialog}
+          onApply={(r: FillRequest) => {
+            store.closeDialog();
+            send({
+              t: 'fill',
+              color: fillColor(r.contents),
+              mode: r.mode,
+              opacity: r.opacity,
+              preserveTransparency: r.preserveTransparency,
+              clear: r.contents === 'transparent',
+            });
+          }}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'stroke'}>
+        <StrokeDialog
+          onCancel={store.closeDialog}
+          onApply={(r: StrokeRequest) => {
+            store.closeDialog();
+            send({
+              t: 'stroke',
+              color: fillColor(r.contents),
+              mode: r.mode,
+              opacity: r.opacity,
+              preserveTransparency: r.preserveTransparency,
+              width: r.width,
+              location: r.location,
+            });
+          }}
+        />
       </Show>
       <Show when={store.dialog()?.id === 'imageSize'}>
         <ImageSizeDialog

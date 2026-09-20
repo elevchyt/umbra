@@ -171,7 +171,9 @@ export type DialogId =
   | 'shortcuts'
   | 'newWorkspace'
   | 'imageSize'
-  | 'canvasSize';
+  | 'canvasSize'
+  | 'fill'
+  | 'stroke';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {

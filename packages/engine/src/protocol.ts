@@ -85,6 +85,23 @@ export type ToEngine =
   | { t: 'endSelect'; x?: number; y?: number }
   | { t: 'cancelSelect' }
   | { t: 'setQuickMask'; on: boolean }
+  | {
+      t: 'fill';
+      color: [number, number, number];
+      mode: string;
+      opacity: number;
+      preserveTransparency: boolean;
+      clear?: boolean;
+    }
+  | {
+      t: 'stroke';
+      color: [number, number, number];
+      mode: string;
+      opacity: number;
+      preserveTransparency: boolean;
+      width: number;
+      location: string;
+    }
   | { t: 'magicWand'; x: number; y: number; op: string }
   | { t: 'selectCommand'; command: string; amount?: number }
   | { t: 'setSelectOptions'; feather?: number; antialias?: boolean; tolerance?: number; contiguous?: boolean }

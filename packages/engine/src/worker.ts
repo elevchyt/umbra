@@ -137,6 +137,27 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.endSelect(msg.x, msg.y);
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'fill':
+        engine?.fill({
+          color: msg.color,
+          mode: msg.mode as never,
+          opacity: msg.opacity,
+          preserveTransparency: msg.preserveTransparency,
+          clear: msg.clear,
+        });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'stroke':
+        engine?.stroke({
+          color: msg.color,
+          mode: msg.mode as never,
+          opacity: msg.opacity,
+          preserveTransparency: msg.preserveTransparency,
+          width: msg.width,
+          location: msg.location as never,
+        });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;
