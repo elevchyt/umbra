@@ -136,8 +136,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'fill',
     key: 'g',
     tools: [
-      { id: 'gradient', name: 'Gradient Tool', icon: 'gradient', key: 'g' },
-      { id: 'paintBucket', name: 'Paint Bucket Tool', icon: 'paintBucket', key: 'g' },
+      { id: 'gradient', name: 'Gradient Tool', icon: 'gradient', key: 'g', implemented: true, hint: 'Drag to draw a gradient. Shift constrains to 45°.' },
+      { id: 'paintBucket', name: 'Paint Bucket Tool', icon: 'paintBucket', key: 'g', implemented: true, hint: 'Click to fill a similar region. Tolerance is in the options bar.' },
     ],
   },
   {

@@ -209,6 +209,23 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         post({ t: 'doc', doc: engine.summary() });
         break;
       }
+      case 'bucket':
+        engine?.bucketAt(msg.x, msg.y, msg.color, msg.mode as never, msg.opacity);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'gradient':
+        engine?.drawGradient({
+          gradient: msg.gradient,
+          style: msg.style as never,
+          from: msg.from,
+          to: msg.to,
+          reverse: msg.reverse,
+          dither: msg.dither,
+          mode: msg.mode as never,
+          opacity: msg.opacity,
+        });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;

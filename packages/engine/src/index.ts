@@ -13,4 +13,11 @@ export { probeCaps, describeCaps, type GpuCaps } from './gpu/caps.js';
 // Re-exported so the UI can describe a brush without depending on @umbra/kernels directly:
 // the dependency rule is core ← kernels ← engine ← app (spec 03 §3).
 export { DEFAULT_BRUSH, type BrushParams } from '@umbra/kernels/brush';
+export {
+  FOREGROUND_TO_BACKGROUND,
+  FOREGROUND_TO_TRANSPARENT,
+  sampleGradient,
+  type Gradient,
+  type GradientStyle,
+} from '@umbra/kernels/gradient';
 export type { PaintMode } from './commands/fill.js';

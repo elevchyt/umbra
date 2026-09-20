@@ -1,5 +1,6 @@
 /** Message protocol between the UI thread and the engine worker (spec 03 §2). */
 import type { BrushParams } from '@umbra/kernels/brush';
+import type { Gradient } from '@umbra/kernels/gradient';
 import type { GpuCaps } from './gpu/caps.js';
 
 
@@ -107,6 +108,25 @@ export type ToEngine =
   | { t: 'cancelTransform' }
   | { t: 'nudge'; dx: number; dy: number }
   | { t: 'clipboard'; op: string }
+  | {
+      t: 'bucket';
+      x: number;
+      y: number;
+      color: [number, number, number];
+      mode: string;
+      opacity: number;
+    }
+  | {
+      t: 'gradient';
+      gradient: Gradient;
+      style: string;
+      from: { x: number; y: number };
+      to: { x: number; y: number };
+      reverse: boolean;
+      dither: boolean;
+      mode: string;
+      opacity: number;
+    }
   | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean }
   | {
       t: 'fill';

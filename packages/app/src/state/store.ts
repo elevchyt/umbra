@@ -75,6 +75,16 @@ const [brush, setBrush] = createStore({
   mode: 'normal' as string,
 });
 
+/** Gradient tool options; the ramp itself is derived from the foreground/background. */
+const [gradientOptions, setGradientOptions] = createStore({
+  style: 'linear' as 'linear' | 'radial' | 'angle' | 'reflected' | 'diamond',
+  preset: 'fgToBg' as 'fgToBg' | 'fgToTransparent' | 'blackToWhite',
+  mode: 'normal' as string,
+  opacity: 1,
+  reverse: false,
+  dither: true,
+});
+
 /** Eyedropper sample square, in document pixels. 1 is Photoshop's "Point Sample". */
 const [sampleSize, setSampleSize] = createSignal(1);
 
@@ -224,6 +234,8 @@ export const store = {
   setSampleSize,
   brush,
   setBrush,
+  gradientOptions,
+  setGradientOptions,
 
   foreground,
   setForeground,

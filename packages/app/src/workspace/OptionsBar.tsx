@@ -4,6 +4,7 @@ import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID } from '../tools/registry';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient } from '@umbra/engine';
 import { store } from '../state/store';
 
 /**
@@ -62,6 +63,46 @@ const paintModeOptions = [
   { value: 'behind', label: 'Behind' },
   { value: 'clear', label: 'Clear' },
 ];
+
+/**
+ * The gradient's ramp, drawn from the live stops. It doubles as the editor's button; the
+ * editor dialog itself arrives with the preset manager.
+ */
+function GradientPreview() {
+  const css = () => {
+    const fg = store.foreground();
+    const bg = store.background();
+    const g =
+      store.gradientOptions.preset === 'fgToTransparent'
+        ? FOREGROUND_TO_TRANSPARENT([fg.r, fg.g, fg.b])
+        : store.gradientOptions.preset === 'blackToWhite'
+          ? FOREGROUND_TO_BACKGROUND([0, 0, 0], [1, 1, 1])
+          : FOREGROUND_TO_BACKGROUND([fg.r, fg.g, fg.b], [bg.r, bg.g, bg.b]);
+    const stops = [0, 0.25, 0.5, 0.75, 1].map((t) => {
+      const [r, gg, b, a] = sampleGradient(g, t);
+      return `rgba(${Math.round(r * 255)},${Math.round(gg * 255)},${Math.round(b * 255)},${a}) ${t * 100}%`;
+    });
+    return `linear-gradient(to right, ${stops.join(', ')})`;
+  };
+
+  const PRESETS = [
+    { value: 'fgToBg', label: 'Foreground to Background' },
+    { value: 'fgToTransparent', label: 'Foreground to Transparent' },
+    { value: 'blackToWhite', label: 'Black, White' },
+  ];
+
+  return (
+    <>
+      <span class="gradient-preview" style={{ background: css() }} title="Gradient preset" />
+      <Select
+        value={store.gradientOptions.preset}
+        options={PRESETS}
+        onChange={(v) => store.setGradientOptions('preset', v as never)}
+        width={172}
+      />
+    </>
+  );
+}
 
 export function OptionsBar(props: OptionsBarProps) {
   const tool = () => TOOL_BY_ID.get(store.activeTool());
@@ -181,6 +222,107 @@ export function OptionsBar(props: OptionsBarProps) {
           <button type="button" class="button" disabled>
             Select and Mask…
           </button>
+        </Match>
+
+        <Match when={store.activeTool() === 'gradient'}>
+          <GradientPreview />
+          <Separator />
+          <div class="segmented">
+            <For
+              each={
+                [
+                  { style: 'linear', icon: 'gradient', title: 'Linear Gradient' },
+                  { style: 'radial', icon: 'ellipse', title: 'Radial Gradient' },
+                  { style: 'angle', icon: 'rotateView', title: 'Angle Gradient' },
+                  { style: 'reflected', icon: 'filterRows', title: 'Reflected Gradient' },
+                  { style: 'diamond', icon: 'polygon', title: 'Diamond Gradient' },
+                ] as const
+              }
+            >
+              {(o) => (
+                <IconButton
+                  icon={o.icon}
+                  title={o.title}
+                  active={store.gradientOptions.style === o.style}
+                  onClick={() => store.setGradientOptions('style', o.style)}
+                />
+              )}
+            </For>
+          </div>
+          <Separator />
+          <Select
+            label="Mode"
+            value={store.gradientOptions.mode}
+            options={paintModeOptions.filter((o) => o.value !== 'behind' && o.value !== 'clear')}
+            onChange={(v) => store.setGradientOptions('mode', v)}
+            width={110}
+          />
+          <NumberField
+            label="Opacity"
+            value={Math.round(store.gradientOptions.opacity * 100)}
+            onChange={(v) => store.setGradientOptions('opacity', v / 100)}
+            min={1}
+            max={100}
+            suffix="%"
+            width={38}
+          />
+          <Separator />
+          <Checkbox
+            checked={store.gradientOptions.reverse}
+            onChange={(v) => store.setGradientOptions('reverse', v)}
+            label="Reverse"
+          />
+          <Checkbox
+            checked={store.gradientOptions.dither}
+            onChange={(v) => store.setGradientOptions('dither', v)}
+            label="Dither"
+          />
+        </Match>
+
+        <Match when={store.activeTool() === 'paintBucket'}>
+          <Select
+            label="Fill"
+            value="foreground"
+            options={[{ value: 'foreground', label: 'Foreground' }]}
+            onChange={() => {}}
+            width={110}
+          />
+          <Separator />
+          <Select
+            label="Mode"
+            value={brush.mode}
+            options={paintModeOptions.filter((o) => o.value !== 'behind' && o.value !== 'clear')}
+            onChange={(v) => store.setBrush('mode', v)}
+            width={110}
+          />
+          <NumberField
+            label="Opacity"
+            value={Math.round(brush.opacity * 100)}
+            onChange={(v) => store.setBrush('opacity', v / 100)}
+            min={1}
+            max={100}
+            suffix="%"
+            width={38}
+          />
+          <Separator />
+          <NumberField
+            label="Tolerance"
+            value={sel.tolerance}
+            onChange={(v) => store.setSelectOptions('tolerance', v)}
+            min={0}
+            max={255}
+            width={40}
+          />
+          <Checkbox
+            checked={sel.antialias}
+            onChange={(v) => store.setSelectOptions('antialias', v)}
+            label="Anti-alias"
+          />
+          <Checkbox
+            checked={sel.contiguous}
+            onChange={(v) => store.setSelectOptions('contiguous', v)}
+            label="Contiguous"
+          />
         </Match>
 
         <Match when={store.activeTool() === 'magicWand'}>

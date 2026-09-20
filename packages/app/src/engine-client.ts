@@ -30,6 +30,16 @@ export interface EngineClientEvents {
   onError?: (message: string) => void;
 }
 
+/** Snap a drag to the nearest 45°, for Shift-constrained gradients. */
+function snap45(from: { x: number; y: number }, to: { x: number; y: number }) {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len === 0) return to;
+  const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+  return { x: from.x + Math.cos(a) * len, y: from.y + Math.sin(a) * len };
+}
+
 export class EngineClient {
   private readonly worker: Worker;
   private readonly ring: PointerRing;
@@ -132,6 +142,11 @@ export class EngineClient {
   selectTool: string | null = null;
   /** Set while the Eyedropper is active; the number is the sample square's edge in doc px. */
   sampleSize: number | null = null;
+  /** 'bucket' or 'gradient' when one of the fill tools is active. */
+  fillTool: 'bucket' | 'gradient' | null = null;
+  /** Filled in by the UI so the worker gets the colours and options the options bar shows. */
+  fillRequest: (() => Record<string, unknown>) | null = null;
+  private gradientFrom: { x: number; y: number } | null = null;
   /** True while a Free Transform box is open, so the pointer drives handles, not tools. */
   transformActive = false;
   /** True when the Move tool is selected, so a drag transforms rather than pans. */
@@ -219,6 +234,16 @@ export class EngineClient {
         this.transformDragging = true;
         return;
       }
+      if (this.fillTool && e.button === 0) {
+        const p = toLocal(e);
+        if (this.fillTool === 'bucket') {
+          this.send({ t: 'bucket', x: p.x, y: p.y, ...(this.fillRequest?.() ?? {}) } as never);
+        } else {
+          // A gradient is defined by a drag, so nothing is drawn until the button comes up.
+          this.gradientFrom = p;
+        }
+        return;
+      }
       if (this.sampleSize !== null && e.button === 0) {
         const p = toLocal(e);
         // Alt-click sets the background colour, as everywhere in Photoshop.
@@ -304,6 +329,14 @@ export class EngineClient {
       if (this.transformDragging) {
         this.transformDragging = false;
         this.send({ t: 'transformDragEnd' });
+      }
+      if (this.gradientFrom) {
+        const from = this.gradientFrom;
+        this.gradientFrom = null;
+        let to = toLocal(e);
+        // Shift constrains the drag to 45° steps, as it does in Photoshop.
+        if (e.shiftKey) to = snap45(from, to);
+        this.send({ t: 'gradient', from, to, ...(this.fillRequest?.() ?? {}) } as never);
       }
       if (this.paintMode && this.ready) write(e, FLAG_UP);
       this.sampling = false;

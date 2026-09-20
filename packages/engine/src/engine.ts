@@ -77,6 +77,8 @@ import {
   type Mat,
 } from '@umbra/kernels/matrix';
 import { hitHandle, handlePoint, type HandleId } from './render/handles.js';
+import { magicWand } from '@umbra/kernels/selection';
+import type { Gradient, GradientStyle } from '@umbra/kernels/gradient';
 import type { PaintMode } from './commands/fill.js';
 import {
   DEFAULT_BRUSH,
@@ -733,6 +735,64 @@ export class Engine {
     // Sampling empty canvas gives white, as Photoshop does over transparency.
     if (weight <= 0) return [1, 1, 1];
     return [r / weight / 255, g / weight / 255, b / weight / 255];
+  }
+
+  // ---- bucket & gradient ----------------------------------------------------------------
+
+  /**
+   * Paint Bucket. The region comes from the same flood fill the Magic Wand uses, on the same
+   * composited pixels — so clicking with the bucket fills exactly what clicking with the wand
+   * would have selected, which is the behaviour users rely on.
+   */
+  bucketAt(x: number, y: number, color: [number, number, number], mode: PaintMode, opacity: number): void {
+    const composite = this.documentPixels();
+    if (!composite) return;
+    const p = docPointAtScreen(this.view, x, y);
+    const mask = magicWand(composite.pixels, { width: composite.width, height: composite.height }, Math.floor(p.x), Math.floor(p.y), {
+      tolerance: this.selectOptions.tolerance,
+      contiguous: this.selectOptions.contiguous,
+      antialias: this.selectOptions.antialias,
+    });
+    this.commit(
+      FillCmd.bucketFill(this.doc, mask, {
+        color,
+        mode: mode === 'behind' || mode === 'clear' ? 'normal' : mode,
+        opacity,
+        preserveTransparency: false,
+      }),
+      'Paint Bucket',
+    );
+  }
+
+  /** Gradient tool. The drag is in screen space; the gradient is drawn in document space. */
+  drawGradient(opts: {
+    gradient: Gradient;
+    style: GradientStyle;
+    from: { x: number; y: number };
+    to: { x: number; y: number };
+    reverse: boolean;
+    dither: boolean;
+    mode: PaintMode;
+    opacity: number;
+  }): void {
+    const a = docPointAtScreen(this.view, opts.from.x, opts.from.y);
+    const b = docPointAtScreen(this.view, opts.to.x, opts.to.y);
+    this.commit(
+      FillCmd.drawGradient(this.doc, {
+        gradient: opts.gradient,
+        style: opts.style,
+        x0: a.x,
+        y0: a.y,
+        x1: b.x,
+        y1: b.y,
+        reverse: opts.reverse,
+        dither: opts.dither,
+        mode: opts.mode === 'behind' || opts.mode === 'clear' ? 'normal' : opts.mode,
+        opacity: opts.opacity,
+        preserveTransparency: false,
+      }),
+      'Gradient',
+    );
   }
 
   // ---- clipboard ------------------------------------------------------------------------

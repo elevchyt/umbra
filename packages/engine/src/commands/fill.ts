@@ -11,6 +11,12 @@ import { rectIntersect, rectIsEmpty, type Rect } from '@umbra/core/geom';
 import { compositePixel } from '@umbra/kernels/blend';
 import type { BlendMode } from '@umbra/core/blend';
 import { contract, expand, maskBounds, type Mask } from '@umbra/kernels/selection';
+import {
+  gradientRamp,
+  gradientT,
+  type Gradient,
+  type GradientStyle,
+} from '@umbra/kernels/gradient';
 import { Plane } from '../tiles/plane.js';
 import { MipPlane } from '../tiles/mip.js';
 import type { Doc, Layer, PixelLayer } from '../document.js';
@@ -184,6 +190,112 @@ export function stroke(doc: Doc, opts: StrokeOptions): Doc {
   const preserve = opts.preserveTransparency || layer.locks.transparency;
   return withPlane(doc, layer, paintThrough(doc, layer, band, { ...opts, preserveTransparency: preserve }));
 }
+
+/**
+ * Paint Bucket and Gradient write through a coverage mask exactly as Fill does, so they reuse
+ * `paintThrough` and differ only in what produces the mask and the colour.
+ */
+export function bucketFill(
+  doc: Doc,
+  mask: Mask,
+  opts: FillOptions,
+): Doc {
+  const layer = targetLayer(doc);
+  if (!layer || layer.locks.pixels || layer.locks.all) return doc;
+  // Confine the flood to the selection, which is what makes "bucket inside a selection" work.
+  const combined = doc.selection ? intersect(mask, doc.selection.mask) : mask;
+  const preserve = opts.preserveTransparency || layer.locks.transparency;
+  return withPlane(doc, layer, paintThrough(doc, layer, combined, { ...opts, preserveTransparency: preserve }));
+}
+
+function intersect(a: Mask, b: Mask): Mask {
+  const out = new Uint8Array(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = Math.round((a[i]! * b[i]!) / 255);
+  return out;
+}
+
+export interface GradientOptions {
+  gradient: Gradient;
+  style: GradientStyle;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  reverse: boolean;
+  dither: boolean;
+  mode: BlendMode;
+  opacity: number;
+  preserveTransparency: boolean;
+}
+
+/**
+ * Draw a gradient across the layer, through the selection.
+ *
+ * Dithering is a small ordered perturbation of the ramp position, not of the output colour:
+ * banding in a gradient comes from quantising `t`, so that is where it has to be broken up.
+ */
+export function drawGradient(doc: Doc, opts: GradientOptions): Doc {
+  const layer = targetLayer(doc);
+  if (!layer || layer.locks.pixels || layer.locks.all) return doc;
+  const plane = layer.plane.base;
+  const n = channelCount(plane.format.layout);
+  if (n !== 4) return doc;
+
+  const ramp = gradientRamp(opts.gradient, 1024);
+  const steps = 1024;
+  const writer = plane.writer();
+  const sel = doc.selection;
+  const preserve = opts.preserveTransparency || layer.locks.transparency;
+  const backdrop: [number, number, number] = [0, 0, 0];
+  const source: [number, number, number] = [0, 0, 0];
+
+  for (let ty = 0; ty <= (doc.height - 1) >> TILE_SHIFT; ty++) {
+    for (let tx = 0; tx <= (doc.width - 1) >> TILE_SHIFT; tx++) {
+      const originX = tx << TILE_SHIFT;
+      const originY = ty << TILE_SHIFT;
+      const px1 = Math.min(doc.width, originX + TILE_SIZE);
+      const py1 = Math.min(doc.height, originY + TILE_SIZE);
+      let data: ReturnType<typeof writer.mutable> | null = null;
+
+      for (let y = originY; y < py1; y++) {
+        for (let x = originX; x < px1; x++) {
+          let coverage = opts.opacity;
+          if (sel) coverage *= sel.mask[y * doc.width + x]! / 255;
+          if (coverage <= 0) continue;
+
+          let t = gradientT(opts.style, opts.x0, opts.y0, opts.x1, opts.y1, x + 0.5, y + 0.5);
+          if (opts.reverse) t = 1 - t;
+          if (opts.dither) t += (BAYER[(y & 3) * 4 + (x & 3)]! / 16 - 0.5) / steps;
+          const i = Math.min(steps - 1, Math.max(0, Math.round(t * (steps - 1)))) * 4;
+
+          const sa = (ramp[i + 3]! / 255) * coverage;
+          if (sa <= 0) continue;
+
+          data ??= writer.mutable(tx, ty);
+          const o = ((y - originY) * TILE_SIZE + (x - originX)) * 4;
+          const da = data[o + 3]! / 255;
+          if (preserve && da <= 0) continue;
+
+          source[0] = ramp[i]! / 255;
+          source[1] = ramp[i + 1]! / 255;
+          source[2] = ramp[i + 2]! / 255;
+          backdrop[0] = data[o]! / 255;
+          backdrop[1] = data[o + 1]! / 255;
+          backdrop[2] = data[o + 2]! / 255;
+          const out = compositePixel(opts.mode, backdrop, da, source, sa);
+          data[o] = Math.round(out.color[0]! * 255);
+          data[o + 1] = Math.round(out.color[1]! * 255);
+          data[o + 2] = Math.round(out.color[2]! * 255);
+          data[o + 3] = preserve ? data[o + 3]! : Math.round(out.alpha * 255);
+        }
+      }
+    }
+  }
+  return withPlane(doc, layer, writer.commit());
+}
+
+/** 4×4 ordered dither, the classic Bayer matrix. */
+const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 /**
  * Paint modes a brush has but a layer does not. They act on alpha rather than on colour, so

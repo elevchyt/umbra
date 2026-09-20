@@ -4,6 +4,7 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT } from '@umbra/engine';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -156,6 +157,7 @@ export function Workspace() {
     client.selectTool = SELECT_TOOLS.has(tool) ? tool : null;
     client.sampleSize = tool === 'eyedropper' ? size : null;
     client.moveTool = tool === 'move';
+    client.fillTool = tool === 'paintBucket' ? 'bucket' : tool === 'gradient' ? 'gradient' : null;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -203,7 +205,39 @@ export function Workspace() {
       pressureOpacity: b.pressureOpacity,
     };
     const mode = b.mode;
+    const g = store.gradientOptions;
+    const gradientArgs = {
+      style: g.style,
+      preset: g.preset,
+      mode: g.mode,
+      opacity: g.opacity,
+      reverse: g.reverse,
+      dither: g.dither,
+    };
     if (!client) return;
+    // The fill tools send their options with the click, so the worker never has to be told
+    // about them up front and the options bar is always authoritative.
+    client.fillRequest = () => {
+      const fg: [number, number, number] = [c.r, c.g, c.b];
+      const bgc = store.background();
+      const bg: [number, number, number] = [bgc.r, bgc.g, bgc.b];
+      if (store.activeTool() === 'paintBucket') {
+        return { color: fg, mode: mode === 'behind' || mode === 'clear' ? 'normal' : mode, opacity: b.opacity };
+      }
+      return {
+        gradient:
+          gradientArgs.preset === 'fgToTransparent'
+            ? FOREGROUND_TO_TRANSPARENT(fg)
+            : gradientArgs.preset === 'blackToWhite'
+              ? FOREGROUND_TO_BACKGROUND([0, 0, 0], [1, 1, 1])
+              : FOREGROUND_TO_BACKGROUND(fg, bg),
+        style: gradientArgs.style,
+        reverse: gradientArgs.reverse,
+        dither: gradientArgs.dither,
+        mode: gradientArgs.mode,
+        opacity: gradientArgs.opacity,
+      };
+    };
     // The Pencil is the brush with a hard tip; that is all that distinguishes them.
     client.brush = tool === 'pencil' ? { ...params, hardness: 1 } : params;
     client.brushColor = [c.r, c.g, c.b];
