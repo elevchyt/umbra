@@ -61,10 +61,10 @@ export class MipPlane {
 }
 
 /**
- * Results are memoised on the identity of the four source tiles. Downsampling is a pure
- * function of them, and documents repeat tile combinations constantly (flat colour, shared
- * layers, empty regions), so this keeps the pyramid's memory close to the number of DISTINCT
- * 2x2 neighbourhoods rather than the number of tile positions.
+ * Results are memoised on the identity AND revision of the four source tiles. Downsampling is
+ * a pure function of their pixels, and documents repeat tile combinations constantly (flat
+ * colour, shared layers, empty regions), so this keeps the pyramid's memory close to the
+ * number of DISTINCT 2x2 neighbourhoods rather than the number of tile positions.
  */
 const mipCache = new Map<string, Tile>();
 const MIP_CACHE_LIMIT = 4096;
@@ -97,7 +97,9 @@ export function downsample(src: Plane): Plane {
       continue;
     }
 
-    const cacheKey = `${quads[0]!.id},${quads[1]!.id},${quads[2]!.id},${quads[3]!.id}`;
+    // `rev` is part of the key: a tile being painted keeps its identity while its pixels
+    // change, so identity alone would serve a stale downsample of the pre-stroke tile.
+    const cacheKey = quads.map((q) => `${q!.id}.${q!.rev}`).join(',');
     const hit = mipCache.get(cacheKey);
     if (hit) {
       out.put(dtx, dty, hit);

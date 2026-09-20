@@ -25,6 +25,8 @@ export interface DocSummary {
   /** Flattened for display: top-most first, groups above their children. */
   layers: LayerSummary[];
   activeLayerIds: number[];
+  hasSelection: boolean;
+  selectionBounds: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Features in the opened file that we do not model yet (spec 07 §1.3). */
   warnings?: { layer: string; features: string[] }[];
 }
@@ -77,6 +79,14 @@ export type ToEngine =
   | { t: 'layerCommand'; command: string; id?: number; ids?: number[]; delta?: number }
   | { t: 'imageCommand'; command: string; width?: number; height?: number; anchor?: string; method?: string; angle?: number; horizontal?: boolean }
   | { t: 'savePsd'; name: string }
+  | { t: 'beginSelect'; tool: string; x: number; y: number; op: string }
+  | { t: 'updateSelect'; x: number; y: number }
+  | { t: 'addSelectPoint'; x: number; y: number }
+  | { t: 'endSelect'; x?: number; y?: number }
+  | { t: 'cancelSelect' }
+  | { t: 'magicWand'; x: number; y: number; op: string }
+  | { t: 'selectCommand'; command: string; amount?: number }
+  | { t: 'setSelectOptions'; feather?: number; antialias?: boolean; tolerance?: number; contiguous?: boolean }
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'synthetic'; layers: number; width: number; height: number }

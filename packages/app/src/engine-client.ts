@@ -119,8 +119,39 @@ export class EngineClient {
 
   /** Set by the UI when a paint tool is active; otherwise drags pan the view. */
   paintMode = false;
+  /** Active selection tool id, or null when the pointer is not making a selection. */
+  selectTool: string | null = null;
+  /** Combine mode chosen in the options bar; modifier keys override it for one gesture. */
+  selectOp = 'new';
+  private selecting = false;
+  /**
+   * A polygonal lasso is click-to-click, not press-drag: the gesture outlives the button, so
+   * it is tracked separately and only ends on a double-click, Enter, or a click on the start.
+   */
+  private polygon = false;
+
+  /** True while a marquee/lasso gesture is in flight, so Escape can cancel it. */
+  get isSelecting(): boolean {
+    return this.selecting || this.polygon;
+  }
   private panning = false;
   private lastPan = { x: 0, y: 0 };
+
+  /** Commit the in-flight gesture (double-click or Enter on a polygonal lasso). */
+  finishSelect(x?: number, y?: number): void {
+    if (!this.selecting && !this.polygon) return;
+    this.send({ t: 'endSelect', x, y });
+    this.selecting = false;
+    this.polygon = false;
+  }
+
+  /** Discard the in-flight gesture, restoring the selection that preceded it. */
+  cancelSelect(): void {
+    if (!this.selecting && !this.polygon) return;
+    this.send({ t: 'cancelSelect' });
+    this.selecting = false;
+    this.polygon = false;
+  }
 
   private attachPointer(canvas: HTMLCanvasElement): void {
     const toLocal = (e: PointerEvent) => {
@@ -143,8 +174,40 @@ export class EngineClient {
       });
     };
 
+    /**
+     * Shift adds, Alt subtracts, both intersect — the same everywhere in Photoshop. With no
+     * modifier held the options bar's mode applies.
+     */
+    const opFor = (e: PointerEvent): string =>
+      e.shiftKey && e.altKey
+        ? 'intersect'
+        : e.shiftKey
+          ? 'add'
+          : e.altKey
+            ? 'subtract'
+            : this.selectOp;
+
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      if (this.selectTool && e.button === 0) {
+        const p = toLocal(e);
+        if (this.selectTool === 'magicWand') {
+          this.send({ t: 'magicWand', x: p.x, y: p.y, op: opFor(e) });
+        } else if (this.selectTool === 'lassoPolygon') {
+          if (!this.polygon) {
+            this.polygon = true;
+            this.send({ t: 'beginSelect', tool: this.selectTool, x: p.x, y: p.y, op: opFor(e) });
+          } else {
+            this.send({ t: 'addSelectPoint', x: p.x, y: p.y });
+          }
+          // A double-click closes the polygon, as it does in Photoshop.
+          if (e.detail >= 2) this.finishSelect(p.x, p.y);
+        } else {
+          this.selecting = true;
+          this.send({ t: 'beginSelect', tool: this.selectTool, x: p.x, y: p.y, op: opFor(e) });
+        }
+        return;
+      }
       if (this.paintMode && e.button === 0) {
         this.send({ t: 'strokeBegin', size: this.brushSize, hardness: this.brushHardness, color: this.brushColor });
         write(e, FLAG_DOWN);
@@ -158,7 +221,11 @@ export class EngineClient {
     // pointerrawupdate delivers samples at full tablet rate, ahead of pointermove.
     const moveEvent = 'onpointerrawupdate' in canvas ? 'pointerrawupdate' : 'pointermove';
     canvas.addEventListener(moveEvent, ((e: PointerEvent) => {
-      if (this.paintMode && e.buttons & 1) {
+      if (this.selecting || this.polygon) {
+        // For a polygon this only previews the segment that follows the cursor.
+        const p = toLocal(e);
+        this.send({ t: 'updateSelect', x: p.x, y: p.y });
+      } else if (this.paintMode && e.buttons & 1) {
         // Every coalesced sample matters for stroke fidelity, not just the latest one.
         const batch = e.getCoalescedEvents?.() ?? [];
         if (batch.length > 1) for (const c of batch) write(c, 0, true);
@@ -175,6 +242,12 @@ export class EngineClient {
       // race the ring: messages are delivered immediately, but ring samples are only drained on
       // the next tick, so the stroke would end before its own samples had been consumed and the
       // tail of the stroke would be silently dropped.
+      if (this.selecting) {
+        const p = toLocal(e);
+        this.send({ t: 'endSelect', x: p.x, y: p.y });
+        this.selecting = false;
+      }
+      // A polygon gesture deliberately survives the button release.
       if (this.paintMode && this.ready) write(e, FLAG_UP);
       this.panning = false;
       if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);

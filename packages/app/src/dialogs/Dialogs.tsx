@@ -553,3 +553,32 @@ export function CanvasSizeDialog(props: {
     </Dialog>
   );
 }
+
+/** One-field dialog shared by Select ▸ Modify and similar simple commands. */
+export function AmountDialog(props: {
+  title: string;
+  label: string;
+  initial: number;
+  unit?: string;
+  min?: number;
+  max?: number;
+  onApply: (value: number) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = createSignal(props.initial);
+  return (
+    <Dialog title={props.title} width={280} onOk={() => props.onApply(value())} onCancel={props.onCancel}>
+      <div class="sizedlg">
+        <NumberField
+          label={props.label}
+          value={value()}
+          onChange={setValue}
+          min={props.min ?? 0}
+          max={props.max ?? 1000}
+          suffix={props.unit ?? 'px'}
+          width={70}
+        />
+      </div>
+    </Dialog>
+  );
+}

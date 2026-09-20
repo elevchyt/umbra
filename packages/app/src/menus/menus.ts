@@ -557,10 +557,10 @@ export const MENUS: MenuDef[] = [
   {
     label: 'Select',
     items: [
-      { label: 'All', cmd: 'select.all', shortcut: 'Ctrl+A' },
-      { label: 'Deselect', cmd: 'select.deselect', shortcut: 'Ctrl+D' },
+      { label: 'All', cmd: 'select.all', shortcut: 'Ctrl+A', done: true },
+      { label: 'Deselect', cmd: 'select.deselect', shortcut: 'Ctrl+D', done: true },
       { label: 'Reselect', cmd: 'select.reselect', shortcut: 'Ctrl+Shift+D' },
-      { label: 'Inverse', cmd: 'select.inverse', shortcut: 'Ctrl+Shift+I' },
+      { label: 'Inverse', cmd: 'select.inverse', shortcut: 'Ctrl+Shift+I', done: true },
       sep,
       { label: 'All Layers', cmd: 'select.allLayers', shortcut: 'Ctrl+Alt+A' },
       { label: 'Deselect Layers', cmd: 'select.deselectLayers' },
@@ -577,11 +577,11 @@ export const MENUS: MenuDef[] = [
       {
         label: 'Modify',
         items: [
-          { label: 'Border…', cmd: 'modify.border' },
-          { label: 'Smooth…', cmd: 'modify.smooth' },
-          { label: 'Expand…', cmd: 'modify.expand' },
-          { label: 'Contract…', cmd: 'modify.contract' },
-          { label: 'Feather…', cmd: 'modify.feather', shortcut: 'Shift+F6' },
+          { label: 'Border…', cmd: 'modify.border', done: true },
+          { label: 'Smooth…', cmd: 'modify.smooth', done: true },
+          { label: 'Expand…', cmd: 'modify.expand', done: true },
+          { label: 'Contract…', cmd: 'modify.contract', done: true },
+          { label: 'Feather…', cmd: 'modify.feather', shortcut: 'Shift+F6', done: true },
         ],
       },
       sep,

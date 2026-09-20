@@ -30,6 +30,10 @@ uniform vec2 u_centre;     // tile-local px
 uniform float u_radius;
 uniform float u_hardness;
 uniform vec4 u_color;      // straight alpha
+uniform sampler2D u_selection;
+uniform float u_useSelection;
+uniform vec2 u_selectionSize;
+uniform vec2 u_tileOrigin;  // document coords of this tile's top-left
 out vec4 fragColor;
 void main() {
   float d = distance(v_local, u_centre);
@@ -37,9 +41,21 @@ void main() {
   float inner = u_radius * u_hardness;
   float a = 1.0 - smoothstep(inner, max(u_radius, inner + 0.5), d);
   a *= u_color.a;
+  // A stroke is confined to the selection, with partial coverage where the selection is
+  // feathered or anti-aliased. This is the whole reason selections are masks, not shapes.
+  if (u_useSelection > 0.5) {
+    vec2 docPos = u_tileOrigin + v_local;
+    a *= texture(u_selection, docPos / u_selectionSize).r;
+  }
   if (a <= 0.0) discard;
   fragColor = vec4(u_color.rgb * a, a);   // premultiplied
 }`;
+
+export interface SelectionTexture {
+  tex: WebGLTexture;
+  width: number;
+  height: number;
+}
 
 export interface DabParams {
   /** Document-space centre. */
@@ -73,7 +89,12 @@ export class DabPainter {
   }
 
   /** Paint one dab into every tile it touches. Returns the tiles it modified. */
-  paint(atlas: TileAtlas, tileFor: (tx: number, ty: number) => Tile, p: DabParams): Tile[] {
+  paint(
+    atlas: TileAtlas,
+    tileFor: (tx: number, ty: number) => Tile,
+    p: DabParams,
+    selection?: SelectionTexture | null,
+  ): Tile[] {
     const gl = this.gl;
     const touched: Tile[] = [];
     const r = p.radius + 1;
@@ -88,6 +109,14 @@ export class DabPainter {
     gl.enable(gl.BLEND);
     // Source is already premultiplied; classic "over".
     gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+    this.program.u1f('u_useSelection', selection ? 1 : 0);
+    if (selection) {
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, selection.tex);
+      this.program.u1i('u_selection', 1);
+      this.program.u2f('u_selectionSize', selection.width, selection.height);
+    }
 
     for (let ty = ty0; ty <= ty1; ty++) {
       for (let tx = tx0; tx <= tx1; tx++) {
@@ -107,6 +136,7 @@ export class DabPainter {
           Math.min(TILE_SIZE, ly + r),
         );
         this.program.u2f('u_centre', lx, ly);
+        this.program.u2f('u_tileOrigin', tx << TILE_SHIFT, ty << TILE_SHIFT);
         this.program.u1f('u_radius', p.radius);
         this.program.u1f('u_hardness', p.hardness);
         this.program.u4f('u_color', p.color[0], p.color[1], p.color[2], p.color[3]);

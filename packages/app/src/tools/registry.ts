@@ -38,18 +38,18 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'marquee',
     key: 'm',
     tools: [
-      { id: 'marqueeRect', name: 'Rectangular Marquee Tool', icon: 'marqueeRect', key: 'm', hint: 'Drag to select. Shift constrains to a square.' },
-      { id: 'marqueeEllipse', name: 'Elliptical Marquee Tool', icon: 'marqueeEllipse', key: 'm' },
-      { id: 'marqueeRow', name: 'Single Row Marquee Tool', icon: 'marqueeRow' },
-      { id: 'marqueeColumn', name: 'Single Column Marquee Tool', icon: 'marqueeColumn' },
+      { id: 'marqueeRect', name: 'Rectangular Marquee Tool', icon: 'marqueeRect', key: 'm', implemented: true, hint: 'Drag to select. Shift constrains to a square.' },
+      { id: 'marqueeEllipse', name: 'Elliptical Marquee Tool', icon: 'marqueeEllipse', key: 'm', implemented: true },
+      { id: 'marqueeRow', name: 'Single Row Marquee Tool', icon: 'marqueeRow', implemented: true },
+      { id: 'marqueeColumn', name: 'Single Column Marquee Tool', icon: 'marqueeColumn', implemented: true },
     ],
   },
   {
     id: 'lasso',
     key: 'l',
     tools: [
-      { id: 'lasso', name: 'Lasso Tool', icon: 'lasso', key: 'l' },
-      { id: 'lassoPolygon', name: 'Polygonal Lasso Tool', icon: 'lassoPolygon', key: 'l' },
+      { id: 'lasso', name: 'Lasso Tool', icon: 'lasso', key: 'l', implemented: true },
+      { id: 'lassoPolygon', name: 'Polygonal Lasso Tool', icon: 'lassoPolygon', key: 'l', implemented: true },
       { id: 'lassoMagnetic', name: 'Magnetic Lasso Tool', icon: 'lassoMagnetic', key: 'l' },
       { id: 'selectionBrush', name: 'Selection Brush Tool', icon: 'selectionBrush', key: 'l' },
     ],
@@ -60,7 +60,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     tools: [
       { id: 'objectSelect', name: 'Object Selection Tool', icon: 'objectSelect', key: 'w' },
       { id: 'quickSelect', name: 'Quick Selection Tool', icon: 'quickSelect', key: 'w' },
-      { id: 'magicWand', name: 'Magic Wand Tool', icon: 'magicWand', key: 'w' },
+      { id: 'magicWand', name: 'Magic Wand Tool', icon: 'magicWand', key: 'w', implemented: true },
     ],
   },
   {
@@ -225,6 +225,17 @@ export function groupOf(toolId: string): ToolGroup | undefined {
 export function cycleForKey(key: string): ToolDef[] {
   return ALL_TOOLS.filter((t) => t.key === key);
 }
+
+/** Tools whose drag builds a selection rather than painting. */
+export const SELECT_TOOLS = new Set([
+  'marqueeRect',
+  'marqueeEllipse',
+  'marqueeRow',
+  'marqueeColumn',
+  'lasso',
+  'lassoPolygon',
+  'magicWand',
+]);
 
 /** Paint-like tools use the brush cursor and brush options. */
 export const PAINT_TOOLS = new Set([

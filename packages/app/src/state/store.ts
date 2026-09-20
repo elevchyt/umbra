@@ -52,6 +52,19 @@ function setActiveTool(id: string): void {
 
 const activeGroup = createMemo(() => groupOf(activeTool())?.id ?? '');
 
+/**
+ * Selection tool options, shared by every marquee/lasso/wand — Photoshop keeps one set of
+ * these per tool family rather than per tool, and the modifier keys temporarily override `op`.
+ */
+const [selectOptions, setSelectOptions] = createStore({
+  op: 'new' as 'new' | 'add' | 'subtract' | 'intersect',
+  feather: 0,
+  antialias: true,
+  tolerance: 32,
+  contiguous: true,
+  sampleAllLayers: false,
+});
+
 // ---- colours ------------------------------------------------------------------------
 
 const [foreground, setForeground] = createSignal<RGB>(BLACK);
@@ -190,6 +203,8 @@ export const store = {
   setActiveTool,
   activeGroup,
   groupDefaults,
+  selectOptions,
+  setSelectOptions,
 
   foreground,
   setForeground,

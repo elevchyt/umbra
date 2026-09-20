@@ -159,6 +159,59 @@ later), Fill… / Stroke… dialogs, clipboard (copy, copy merged, paste, paste 
 into), History panel complete (snapshots, non-linear option), crash-recovery journal.
 **Exit:** dogfood-able for basic photo compositing & painting; latency budgets green.
 
+**Progress (selections done, painting in progress).** The selection stack is complete end to
+end: kernel (`@umbra/kernels/selection` — rect/ellipse/polygon/line rasterising with
+anti-aliased coverage, combine ops, exact Felzenszwalb distance transform behind
+Expand/Contract/Border, three-box-pass Feather, majority-vote Smooth, scanline flood fill
+behind the Magic Wand, boundary tracing), engine state (selection lives on `Doc`, so undo
+restores it with the pixels), the marching-ants pass, GPU stroke clipping in the dab shader,
+and the UI (tool registry, options bar with the four combine modes and the wand's
+tolerance/contiguous, Select ▸ All/Deselect/Inverse and all five Modify dialogs). Verified in
+the browser: a marquee drag draws ants, Expand 200 px rounds the corners as a true Euclidean
+distance should, a brush stroke crossing the selection edge is clipped exactly at it, and the
+wand selects a contiguous band from a composited gradient.
+
+Findings.
+
+1. **`PlaneWriter.mutable()` was not actually copy-on-write.** `Tile.expand()` returns the
+   tile's OWN buffer for a full (non-uniform) tile — only the uniform case allocates — and
+   `mutable()` wrapped that buffer in a new `Tile` without copying. The new tile therefore
+   shared pixels with the source, so painting one cell wrote through to every other cell,
+   plane and layer holding that same `Tile` object. Found by painting one stroke on the
+   synthetic benchmark document and getting two: the fixture repeats one tile along diagonals,
+   so the stroke also appeared at the cells sharing the painted tiles' buffers, offset by
+   exactly (+3, −1) tiles. This would equally have corrupted duplicated layers (advertised as
+   free precisely because they share tiles), PSDs with repeated tiles, and anything the mip
+   cache shares. Fixed with `Tile.expandCopy()`; two regression tests in `plane.test.ts` cover
+   the aliased-cell and two-writers cases, and both fail against the old code.
+
+   The lesson worth keeping: "immutable value that shares structure" is only true while every
+   write goes through a real copy. A single accessor that returns the live buffer for
+   performance silently converts the whole design into aliased mutable state.
+
+2. **The mip cache memoised on tile identity while the brush mutates tiles in place.** A live
+   stroke deliberately keeps ONE `Tile` object so its GPU atlas slice stays put, so identity
+   alone is not a content key. `Tile` now carries a `rev` counter bumped by `mutable()` and by
+   the stroke-end readback, and the cache keys on `id.rev`.
+
+3. **Atlas growth reset residency mid-batch.** The tile drawer collects slot indices into an
+   instance buffer and issues one instanced draw at the end; `grow()` reallocated the array
+   texture and cleared `slots`, so every index already written into that buffer pointed at a
+   cell some later tile was about to be uploaded into. Growth now blits the old pages into the
+   larger texture and keeps slot numbers (slot → page/x/y is a pure function and growth only
+   appends pages). The blit rather than a CPU re-upload is deliberate: mid-stroke, the newest
+   dabs exist only in the atlas.
+
+4. **Solid's `<Show>` accessor is invalid once the condition clears.** The Modify dialogs read
+   `p().apply(v)` after `setAmountPrompt(null)` and threw, so OK silently did nothing while
+   the dialog closed. The callback is now captured before the signal is cleared. Worth
+   remembering as a shape, not a one-off: in any `Show` callback, read what you need up front.
+
+Still to do in M3: Quick Mask, Transform Selection, Save/Load Selection + Channels panel,
+Grow/Similar, brush engine v1, Pencil/Eraser/Bucket/Gradient/Eyedropper, Fill…/Stroke…,
+clipboard, Crop, History panel completeness, crash-recovery journal, and the Move tool and
+Free Transform deferred out of M2.
+
 ### M4 — Adjustments (L)
 All adjustments in [05 §A](05-adjustments-filters.md) as destructive commands **and**
 adjustment layers; Properties panel UIs (Curves editor with point/pencil modes, on-image

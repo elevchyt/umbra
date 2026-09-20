@@ -34,6 +34,24 @@ import {
   type PixelLayer,
 } from './document.js';
 import { History } from './history.js';
+import {
+  applyShape,
+  applyWand,
+  makeSelection,
+  selectAll,
+  selectionOutline,
+  selectionIsEmpty,
+  invertSelection,
+  featherSelection,
+  expandSelection,
+  contractSelection,
+  borderSelection,
+  smoothSelection,
+  type Selection,
+  type SelectShape,
+  type CombineOp,
+  type Point,
+} from './selection.js';
 import * as LayerCmd from './commands/layers.js';
 import * as ImageCmd from './commands/image.js';
 import { savePsd } from './psd-save.js';
@@ -55,6 +73,8 @@ export class Engine {
   /** Set when a stroke finished during the last frame, so the worker can push a doc update. */
   strokeEnded = false;
   warnings: { layer: string; features: string[] }[] = [];
+  /** View ▸ Show ▸ Selection Edges. */
+  showSelectionEdges = true;
 
   private readonly ring: PointerRing;
   private readonly samples: PointerSample[] = [];
@@ -76,6 +96,22 @@ export class Engine {
   private painting = false;
   private pendingLatencyFrom: number | null = null;
   private readonly syncPixel = new Uint8Array(4);
+
+  // Selection state.
+  private selectionTex: WebGLTexture | null = null;
+  private selectionTexFor: Selection | null = null;
+  private outlineFor: Selection | null = null;
+  /** In-flight selection gesture. */
+  private gesture: {
+    tool: string;
+    op: CombineOp;
+    start: Point;
+    points: Point[];
+    base: Selection | null;
+  } | null = null;
+  private selectOptions = { feather: 0, antialias: true, tolerance: 32, contiguous: true };
+  /** Cached 1:1 composite for the Magic Wand, invalidated whenever the document changes. */
+  private compositeCache: { pixels: Uint8Array; width: number; height: number; doc: Doc } | null = null;
 
   constructor(
     private readonly canvas: OffscreenCanvas,
@@ -144,6 +180,7 @@ export class Engine {
   private commit(doc: Doc, historyName: string): void {
     this.doc = doc;
     this.history.push(historyName, doc);
+    this.compositeCache = null;
   }
 
   openBitmap(bitmap: ImageBitmap, name: string): void {
@@ -340,6 +377,152 @@ export class Engine {
     return true;
   }
 
+  // ---- selection ----------------------------------------------------------------------
+
+  setSelectOptions(patch: Partial<{ feather: number; antialias: boolean; tolerance: number; contiguous: boolean }>): void {
+    this.selectOptions = { ...this.selectOptions, ...patch };
+  }
+
+  private setSelection(sel: Selection | null, name: string): void {
+    this.commit({ ...this.doc, selection: sel && !selectionIsEmpty(sel) ? sel : null }, name);
+  }
+
+  selectAllPixels(): void {
+    this.setSelection(selectAll(this.doc.width, this.doc.height), 'Select All');
+  }
+  deselect(): void {
+    if (!this.doc.selection) return;
+    this.setSelection(null, 'Deselect');
+  }
+  invertSelectionCmd(): void {
+    const sel = this.doc.selection ?? selectAll(this.doc.width, this.doc.height);
+    this.setSelection(invertSelection(sel), 'Inverse');
+  }
+  modifySelection(op: 'feather' | 'expand' | 'contract' | 'border' | 'smooth', amount: number): void {
+    const sel = this.doc.selection;
+    if (!sel) return;
+    const fn =
+      op === 'feather' ? featherSelection
+      : op === 'expand' ? expandSelection
+      : op === 'contract' ? contractSelection
+      : op === 'border' ? borderSelection
+      : smoothSelection;
+    this.setSelection(fn(sel, amount), op[0]!.toUpperCase() + op.slice(1));
+  }
+
+  /** Start a marquee/lasso gesture. */
+  beginSelect(tool: string, x: number, y: number, op: CombineOp): void {
+    const p = docPointAtScreen(this.view, x, y);
+    this.gesture = { tool, op, start: p, points: [p], base: this.doc.selection };
+    this.updateSelectPreview(p);
+  }
+
+  updateSelect(x: number, y: number): void {
+    if (!this.gesture) return;
+    const p = docPointAtScreen(this.view, x, y);
+    if (this.gesture.tool === 'lasso') this.gesture.points.push(p);
+    this.updateSelectPreview(p);
+  }
+
+  /** Polygonal lasso adds a vertex per click rather than following the pointer. */
+  addSelectPoint(x: number, y: number): void {
+    if (!this.gesture) return;
+    this.gesture.points.push(docPointAtScreen(this.view, x, y));
+  }
+
+  private shapeFor(g: NonNullable<Engine['gesture']>, current: Point): SelectShape | null {
+    switch (g.tool) {
+      case 'marqueeRect':
+        return { kind: 'rect', x0: g.start.x, y0: g.start.y, x1: current.x, y1: current.y };
+      case 'marqueeEllipse':
+        return { kind: 'ellipse', x0: g.start.x, y0: g.start.y, x1: current.x, y1: current.y };
+      case 'marqueeRow':
+        return { kind: 'row', index: Math.floor(current.y) };
+      case 'marqueeColumn':
+        return { kind: 'column', index: Math.floor(current.x) };
+      case 'lasso':
+      case 'lassoPolygon':
+        return g.points.length >= 3 ? { kind: 'polygon', points: g.points } : null;
+      default:
+        return null;
+    }
+  }
+
+  /** Live preview: the selection updates as the pointer moves, without touching history. */
+  private updateSelectPreview(current: Point): void {
+    const g = this.gesture;
+    if (!g) return;
+    const shape = this.shapeFor(g, current);
+    if (!shape) return;
+    const sel = applyShape(g.base, this.doc.width, this.doc.height, shape, {
+      op: g.op,
+      feather: this.selectOptions.feather,
+      antialias: this.selectOptions.antialias,
+    });
+    this.doc = { ...this.doc, selection: selectionIsEmpty(sel) ? null : sel };
+  }
+
+  endSelect(x?: number, y?: number): void {
+    const g = this.gesture;
+    if (!g) return;
+    if (x !== undefined && y !== undefined) this.updateSelectPreview(docPointAtScreen(this.view, x, y));
+    this.gesture = null;
+    // One history entry for the whole gesture, not one per pointer sample.
+    this.commit(this.doc, 'Selection');
+  }
+
+  cancelSelect(): void {
+    if (!this.gesture) return;
+    this.doc = { ...this.doc, selection: this.gesture.base };
+    this.gesture = null;
+  }
+
+  magicWandAt(x: number, y: number, op: CombineOp): void {
+    const p = docPointAtScreen(this.view, x, y);
+    const composite = this.documentPixels();
+    if (!composite) return;
+    const sel = applyWand(this.doc.selection, composite.pixels, composite.width, composite.height, {
+      x: p.x,
+      y: p.y,
+      tolerance: this.selectOptions.tolerance,
+      contiguous: this.selectOptions.contiguous,
+      antialias: this.selectOptions.antialias,
+      op,
+    });
+    this.setSelection(sel, 'Magic Wand');
+  }
+
+  /** Composited document pixels at 1:1, cached until the document changes. */
+  private documentPixels(): { pixels: Uint8Array; width: number; height: number } | null {
+    if (this.compositeCache && this.compositeCache.doc === this.doc) return this.compositeCache;
+    if (this.contextLost) return null;
+    const result = this.renderer.renderToBuffer(this.doc, this.caps.maxTextureSize);
+    this.compositeCache = { ...result, doc: this.doc };
+    return this.compositeCache;
+  }
+
+  /** Upload the selection as an R8 texture so the brush can clip to it on the GPU. */
+  private selectionTexture(): { tex: WebGLTexture; width: number; height: number } | null {
+    const sel = this.doc.selection;
+    if (!sel) return null;
+    const gl = this.gl;
+    if (this.selectionTexFor !== sel || !this.selectionTex) {
+      if (this.selectionTex) gl.deleteTexture(this.selectionTex);
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, sel.width, sel.height);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, sel.width, sel.height, gl.RED, gl.UNSIGNED_BYTE, sel.mask);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.selectionTex = tex;
+      this.selectionTexFor = sel;
+    }
+    return { tex: this.selectionTex, width: sel.width, height: sel.height };
+  }
+
   // ---- view -------------------------------------------------------------------------
 
   pan(dx: number, dy: number): void {
@@ -397,6 +580,8 @@ export class Engine {
     for (const tile of this.dabs.gpuDirty) {
       this.dabs.readbackTile(this.atlas, tile, scratch);
       unpremultiplyInto(scratch, tile.data as Uint8Array);
+      // The tile's pixels changed under a stable identity; invalidate anything keyed on it.
+      tile.touch();
       this.atlas.invalidate(tile);
     }
     this.dabs.gpuDirty.clear();
@@ -461,13 +646,18 @@ export class Engine {
   private stampDab(x: number, y: number, radius: number): void {
     const writer = this.strokeWriter;
     if (!writer) return;
-    this.dabs.paint(this.atlas, (tx, ty) => writer.mutableTile(tx, ty), {
-      x,
-      y,
-      radius,
-      hardness: this.strokeParams.hardness,
-      color: this.strokeParams.color,
-    });
+    this.dabs.paint(
+      this.atlas,
+      (tx, ty) => writer.mutableTile(tx, ty),
+      {
+        x,
+        y,
+        radius,
+        hardness: this.strokeParams.hardness,
+        color: this.strokeParams.color,
+      },
+      this.selectionTexture(),
+    );
   }
 
   // ---- frame ------------------------------------------------------------------------
@@ -484,8 +674,15 @@ export class Engine {
     if (this.contextLost) return this.stats(0);
 
     this.processInput();
+
+    // Re-trace the outline only when the selection itself changed.
+    if (this.outlineFor !== this.doc.selection) {
+      this.renderer.ants.setOutline(selectionOutline(this.doc.selection));
+      this.outlineFor = this.doc.selection;
+    }
+
     this.atlas.beginFrame();
-    const s = this.renderer.render(this.doc, this.view, docRect(this.doc));
+    const s = this.renderer.render(this.doc, this.view, docRect(this.doc), undefined, this.showSelectionEdges);
     this.lastPasses = s.layerPasses;
     this.lastInstances = s.tileInstances;
 
@@ -539,6 +736,8 @@ export class Engine {
       width: this.doc.width,
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
+      hasSelection: !!this.doc.selection,
+      selectionBounds: selectionBoundsOf(this.doc.selection),
       warnings: this.warnings.length ? this.warnings : undefined,
       layers: panelRows(this.doc.layers).map(({ layer, depth }) => ({
         id: layer.id,
@@ -572,6 +771,30 @@ export class Engine {
   resetFrameTimes(): void {
     this.frameTimes = [];
   }
+}
+
+function selectionBoundsOf(sel: Selection | null): { x0: number; y0: number; x1: number; y1: number } | null {
+  if (!sel) return null;
+  const b = maskBoundsOf(sel);
+  return b;
+}
+
+function maskBoundsOf(sel: Selection) {
+  let x0 = sel.width;
+  let y0 = sel.height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < sel.height; y++) {
+    const row = y * sel.width;
+    for (let x = 0; x < sel.width; x++) {
+      if (sel.mask[row + x] === 0) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+  }
+  return x1 < 0 ? null : { x0, y0, x1: x1 + 1, y1: y1 + 1 };
 }
 
 function unpremultiplyInto(src: Uint8Array, dst: Uint8Array): void {

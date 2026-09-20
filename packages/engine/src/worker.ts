@@ -124,6 +124,44 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
         break;
       }
+      case 'beginSelect':
+        engine?.beginSelect(msg.tool, msg.x, msg.y, msg.op as never);
+        break;
+      case 'updateSelect':
+        engine?.updateSelect(msg.x, msg.y);
+        break;
+      case 'addSelectPoint':
+        engine?.addSelectPoint(msg.x, msg.y);
+        break;
+      case 'endSelect':
+        engine?.endSelect(msg.x, msg.y);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'cancelSelect':
+        engine?.cancelSelect();
+        break;
+      case 'magicWand':
+        engine?.magicWandAt(msg.x, msg.y, msg.op as never);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setSelectOptions':
+        engine?.setSelectOptions(msg);
+        break;
+      case 'selectCommand': {
+        if (!engine) break;
+        switch (msg.command) {
+          case 'all': engine.selectAllPixels(); break;
+          case 'deselect': engine.deselect(); break;
+          case 'inverse': engine.invertSelectionCmd(); break;
+          case 'feather': engine.modifySelection('feather', msg.amount ?? 1); break;
+          case 'expand': engine.modifySelection('expand', msg.amount ?? 1); break;
+          case 'contract': engine.modifySelection('contract', msg.amount ?? 1); break;
+          case 'border': engine.modifySelection('border', msg.amount ?? 1); break;
+          case 'smooth': engine.modifySelection('smooth', msg.amount ?? 1); break;
+        }
+        post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
       case 'undo':
         if (engine?.undo()) post({ t: 'doc', doc: engine.summary() });
         break;

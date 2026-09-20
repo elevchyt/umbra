@@ -7,13 +7,13 @@ import { rgbToCss } from '@umbra/core/color';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
-import { TOOL_GROUPS, TOOL_BY_ID, ALL_TOOLS, PAINT_TOOLS, cycleForKey, groupOf } from '../tools/registry';
+import { TOOL_GROUPS, TOOL_BY_ID, ALL_TOOLS, PAINT_TOOLS, SELECT_TOOLS, cycleForKey, groupOf } from '../tools/registry';
 import { PANEL_META, PANEL_BY_COMMAND, renderPanel } from '../panels/panels';
 import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
 import { DocumentTabs, StatusBar } from './Chrome';
-import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog } from '../dialogs/Dialogs';
+import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
@@ -119,7 +119,24 @@ export function Workspace() {
 
   // Paint mode and brush settings follow the active tool and options bar.
   createEffect(() => {
-    if (client) client.paintMode = PAINT_TOOLS.has(store.activeTool());
+    const tool = store.activeTool();
+    if (!client) return;
+    client.paintMode = PAINT_TOOLS.has(tool);
+    client.selectTool = SELECT_TOOLS.has(tool) ? tool : null;
+  });
+
+  // Selection options live in the UI store; the engine needs them before the next gesture.
+  createEffect(() => {
+    const o = store.selectOptions;
+    if (!client) return;
+    client.selectOp = o.op;
+    send({
+      t: 'setSelectOptions',
+      feather: o.feather,
+      antialias: o.antialias,
+      tolerance: o.tolerance,
+      contiguous: o.contiguous,
+    });
   });
   createEffect(() => {
     if (!client) return;
@@ -274,6 +291,42 @@ export function Workspace() {
         store.openDialog('shortcuts');
         break;
 
+      // Select menu
+      case 'select.all':
+        send({ t: 'selectCommand', command: 'all' });
+        break;
+      case 'select.deselect':
+        send({ t: 'selectCommand', command: 'deselect' });
+        break;
+      case 'select.inverse':
+        send({ t: 'selectCommand', command: 'inverse' });
+        break;
+      case 'modify.feather':
+        promptAmount('Feather Selection', 'Feather Radius', 1, (v) =>
+          send({ t: 'selectCommand', command: 'feather', amount: v }),
+        );
+        break;
+      case 'modify.expand':
+        promptAmount('Expand Selection', 'Expand By', 1, (v) =>
+          send({ t: 'selectCommand', command: 'expand', amount: v }),
+        );
+        break;
+      case 'modify.contract':
+        promptAmount('Contract Selection', 'Contract By', 1, (v) =>
+          send({ t: 'selectCommand', command: 'contract', amount: v }),
+        );
+        break;
+      case 'modify.border':
+        promptAmount('Border Selection', 'Width', 4, (v) =>
+          send({ t: 'selectCommand', command: 'border', amount: v }),
+        );
+        break;
+      case 'modify.smooth':
+        promptAmount('Smooth Selection', 'Sample Radius', 2, (v) =>
+          send({ t: 'selectCommand', command: 'smooth', amount: v }),
+        );
+        break;
+
       // Layer menu
       case 'layer.new':
         send({ t: 'layerCommand', command: 'add' });
@@ -348,6 +401,18 @@ export function Workspace() {
     }
   }
 
+  const [amountPrompt, setAmountPrompt] = createSignal<{
+    title: string;
+    label: string;
+    value: number;
+    apply: (v: number) => void;
+  } | null>(null);
+
+  /** The small one-field dialogs the Select ▸ Modify commands share. */
+  function promptAmount(title: string, label: string, value: number, apply: (v: number) => void): void {
+    setAmountPrompt({ title, label, value, apply });
+  }
+
   /** Current document name with a .psd extension, for the Save dialog's default. */
   function psdName(): string {
     const name = store.doc()?.name ?? 'Untitled';
@@ -406,7 +471,16 @@ export function Workspace() {
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTextEntry(e.target)) return;
-      if (store.dialog()) return;
+      // Any modal swallows the shell's shortcuts, including the small Select ▸ Modify dialogs.
+      if (store.dialog() || amountPrompt()) return;
+      // Escape abandons an in-flight selection gesture; Enter commits one. Neither should
+      // swallow the key when no gesture is running.
+      if (client?.isSelecting && (e.key === 'Escape' || e.key === 'Enter')) {
+        e.preventDefault();
+        if (e.key === 'Escape') client.cancelSelect();
+        else client.finishSelect();
+        return;
+      }
 
       const chord = chordFromEvent(e);
 
@@ -671,6 +745,25 @@ export function Workspace() {
             else store.setBackground(c);
           }}
         />
+      </Show>
+      <Show when={amountPrompt()}>
+        {(p) => {
+          // Read `apply` up front: clearing the signal first unmounts this Show, and reading
+          // the accessor afterwards throws on a stale value.
+          const apply = p().apply;
+          return (
+            <AmountDialog
+              title={p().title}
+              label={p().label}
+              initial={p().value}
+              onCancel={() => setAmountPrompt(null)}
+              onApply={(v) => {
+                setAmountPrompt(null);
+                apply(v);
+              }}
+            />
+          );
+        }}
       </Show>
       <Show when={store.dialog()?.id === 'imageSize'}>
         <ImageSizeDialog

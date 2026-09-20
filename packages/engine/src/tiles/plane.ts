@@ -52,6 +52,13 @@ export const tileMemory = new MemoryAccountant();
  */
 export class Tile {
   readonly id = nextTileId++;
+  /**
+   * Bumped whenever this tile's pixels are written in place. A Tile is normally immutable,
+   * but a live brush stroke deliberately keeps ONE tile object and paints into it repeatedly
+   * (so the GPU atlas slice stays put). Anything that memoises on tile identity — the mip
+   * pyramid does — must therefore key on `id` AND `rev`, or it serves pre-stroke pixels.
+   */
+  rev = 0;
   constructor(
     readonly format: PlaneFormat,
     readonly data: TypedPixels,
@@ -70,7 +77,14 @@ export class Tile {
     return Tile.uniform(format, new Array(channelCount(format.layout)).fill(0));
   }
 
-  /** Materialise a full 256×256 buffer, expanding a uniform tile if needed. */
+  /**
+   * Materialise a full 256×256 buffer, expanding a uniform tile if needed.
+   *
+   * For a full tile this returns the LIVE buffer, not a copy — callers that intend to write
+   * must go through `expandCopy()` instead. A Tile is shared freely between cells, planes and
+   * layers (that is what makes duplicating a layer free), so writing through this buffer
+   * writes every one of those places at once.
+   */
   expand(): TypedPixels {
     if (!this.uniform) return this.data;
     const n = channelCount(this.format.layout);
@@ -84,6 +98,19 @@ export class Tile {
       filled += take;
     }
     return out;
+  }
+
+  /** Like `expand()`, but always returns a buffer the caller exclusively owns. */
+  expandCopy(): TypedPixels {
+    if (this.uniform) return this.expand();
+    const out = allocTile(this.format);
+    out.set(this.data as never);
+    return out;
+  }
+
+  /** Record that this tile's pixels have just been written in place. */
+  touch(): void {
+    this.rev++;
   }
 
   isTransparent(): boolean {
@@ -214,11 +241,16 @@ export class PlaneWriter {
     const key = tileKey(tx, ty);
     let tile = this.next.get(key);
     if (tile && this.owned.has(key) && !tile.uniform) {
+      // The caller is about to write these pixels, so anything memoised on this tile is stale.
+      tile.touch();
       this.markDirty(tx, ty);
       return tile.data;
     }
     const source = tile ?? this.base.defaultTile;
-    const data = source.expand();
+    // Copy-on-write, and it must be a real copy: `expand()` hands back the source's own
+    // buffer for a full tile, and that buffer may be shared with other cells and other
+    // layers, so writing through it would corrupt every one of them.
+    const data = source.expandCopy();
     tile = new Tile(this.base.format, data, false);
     this.next.set(key, tile);
     this.owned.add(key);

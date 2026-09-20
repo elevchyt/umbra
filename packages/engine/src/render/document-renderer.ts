@@ -12,6 +12,7 @@ import type { TileAtlas } from '../gpu/atlas.js';
 import type { GpuCaps } from '../gpu/caps.js';
 import { LayerCompositor, type GpuLayer, type RenderTarget } from './compositor.js';
 import { TileDrawer } from './tile-drawer.js';
+import { AntsRenderer } from './ants.js';
 import type { ViewState } from './view.js';
 import type { Doc, Layer } from '../document.js';
 
@@ -63,6 +64,7 @@ export interface DocumentFrameStats {
 export class DocumentRenderer {
   readonly compositor: LayerCompositor;
   readonly tiles: TileDrawer;
+  readonly ants: AntsRenderer;
   private present: Program;
   private quad: WebGLBuffer;
   private vao: WebGLVertexArrayObject;
@@ -75,6 +77,7 @@ export class DocumentRenderer {
   ) {
     this.compositor = new LayerCompositor(gl, caps);
     this.tiles = new TileDrawer(gl, atlas);
+    this.ants = new AntsRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
@@ -142,6 +145,7 @@ export class DocumentRenderer {
     view: ViewState,
     docRect: Rect,
     pasteboard: [number, number, number] = [0.157, 0.157, 0.157],
+    showAnts = true,
   ): DocumentFrameStats {
     const gl = this.gl;
     const dpr = view.devicePixelRatio;
@@ -175,13 +179,60 @@ export class DocumentRenderer {
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
 
+    // Selection outline sits on top of everything, in screen space.
+    if (showAnts) this.ants.draw(view, performance.now());
+
     this.compositor.releaseAll();
     return this.stats;
+  }
+
+  /**
+   * Composite the whole document at 1:1 and read it back as straight-alpha RGBA8.
+   *
+   * The Magic Wand needs the composited pixels, and reading them from the GPU is far cheaper
+   * than walking the layer tree per pixel on the CPU (a 4K document would be tens of millions
+   * of closure calls). Capped at the device's texture limit; larger documents need tiling,
+   * which is not implemented yet.
+   */
+  renderToBuffer(doc: Doc, maxSize: number): { pixels: Uint8Array; width: number; height: number } {
+    const gl = this.gl;
+    const width = Math.min(doc.width, maxSize);
+    const height = Math.min(doc.height, maxSize);
+    const view: ViewState = {
+      zoom: 1,
+      rotation: 0,
+      centre: { x: width / 2, y: height / 2 },
+      width,
+      height,
+      devicePixelRatio: 1,
+    };
+
+    this.compositor.resize(width, height);
+    const layers = doc.layers.map((l) => this.toGpuLayer(l, view, { x0: 0, y0: 0, x1: doc.width, y1: doc.height }));
+    const composite = this.compositor.compositeOnTransparent(layers);
+
+    const floats = new Float32Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, composite.fbo);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, floats);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.compositor.releaseAll();
+
+    // readPixels is bottom-up; flip into document order.
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      const src = (height - 1 - y) * width * 4;
+      const dst = y * width * 4;
+      for (let i = 0; i < width * 4; i++) {
+        pixels[dst + i] = Math.round(Math.min(1, Math.max(0, floats[src + i]!)) * 255);
+      }
+    }
+    return { pixels, width, height };
   }
 
   dispose(): void {
     this.compositor.dispose();
     this.tiles.dispose();
+    this.ants.dispose();
     this.present.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);

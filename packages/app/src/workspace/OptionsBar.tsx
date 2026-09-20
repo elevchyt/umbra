@@ -1,4 +1,4 @@
-import { Match, Show, Switch, createSignal } from 'solid-js';
+import { For, Match, Show, Switch, createSignal } from 'solid-js';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
@@ -27,14 +27,41 @@ export interface OptionsBarProps {
   setBrushFlow: (v: number) => void;
 }
 
+/** The four combine modes, shared by every selection tool. */
+function SelectionOps() {
+  const sel = store.selectOptions;
+  return (
+    <div class="segmented">
+      <For
+        each={
+          [
+            { op: 'new', icon: 'marqueeRect', title: 'New selection' },
+            { op: 'add', icon: 'plus', title: 'Add to selection (Shift)' },
+            { op: 'subtract', icon: 'minus', title: 'Subtract from selection (Alt)' },
+            { op: 'intersect', icon: 'grid', title: 'Intersect with selection (Shift+Alt)' },
+          ] as const
+        }
+      >
+        {(o) => (
+          <IconButton
+            icon={o.icon}
+            title={o.title}
+            active={sel.op === o.op}
+            onClick={() => store.setSelectOptions('op', o.op)}
+          />
+        )}
+      </For>
+    </div>
+  );
+}
+
 export function OptionsBar(props: OptionsBarProps) {
   const tool = () => TOOL_BY_ID.get(store.activeTool());
   const [mode, setMode] = createSignal<BlendMode>('normal');
   const [autoSelect, setAutoSelect] = createSignal(false);
   const [showTransform, setShowTransform] = createSignal(false);
   const [sampleSize, setSampleSize] = createSignal('point');
-  const [featherPx, setFeatherPx] = createSignal(0);
-  const [antiAlias, setAntiAlias] = createSignal(true);
+  const sel = store.selectOptions;
 
   const blendOptions = BLEND_MENU.filter((m) => m !== '-' && m !== 'passThrough').map((m) => ({
     value: m as BlendMode,
@@ -84,19 +111,61 @@ export function OptionsBar(props: OptionsBarProps) {
         </Match>
 
         <Match when={store.activeTool().startsWith('marquee') || store.activeTool().startsWith('lasso')}>
-          <div class="segmented">
-            <IconButton icon="marqueeRect" title="New selection" active />
-            <IconButton icon="plus" title="Add to selection" />
-            <IconButton icon="minus" title="Subtract from selection" />
-            <IconButton icon="grid" title="Intersect with selection" />
-          </div>
+          <SelectionOps />
           <Separator />
-          <NumberField label="Feather" value={featherPx()} onChange={setFeatherPx} min={0} max={1000} suffix="px" width={40} />
-          <Checkbox checked={antiAlias()} onChange={setAntiAlias} label="Anti-alias" />
+          <NumberField
+            label="Feather"
+            value={sel.feather}
+            onChange={(v) => store.setSelectOptions('feather', v)}
+            min={0}
+            max={1000}
+            suffix="px"
+            width={40}
+          />
+          <Checkbox
+            checked={sel.antialias}
+            onChange={(v) => store.setSelectOptions('antialias', v)}
+            label="Anti-alias"
+            disabled={store.activeTool() === 'marqueeRect'}
+          />
           <Separator />
           <button type="button" class="button" disabled>
             Select and Mask…
           </button>
+        </Match>
+
+        <Match when={store.activeTool() === 'magicWand'}>
+          <SelectionOps />
+          <Separator />
+          <Select
+            label="Sample Size"
+            value={sampleSize()}
+            options={[
+              { value: 'point', label: 'Point Sample' },
+              { value: '3', label: '3 by 3 Average' },
+              { value: '5', label: '5 by 5 Average' },
+            ]}
+            onChange={setSampleSize}
+            width={132}
+          />
+          <NumberField
+            label="Tolerance"
+            value={sel.tolerance}
+            onChange={(v) => store.setSelectOptions('tolerance', v)}
+            min={0}
+            max={255}
+            width={40}
+          />
+          <Checkbox
+            checked={sel.antialias}
+            onChange={(v) => store.setSelectOptions('antialias', v)}
+            label="Anti-alias"
+          />
+          <Checkbox
+            checked={sel.contiguous}
+            onChange={(v) => store.setSelectOptions('contiguous', v)}
+            label="Contiguous"
+          />
         </Match>
 
         <Match when={store.activeTool() === 'eyedropper'}>

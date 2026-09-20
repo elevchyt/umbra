@@ -36,6 +36,8 @@ export interface AtlasStats {
   evictions: number;
   /** Evictions of tiles still needed later in the same frame — the thrash signal. */
   thrash: number;
+  /** Times the page array has been doubled. */
+  grows: number;
   bytes: number;
 }
 
@@ -54,6 +56,7 @@ export class TileAtlas {
   private uploads = 0;
   private evictions = 0;
   private thrash = 0;
+  private grows = 0;
 
   constructor(
     private gl: WebGL2RenderingContext,
@@ -67,9 +70,19 @@ export class TileAtlas {
     this.allocate(Math.min(initialPages, this.maxPages));
   }
 
+  /** Create an empty array texture of `pages` pages, discarding whatever was resident. */
   private allocate(pages: number): void {
+    const tex = this.createTexture(pages);
+    if (this.texture) this.gl.deleteTexture(this.texture);
+    this.texture = tex;
+    this.pages = pages;
+    this.slots.clear();
+    this.free = [];
+    for (let i = pages * TILES_PER_PAGE - 1; i >= 0; i--) this.free.push(i);
+  }
+
+  private createTexture(pages: number): WebGLTexture {
     const gl = this.gl;
-    if (this.texture) gl.deleteTexture(this.texture);
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl.RGBA8, PAGE_SIZE, PAGE_SIZE, pages);
@@ -78,19 +91,46 @@ export class TileAtlas {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    this.texture = tex;
-    this.pages = pages;
-    this.slots.clear();
-    this.free = [];
-    for (let i = pages * TILES_PER_PAGE - 1; i >= 0; i--) this.free.push(i);
+    return tex;
   }
 
-  /** Try to double the page count; returns false once the budget is reached. */
+  /**
+   * Try to double the page count; returns false once the budget is reached.
+   *
+   * Growth must PRESERVE slot numbers. `acquire` is called while a draw batch is being
+   * assembled — the tile drawer collects slot indices into an instance buffer and issues one
+   * instanced draw at the end — so a grow that reset residency would leave every slot already
+   * written into that buffer pointing at a cell some later tile is about to be uploaded into,
+   * and those tiles would render with another tile's pixels. Slot index → (page, x, y) is a
+   * pure function and growing only appends pages, so the old cells keep their addresses: the
+   * old pages are blitted across and `slots` is left intact. The blit (rather than a re-upload
+   * from the CPU store) is what keeps a live brush stroke, whose newest dabs exist only in the
+   * atlas, from being rolled back mid-stroke.
+   */
   private grow(): boolean {
     if (this.pages >= this.maxPages) return false;
+    const gl = this.gl;
     const next = Math.min(this.pages * 2, this.maxPages);
-    // The CPU tile store is the source of truth, so dropping everything is safe.
-    this.allocate(next);
+    const tex = this.createTexture(next);
+
+    const fbo = gl.createFramebuffer();
+    const prevRead = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING) as WebGLFramebuffer | null;
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    for (let page = 0; page < this.pages; page++) {
+      gl.framebufferTextureLayer(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.texture, 0, page);
+      gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, page, 0, 0, PAGE_SIZE, PAGE_SIZE);
+    }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, prevRead);
+    gl.deleteFramebuffer(fbo);
+
+    if (this.texture) gl.deleteTexture(this.texture);
+    this.texture = tex;
+    for (let i = next * TILES_PER_PAGE - 1; i >= this.pages * TILES_PER_PAGE; i--) {
+      this.free.push(i);
+    }
+    this.pages = next;
+    this.grows++;
     return true;
   }
 
@@ -218,6 +258,7 @@ export class TileAtlas {
       uploads: this.uploads,
       evictions: this.evictions,
       thrash: this.thrash,
+      grows: this.grows,
       bytes: this.pages * PAGE_BYTES,
     };
   }

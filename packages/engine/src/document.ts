@@ -11,6 +11,7 @@ import { MipPlane } from './tiles/mip.js';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
+import type { Selection } from './selection.js';
 
 export type LabelColor =
   | 'none'
@@ -96,6 +97,8 @@ export interface Doc {
   /** Bottom-most first, matching PSD storage and the compositor's walk order. */
   readonly layers: readonly Layer[];
   readonly activeLayerIds: readonly number[];
+  /** Active selection; null means "no selection", which edits treat as "everywhere". */
+  readonly selection: Selection | null;
   /** Bottom layer is a locked Background (no alpha, no mode). */
   readonly hasBackground: boolean;
   readonly dirty: boolean;
@@ -152,6 +155,7 @@ export function emptyDoc(width = 1920, height = 1080, name = 'Untitled-1'): Doc 
     height,
     layers: [],
     activeLayerIds: [],
+    selection: null,
     hasBackground: false,
     dirty: false,
   };

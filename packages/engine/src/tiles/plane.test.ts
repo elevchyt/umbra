@@ -199,3 +199,52 @@ describe('tilesInRect', () => {
     ]);
   });
 });
+
+describe('copy-on-write aliasing', () => {
+  it('does not write through to a tile shared by another cell', () => {
+    // Planes share Tile objects freely — the synthetic benchmark document repeats one tile
+    // along diagonals, a duplicated layer shares every tile with its original, and the mip
+    // cache shares one downsampled tile between identical neighbourhoods. Writing one cell
+    // must not reach any of the others.
+    const w = Plane.empty(RGBA8).writer();
+    const px = w.mutable(0, 0);
+    // Non-uniform, or commit() collapses it to a one-pixel tile and expand() would allocate.
+    px.fill(200);
+    px[0] = 1;
+    const plane = w.commit();
+    const shared = plane.tileAt(0, 0);
+    const withAlias = Plane._commit(
+      plane,
+      new Map([
+        [tileKey(0, 0), shared],
+        [tileKey(5, 3), shared],
+      ]),
+    );
+
+    const w2 = withAlias.writer();
+    // A single pixel, so the tile stays full and commit() does not collapse it away.
+    w2.mutable(0, 0)[4] = 7;
+    const after = w2.commit();
+
+    expect(after.tileAt(0, 0).data[4]).toBe(7);
+    expect(after.tileAt(5, 3).data[4]).toBe(200);
+    expect(shared.data[4]).toBe(200);
+  });
+
+  it('gives each writer its own buffer when two writers start from one plane', () => {
+    const w = Plane.empty(RGBA8).writer();
+    const p0 = w.mutable(1, 1);
+    p0.fill(100);
+    p0[0] = 1;
+    const base = w.commit();
+
+    const a = base.writer();
+    const b = base.writer();
+    a.mutable(1, 1)[4] = 1;
+    b.mutable(1, 1)[4] = 2;
+
+    expect(a.commit().tileAt(1, 1).data[4]).toBe(1);
+    expect(b.commit().tileAt(1, 1).data[4]).toBe(2);
+    expect(base.tileAt(1, 1).data[4]).toBe(100);
+  });
+});
