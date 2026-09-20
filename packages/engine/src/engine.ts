@@ -58,6 +58,15 @@ import {
 import * as LayerCmd from './commands/layers.js';
 import * as ImageCmd from './commands/image.js';
 import * as FillCmd from './commands/fill.js';
+import type { PaintMode } from './commands/fill.js';
+import {
+  DEFAULT_BRUSH,
+  beginStroke as beginBrushStroke,
+  strokeTo,
+  type BrushParams,
+  type Dab,
+  type StrokeState,
+} from '@umbra/kernels/brush';
 import { savePsd } from './psd-save.js';
 import { openPsd } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
@@ -90,7 +99,16 @@ export class Engine {
 
   // Live stroke state.
   private strokeLayerId: number | null = null;
+  /**
+   * The stroke buffer: dabs accumulate here at the brush's flow, and the whole thing is
+   * composited onto the layer at the brush's opacity when the stroke ends. See the header of
+   * `@umbra/kernels/brush` for why that order matters.
+   */
   private strokeWriter: PlaneWriter | null = null;
+  private strokeState: StrokeState | null = null;
+  brush: BrushParams = { ...DEFAULT_BRUSH };
+  paintMode: PaintMode = 'normal';
+  private strokeColor: [number, number, number] = [0, 0, 0];
   private strokeParams = {
     size: 40,
     hardness: 0.6,
@@ -669,8 +687,12 @@ export class Engine {
 
   // ---- painting ---------------------------------------------------------------------
 
-  beginStroke(size: number, hardness: number, color: [number, number, number, number]): void {
-    this.strokeParams = { size, hardness, color };
+  beginStroke(params: BrushParams, color: [number, number, number], mode: PaintMode): void {
+    this.brush = params;
+    this.paintMode = mode;
+    this.strokeColor = color;
+    this.strokeParams = { size: params.size, hardness: params.hardness, color: [...color, 1] };
+    this.strokeState = beginBrushStroke(params);
     this.lastDab = null;
 
     if (this.quickMask) {
@@ -691,7 +713,8 @@ export class Engine {
       target = layer;
     }
     this.strokeLayerId = target.id;
-    this.strokeWriter = target.plane.base.writer();
+    // The stroke goes into its own empty plane, not into the layer.
+    this.strokeWriter = Plane.empty(RGBA8).writer();
     this.painting = true;
   }
 
@@ -729,18 +752,14 @@ export class Engine {
     }
     this.dabs.gpuDirty.clear();
 
-    const committed = this.strokeWriter.commit();
+    const strokePlane = this.strokeWriter.commit();
     const id = this.strokeLayerId;
     this.commit(
-      {
-        ...this.doc,
-        layers: updateLayer(this.doc.layers, id, (l) =>
-          l.kind === 'pixel' ? { ...l, plane: new MipPlane(committed) } : l,
-        ),
-      },
-      'Brush Tool',
+      FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
+      this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
     this.strokeWriter = null;
+    this.strokeState = null;
     this.strokeLayerId = null;
     this.painting = false;
     this.lastDab = null;
@@ -752,32 +771,19 @@ export class Engine {
     let oldest: number | null = null;
 
     for (const s of samples) {
-      if (s.flags & FLAG_DOWN) this.lastDab = null;
-      if (!this.painting || (!this.strokeWriter && !this.quickMask)) continue;
+      if (!this.painting || !this.strokeState) continue;
       if (oldest === null) oldest = s.timeAbs;
 
       const doc = docPointAtScreen(this.view, s.x, s.y);
-      const radius = (this.strokeParams.size * Math.max(0.05, s.pressure || 1)) / 2;
-      const spacing = Math.max(1, this.strokeParams.size * STROKE_SPACING);
-
-      if (!this.lastDab) {
-        this.stampDab(doc.x, doc.y, radius);
-        this.lastDab = { x: doc.x, y: doc.y };
-      } else {
-        const { x, y } = this.lastDab;
-        const dx = doc.x - x;
-        const dy = doc.y - y;
-        const dist = Math.hypot(dx, dy);
-        const steps = Math.floor(dist / spacing);
-        for (let i = 1; i <= steps; i++) {
-          const t = (i * spacing) / dist;
-          this.stampDab(x + dx * t, y + dy * t, radius);
-        }
-        if (steps > 0) {
-          const t = (steps * spacing) / dist;
-          this.lastDab = { x: x + dx * t, y: y + dy * t };
-        }
+      for (const dab of strokeTo(this.strokeState, {
+        x: doc.x,
+        y: doc.y,
+        pressure: s.pressure,
+        time: s.timeAbs,
+      })) {
+        this.stampDab(dab);
       }
+
       if (s.flags & FLAG_UP) {
         this.endStroke();
         this.strokeEnded = true;
@@ -786,9 +792,27 @@ export class Engine {
     if (oldest !== null) this.pendingLatencyFrom = oldest;
   }
 
-  private stampDab(x: number, y: number, radius: number): void {
+  /**
+   * Airbrush build-up happens on a clock, not on pointer motion, so it needs a tick of its own
+   * — a held-still pointer produces no events at all.
+   */
+  private airbrushTick(): void {
+    if (!this.painting || !this.strokeState || !this.brush.airbrush) return;
+    if (!this.strokeState.brush) return;
+    const at = this.strokeState.brush;
+    for (const dab of strokeTo(this.strokeState, {
+      x: at.x,
+      y: at.y,
+      pressure: this.strokeState.lastPressure,
+      time: nowAbs(),
+    })) {
+      this.stampDab(dab);
+    }
+  }
+
+  private stampDab(dab: Dab): void {
     if (this.quickMask) {
-      this.stampQuickMaskDab(x, y, radius);
+      this.stampQuickMaskDab(dab.x, dab.y, dab.radius);
       return;
     }
     const writer = this.strokeWriter;
@@ -797,11 +821,13 @@ export class Engine {
       this.atlas,
       (tx, ty) => writer.mutableTile(tx, ty),
       {
-        x,
-        y,
-        radius,
-        hardness: this.strokeParams.hardness,
-        color: this.strokeParams.color,
+        x: dab.x,
+        y: dab.y,
+        radius: dab.radius,
+        hardness: dab.hardness,
+        angle: dab.angle,
+        roundness: dab.roundness,
+        color: [this.strokeColor[0], this.strokeColor[1], this.strokeColor[2], dab.flow],
       },
       this.selectionTexture(),
     );
@@ -872,6 +898,7 @@ export class Engine {
     if (this.contextLost) return this.stats(0);
 
     this.processInput();
+    this.airbrushTick();
 
     // Quick Mask replaces the ants with the overlay, and the mask changes every frame while
     // painting, so the outline is dropped rather than re-traced. Tracking what the outline was
@@ -885,6 +912,20 @@ export class Engine {
     }
 
     this.atlas.beginFrame();
+    // The live stroke is drawn from the base level only: it is small, and a mip built from the
+    // stroke buffer would be a frame behind the dabs the GPU is still laying down.
+    this.renderer.setStrokeOverlay(
+      this.strokeWriter && this.strokeLayerId !== null && this.paintMode !== 'clear'
+        ? {
+            plane: new MipPlane(this.strokeWriter.preview(), 0),
+            layerId: this.strokeLayerId,
+            opacity: this.brush.opacity,
+            // Behind previews as Normal; the difference only shows where the layer already has
+            // pixels, and the exact result lands when the stroke is composited.
+            mode: this.paintMode === 'behind' ? 'normal' : this.paintMode,
+          }
+        : null,
+    );
     const overlay = this.quickMask ? this.selectionTexture() : null;
     const s = this.renderer.render(
       this.doc,

@@ -50,10 +50,6 @@ export function Workspace() {
   let docAreaRef!: HTMLDivElement;
   let client: EngineClient | undefined;
 
-  const [brushSize, setBrushSize] = createSignal(60);
-  const [brushHardness, setBrushHardness] = createSignal(0.6);
-  const [brushOpacity, setBrushOpacity] = createSignal(100);
-  const [brushFlow, setBrushFlow] = createSignal(100);
   const [pickerTarget, setPickerTarget] = createSignal<'foreground' | 'background'>('foreground');
   const [quickMask, setQuickMask] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
@@ -126,31 +122,64 @@ export function Workspace() {
   // Paint mode and brush settings follow the active tool and options bar.
   createEffect(() => {
     const tool = store.activeTool();
+    const size = store.sampleSize();
     if (!client) return;
     client.paintMode = PAINT_TOOLS.has(tool);
     client.selectTool = SELECT_TOOLS.has(tool) ? tool : null;
-    client.sampleSize = tool === 'eyedropper' ? store.sampleSize() : null;
+    client.sampleSize = tool === 'eyedropper' ? size : null;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
   createEffect(() => {
+    // Read every value BEFORE the guard. An effect that returns early registers no
+    // dependencies and never runs again — and on the first run `client` is not up yet.
     const o = store.selectOptions;
-    if (!client) return;
-    client.selectOp = o.op;
-    send({
-      t: 'setSelectOptions',
+    const next = {
+      op: o.op,
       feather: o.feather,
       antialias: o.antialias,
       tolerance: o.tolerance,
       contiguous: o.contiguous,
+    };
+    if (!client) return;
+    client.selectOp = next.op;
+    send({
+      t: 'setSelectOptions',
+      feather: next.feather,
+      antialias: next.antialias,
+      tolerance: next.tolerance,
+      contiguous: next.contiguous,
     });
   });
   createEffect(() => {
-    if (!client) return;
-    client.brushSize = brushSize();
-    client.brushHardness = brushHardness();
+    const b = store.brush;
+    const tool = store.activeTool();
     const c = store.foreground();
-    client.brushColor = [c.r, c.g, c.b, brushOpacity() / 100];
+    // Every field is read by name, and all of them BEFORE the `client` guard. Spreading a
+    // Solid store goes through ownKeys and does not subscribe the effect to the individual
+    // properties; returning early registers no dependencies at all. Either mistake leaves the
+    // engine painting with whatever the brush was when the effect first ran.
+    const params = {
+      size: b.size,
+      hardness: b.hardness,
+      spacing: b.spacing,
+      angle: b.angle,
+      roundness: b.roundness,
+      opacity: b.opacity,
+      flow: b.flow,
+      smoothing: b.smoothing,
+      airbrush: b.airbrush,
+      airbrushRate: b.airbrushRate,
+      pressureSize: b.pressureSize,
+      pressureOpacity: b.pressureOpacity,
+    };
+    const mode = b.mode;
+    if (!client) return;
+    // The Pencil is the brush with a hard tip; that is all that distinguishes them.
+    client.brush = tool === 'pencil' ? { ...params, hardness: 1 } : params;
+    client.brushColor = [c.r, c.g, c.b];
+    // The Eraser is the Clear paint mode with the brush's own settings.
+    client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
   });
 
   // Theme + UI scale live on <html> so CSS variables cascade everywhere.
@@ -269,16 +298,16 @@ export function Workspace() {
       }
 
       case 'brush.sizeUp':
-        setBrushSize((s) => Math.min(5000, s + stepFor(s)));
+        store.setBrush('size', Math.min(5000, store.brush.size + stepFor(store.brush.size)));
         break;
       case 'brush.sizeDown':
-        setBrushSize((s) => Math.max(1, s - stepFor(s)));
+        store.setBrush('size', Math.max(1, store.brush.size - stepFor(store.brush.size)));
         break;
       case 'brush.hardnessUp':
-        setBrushHardness((h) => Math.min(1, h + 0.25));
+        store.setBrush('hardness', Math.min(1, store.brush.hardness + 0.25));
         break;
       case 'brush.hardnessDown':
-        setBrushHardness((h) => Math.max(0, h - 0.25));
+        store.setBrush('hardness', Math.max(0, store.brush.hardness - 0.25));
         break;
 
       case 'workspace.reset':
@@ -649,14 +678,6 @@ export function Workspace() {
       <Show when={store.optionsVisible() && store.screenMode() !== 'full'}>
         <OptionsBar
           onCommand={runCommand}
-          brushSize={brushSize()}
-          setBrushSize={setBrushSize}
-          brushHardness={brushHardness()}
-          setBrushHardness={setBrushHardness}
-          brushOpacity={brushOpacity()}
-          setBrushOpacity={setBrushOpacity}
-          brushFlow={brushFlow()}
-          setBrushFlow={setBrushFlow}
         />
       </Show>
 

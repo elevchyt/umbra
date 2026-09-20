@@ -115,7 +115,7 @@ export function App() {
             onInput={(e) => {
               const v = +e.currentTarget.value;
               setSize(v);
-              if (client) client.brushSize = v;
+              if (client) client.brush = { ...client.brush, size: v };
             }}
           />
           <span style={{ width: '30px', 'font-family': 'var(--mono)' }}>{size()}</span>

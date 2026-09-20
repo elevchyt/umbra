@@ -29,6 +29,8 @@ in vec2 v_local;
 uniform vec2 u_centre;     // tile-local px
 uniform float u_radius;
 uniform float u_hardness;
+uniform float u_angle;     // tip rotation, radians
+uniform float u_roundness; // 1 is a circle
 uniform vec4 u_color;      // straight alpha
 uniform sampler2D u_selection;
 uniform float u_useSelection;
@@ -36,7 +38,12 @@ uniform vec2 u_selectionSize;
 uniform vec2 u_tileOrigin;  // document coords of this tile's top-left
 out vec4 fragColor;
 void main() {
-  float d = distance(v_local, u_centre);
+  // Rotate into tip space and squash the minor axis, so angle and roundness cost one mat2.
+  vec2 rel = v_local - u_centre;
+  float c = cos(-u_angle);
+  float s = sin(-u_angle);
+  vec2 tip = vec2(rel.x * c - rel.y * s, (rel.x * s + rel.y * c) / u_roundness);
+  float d = length(tip);
   // Hard core out to hardness*radius, then a smooth falloff to the rim.
   float inner = u_radius * u_hardness;
   float a = 1.0 - smoothstep(inner, max(u_radius, inner + 0.5), d);
@@ -61,8 +68,14 @@ export interface DabParams {
   /** Document-space centre. */
   x: number;
   y: number;
+  /** Semi-major axis in document pixels. */
   radius: number;
   hardness: number;
+  /** Tip rotation in radians. */
+  angle: number;
+  /** 0…1; 1 is a circle. */
+  roundness: number;
+  /** Straight RGB plus the alpha this dab deposits (the brush's flow). */
   color: [number, number, number, number];
 }
 
@@ -139,6 +152,8 @@ export class DabPainter {
         this.program.u2f('u_tileOrigin', tx << TILE_SHIFT, ty << TILE_SHIFT);
         this.program.u1f('u_radius', p.radius);
         this.program.u1f('u_hardness', p.hardness);
+        this.program.u1f('u_angle', p.angle);
+        this.program.u1f('u_roundness', Math.max(0.01, p.roundness));
         this.program.u4f('u_color', p.color[0], p.color[1], p.color[2], p.color[3]);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
         this.gpuDirty.add(tile);

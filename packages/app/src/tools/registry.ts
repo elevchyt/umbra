@@ -102,7 +102,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     key: 'b',
     tools: [
       { id: 'brush', name: 'Brush Tool', icon: 'brush', key: 'b', implemented: true, hint: 'Drag to paint. [ and ] change the brush size.' },
-      { id: 'pencil', name: 'Pencil Tool', icon: 'pencil', key: 'b' },
+      { id: 'pencil', name: 'Pencil Tool', icon: 'pencil', key: 'b', implemented: true, hint: 'Drag for a hard-edged stroke.' },
       { id: 'colorReplacement', name: 'Color Replacement Tool', icon: 'colorReplacement', key: 'b' },
       { id: 'mixerBrush', name: 'Mixer Brush Tool', icon: 'mixerBrush', key: 'b' },
     ],
@@ -127,7 +127,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'erase',
     key: 'e',
     tools: [
-      { id: 'eraser', name: 'Eraser Tool', icon: 'eraser', key: 'e' },
+      { id: 'eraser', name: 'Eraser Tool', icon: 'eraser', key: 'e', implemented: true, hint: 'Drag to erase. Clear is the brush with the Clear paint mode.' },
       { id: 'backgroundEraser', name: 'Background Eraser Tool', icon: 'backgroundEraser', key: 'e' },
       { id: 'magicEraser', name: 'Magic Eraser Tool', icon: 'magicEraser', key: 'e' },
     ],

@@ -161,6 +161,11 @@ export class Plane {
     return r;
   }
 
+  /** The cells this plane actually stores a tile for, in insertion order. */
+  *tileCells(): Generator<{ tx: number; ty: number }> {
+    for (const key of this.tiles.keys()) yield { tx: tileKeyX(key), ty: tileKeyY(key) };
+  }
+
   get tileCount(): number {
     return this.tiles.size;
   }
@@ -266,6 +271,18 @@ export class PlaneWriter {
   mutableTile(tx: number, ty: number): Tile {
     this.mutable(tx, ty);
     return this.next.get(tileKey(tx, ty))!;
+  }
+
+  /**
+   * A read-only Plane over the transaction's CURRENT tiles, without ending it.
+   *
+   * A live brush stroke needs to be drawn every frame while it is still being painted, and the
+   * renderer takes Planes. Uniform tiles are deliberately not collapsed here: that is a
+   * `commit()` concern, and collapsing mid-stroke would swap out the very Tile objects the GPU
+   * atlas is painting into.
+   */
+  preview(): Plane {
+    return Plane._commit(this.base, new Map(this.next));
   }
 
   /** Replace a whole tile cell without copying (the caller must not retain `tile`'s buffer). */

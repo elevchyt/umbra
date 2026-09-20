@@ -14,7 +14,7 @@ import {
   FLAG_COALESCED,
   nowAbs,
 } from '@umbra/engine/input/ring';
-import type { DocSummary, EngineStats, FromEngine, ToEngine, GpuCaps } from '@umbra/engine';
+import { DEFAULT_BRUSH, type BrushParams, type DocSummary, type EngineStats, type FromEngine, type ToEngine, type GpuCaps } from '@umbra/engine';
 
 export interface EngineClientEvents {
   onReady?: (caps: GpuCaps) => void;
@@ -224,7 +224,7 @@ export class EngineClient {
         return;
       }
       if (this.paintMode && e.button === 0) {
-        this.send({ t: 'strokeBegin', size: this.brushSize, hardness: this.brushHardness, color: this.brushColor });
+        this.send({ t: 'strokeBegin', brush: this.brush, color: this.brushColor, mode: this.paintBlendMode });
         write(e, FLAG_DOWN);
       } else {
         this.panning = true;
@@ -295,9 +295,10 @@ export class EngineClient {
     );
   }
 
-  brushSize = 60;
-  brushHardness = 0.6;
-  brushColor: [number, number, number, number] = [0.1, 0.45, 0.95, 1];
+  brushColor: [number, number, number] = [0, 0, 0];
+  brush: BrushParams = { ...DEFAULT_BRUSH };
+  /** Paint blend mode, which unlike a layer's may also be 'behind' or 'clear'. */
+  paintBlendMode = 'normal';
 
   resize(width: number, height: number): void {
     this.send({ t: 'resize', width, height, dpr: devicePixelRatio });

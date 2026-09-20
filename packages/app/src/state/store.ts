@@ -7,9 +7,10 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import type { DocSummary, EngineStats } from '@umbra/engine';
+import { DEFAULT_BRUSH, type DocSummary, type EngineStats } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
+
 import { DEFAULT_LAYOUT, type DockLayout } from '../workspaces/layouts';
 
 export type ThemeName = 'darkest' | 'dark' | 'medium' | 'light';
@@ -63,6 +64,15 @@ const [selectOptions, setSelectOptions] = createStore({
   tolerance: 32,
   contiguous: true,
   sampleAllLayers: false,
+});
+
+/**
+ * Brush settings, shared by every paint tool as Photoshop's options bar does. `mode` is the
+ * paint blend mode, which has two entries (Behind, Clear) a layer does not.
+ */
+const [brush, setBrush] = createStore({
+  ...DEFAULT_BRUSH,
+  mode: 'normal' as string,
 });
 
 /** Eyedropper sample square, in document pixels. 1 is Photoshop's "Point Sample". */
@@ -212,6 +222,8 @@ export const store = {
   setSelectOptions,
   sampleSize,
   setSampleSize,
+  brush,
+  setBrush,
 
   foreground,
   setForeground,

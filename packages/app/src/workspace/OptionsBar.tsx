@@ -17,14 +17,6 @@ import { store } from '../state/store';
 
 export interface OptionsBarProps {
   onCommand: (cmd: string) => void;
-  brushSize: number;
-  setBrushSize: (v: number) => void;
-  brushHardness: number;
-  setBrushHardness: (v: number) => void;
-  brushOpacity: number;
-  setBrushOpacity: (v: number) => void;
-  brushFlow: number;
-  setBrushFlow: (v: number) => void;
 }
 
 /** The four combine modes, shared by every selection tool. */
@@ -55,6 +47,22 @@ function SelectionOps() {
   );
 }
 
+/** Tools that share the brush options row. */
+const PAINT_OPTION_TOOLS = new Set(['brush', 'pencil', 'eraser']);
+
+/**
+ * The paint modes. Behind and Clear exist only for painting — they act on alpha rather than
+ * on colour, so they are not in the layer blend menu.
+ */
+const paintModeOptions = [
+  ...BLEND_MENU.filter((m) => m !== '-' && m !== 'passThrough').map((m) => ({
+    value: m as string,
+    label: BLEND_LABEL[m as BlendMode],
+  })),
+  { value: 'behind', label: 'Behind' },
+  { value: 'clear', label: 'Clear' },
+];
+
 export function OptionsBar(props: OptionsBarProps) {
   const tool = () => TOOL_BY_ID.get(store.activeTool());
   const [mode, setMode] = createSignal<BlendMode>('normal');
@@ -62,10 +70,7 @@ export function OptionsBar(props: OptionsBarProps) {
   const [showTransform, setShowTransform] = createSignal(false);
   const sel = store.selectOptions;
 
-  const blendOptions = BLEND_MENU.filter((m) => m !== '-' && m !== 'passThrough').map((m) => ({
-    value: m as BlendMode,
-    label: BLEND_LABEL[m as BlendMode],
-  }));
+  const brush = store.brush;
 
   return (
     <div class="options-bar">
@@ -93,20 +98,47 @@ export function OptionsBar(props: OptionsBarProps) {
           <IconButton icon="filterRows" title="Align left edges" disabled />
         </Match>
 
-        <Match when={store.activeTool() === 'brush' || store.activeTool() === 'pencil'}>
+        <Match when={PAINT_OPTION_TOOLS.has(store.activeTool())}>
           <button type="button" class="brush-preview" title="Brush preset picker">
-            <span class="brush-dot" style={{ width: `${Math.min(22, Math.max(3, props.brushSize / 12))}px`, height: `${Math.min(22, Math.max(3, props.brushSize / 12))}px` }} />
+            <span
+              class="brush-dot"
+              style={{
+                width: `${Math.min(22, Math.max(3, brush.size / 12))}px`,
+                height: `${Math.min(22, Math.max(3, brush.size / 12))}px`,
+              }}
+            />
             <Icon name="chevronDown" size={10} />
           </button>
-          <NumberField label="Size" value={props.brushSize} onChange={props.setBrushSize} min={1} max={5000} suffix="px" width={44} />
-          <NumberField label="Hardness" value={Math.round(props.brushHardness * 100)} onChange={(v) => props.setBrushHardness(v / 100)} min={0} max={100} suffix="%" width={38} />
+          <NumberField label="Size" value={brush.size} onChange={(v) => store.setBrush('size', v)} min={1} max={5000} suffix="px" width={44} />
+          <NumberField label="Hardness" value={Math.round(brush.hardness * 100)} onChange={(v) => store.setBrush('hardness', v / 100)} min={0} max={100} suffix="%" width={38} />
           <Separator />
-          <Select label="Mode" value={mode()} options={blendOptions} onChange={setMode} width={110} />
-          <NumberField label="Opacity" value={props.brushOpacity} onChange={props.setBrushOpacity} min={1} max={100} suffix="%" width={38} />
-          <NumberField label="Flow" value={props.brushFlow} onChange={props.setBrushFlow} min={1} max={100} suffix="%" width={38} />
-          <IconButton icon="blurTool" title="Enable airbrush-style build-up effects" />
+          <Select label="Mode" value={brush.mode} options={paintModeOptions} onChange={(v) => store.setBrush('mode', v)} width={110} />
+          <NumberField label="Opacity" value={Math.round(brush.opacity * 100)} onChange={(v) => store.setBrush('opacity', v / 100)} min={1} max={100} suffix="%" width={38} />
+          <NumberField label="Flow" value={Math.round(brush.flow * 100)} onChange={(v) => store.setBrush('flow', v / 100)} min={1} max={100} suffix="%" width={38} />
+          <IconButton
+            icon="blurTool"
+            title="Enable airbrush-style build-up effects"
+            active={brush.airbrush}
+            onClick={() => store.setBrush('airbrush', !brush.airbrush)}
+          />
           <Separator />
-          <NumberField label="Smoothing" value={10} onChange={() => {}} min={0} max={100} suffix="%" width={38} />
+          <NumberField label="Smoothing" value={Math.round(brush.smoothing * 100)} onChange={(v) => store.setBrush('smoothing', v / 100)} min={0} max={95} suffix="%" width={38} />
+          <Separator />
+          <NumberField label="Angle" value={brush.angle} onChange={(v) => store.setBrush('angle', v)} min={-180} max={180} suffix="°" width={38} />
+          <NumberField label="Roundness" value={Math.round(brush.roundness * 100)} onChange={(v) => store.setBrush('roundness', v / 100)} min={1} max={100} suffix="%" width={38} />
+          <Separator />
+          <IconButton
+            icon="pen"
+            title="Always use Pressure for Size"
+            active={brush.pressureSize}
+            onClick={() => store.setBrush('pressureSize', !brush.pressureSize)}
+          />
+          <IconButton
+            icon="brush"
+            title="Always use Pressure for Opacity"
+            active={brush.pressureOpacity}
+            onClick={() => store.setBrush('pressureOpacity', !brush.pressureOpacity)}
+          />
         </Match>
 
         <Match when={store.activeTool().startsWith('marquee') || store.activeTool().startsWith('lasso')}>

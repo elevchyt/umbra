@@ -15,6 +15,8 @@ import { TileDrawer } from './tile-drawer.js';
 import { AntsRenderer } from './ants.js';
 import { QuickMaskRenderer, type QuickMaskStyle } from './quick-mask.js';
 import { docToClip, type ViewState } from './view.js';
+import type { BlendMode } from '@umbra/core/blend';
+import { MipPlane } from '../tiles/mip.js';
 import type { Doc, Layer } from '../document.js';
 
 const QUAD_VERT = /* glsl */ `#version 300 es
@@ -112,6 +114,53 @@ export class DocumentRenderer {
     this.tiles.setAtlas(atlas);
   }
 
+  /**
+   * A live stroke, drawn as a synthetic layer immediately above the one being painted.
+   *
+   * It has to be a separate layer rather than pixels in the target: the stroke buffer holds
+   * accumulated FLOW and is only applied at the brush's opacity and blend mode when the stroke
+   * ends, so the preview has to apply them the same way without touching the layer.
+   */
+  private strokeOverlay: {
+    plane: MipPlane;
+    layerId: number;
+    opacity: number;
+    mode: BlendMode;
+  } | null = null;
+
+  setStrokeOverlay(
+    overlay: { plane: MipPlane; layerId: number; opacity: number; mode: BlendMode } | null,
+  ): void {
+    this.strokeOverlay = overlay;
+  }
+
+  /** Map a layer list to GPU layers, splicing the live stroke in above its target. */
+  private toGpuLayers(layers: readonly Layer[], view: ViewState, clip: Rect): GpuLayer[] {
+    const out: GpuLayer[] = [];
+    for (const l of layers) {
+      out.push(this.toGpuLayer(l, view, clip));
+      const o = this.strokeOverlay;
+      if (o && o.layerId === l.id) {
+        out.push({
+          kind: 'pixel',
+          name: '<stroke>',
+          visible: true,
+          opacity: o.opacity,
+          fill: 1,
+          blendMode: o.mode,
+          clipped: false,
+          seed: 0,
+          maskDensity: 1,
+          drawSource: () => {
+            this.stats.layerPasses++;
+            this.stats.tileInstances += this.tiles.draw(o.plane, view, clip);
+          },
+        });
+      }
+    }
+    return out;
+  }
+
   private toGpuLayer(layer: Layer, view: ViewState, clip: Rect): GpuLayer {
     const out: GpuLayer = {
       kind: layer.kind,
@@ -135,7 +184,7 @@ export class DocumentRenderer {
     }
 
     if (layer.kind === 'group') {
-      out.children = layer.children.map((c) => this.toGpuLayer(c, view, clip));
+      out.children = this.toGpuLayers(layer.children, view, clip);
     } else {
       const plane = layer.plane;
       out.drawSource = (_t: RenderTarget) => {
@@ -175,7 +224,7 @@ export class DocumentRenderer {
     this.compositor.resize(vw, vh);
     this.compositor.setOrigin(0, 0);
 
-    const layers = doc.layers.map((l) => this.toGpuLayer(l, view, docRect));
+    const layers = this.toGpuLayers(doc.layers, view, docRect);
 
     // Composite onto transparency; the present pass puts the checkerboard underneath.
     const composite = this.compositor.compositeOnTransparent(layers);

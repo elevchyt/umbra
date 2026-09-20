@@ -184,3 +184,77 @@ export function stroke(doc: Doc, opts: StrokeOptions): Doc {
   const preserve = opts.preserveTransparency || layer.locks.transparency;
   return withPlane(doc, layer, paintThrough(doc, layer, band, { ...opts, preserveTransparency: preserve }));
 }
+
+/**
+ * Paint modes a brush has but a layer does not. They act on alpha rather than on colour, so
+ * they cannot go through the blend table.
+ */
+export type PaintMode = BlendMode | 'behind' | 'clear';
+
+/**
+ * Composite a finished stroke onto its layer.
+ *
+ * The stroke was accumulated in its own buffer at the brush's FLOW, and is applied here once
+ * at its OPACITY. Doing it in this order is the whole reason for the buffer: overlapping dabs
+ * build toward opacity and stop, where compositing each dab straight onto the layer would let
+ * a slow stroke keep darkening.
+ */
+export function compositeStroke(
+  doc: Doc,
+  layerId: number,
+  strokePlane: Plane,
+  opacity: number,
+  mode: PaintMode,
+): Doc {
+  const layer = findLayer(doc.layers, layerId);
+  if (!layer || layer.kind !== 'pixel') return doc;
+  const dest = layer.plane.base;
+  if (channelCount(dest.format.layout) !== 4) return doc;
+
+  const writer = dest.writer();
+  const backdrop: [number, number, number] = [0, 0, 0];
+  const source: [number, number, number] = [0, 0, 0];
+  const preserve = layer.locks.transparency;
+
+  for (const { tx, ty } of strokePlane.tileCells()) {
+    const src = strokePlane.tileAt(tx, ty);
+    if (src.isTransparent()) continue;
+    const data = writer.mutable(tx, ty);
+    const sd = src.data;
+    const uniform = src.uniform;
+
+    for (let i = 0; i < TILE_SIZE * TILE_SIZE; i++) {
+      const so = uniform ? 0 : i * 4;
+      const sa = (sd[so + 3]! / 255) * opacity;
+      if (sa <= 0) continue;
+      const o = i * 4;
+      const da = data[o + 3]! / 255;
+
+      if (mode === 'clear') {
+        data[o + 3] = Math.round(da * (1 - sa) * 255);
+        continue;
+      }
+      if (preserve && da <= 0) continue;
+
+      source[0] = sd[so]! / 255;
+      source[1] = sd[so + 1]! / 255;
+      source[2] = sd[so + 2]! / 255;
+      backdrop[0] = data[o]! / 255;
+      backdrop[1] = data[o + 1]! / 255;
+      backdrop[2] = data[o + 2]! / 255;
+
+      // Behind puts the paint UNDER what is already there, which is the same equation with
+      // the two sides swapped.
+      const out =
+        mode === 'behind'
+          ? compositePixel('normal', source, sa, backdrop, da)
+          : compositePixel(mode, backdrop, da, source, sa);
+
+      data[o] = Math.round(out.color[0]! * 255);
+      data[o + 1] = Math.round(out.color[1]! * 255);
+      data[o + 2] = Math.round(out.color[2]! * 255);
+      data[o + 3] = preserve ? data[o + 3]! : Math.round(out.alpha * 255);
+    }
+  }
+  return withPlane(doc, layer, writer.commit());
+}

@@ -1,4 +1,5 @@
 /** Message protocol between the UI thread and the engine worker (spec 03 §2). */
+import type { BrushParams } from '@umbra/kernels/brush';
 import type { GpuCaps } from './gpu/caps.js';
 
 
@@ -110,7 +111,12 @@ export type ToEngine =
   | { t: 'redo' }
   | { t: 'synthetic'; layers: number; width: number; height: number }
   | { t: 'newDoc'; width: number; height: number }
-  | { t: 'strokeBegin'; size: number; hardness: number; color: [number, number, number, number] }
+  | {
+      t: 'strokeBegin';
+      brush: BrushParams;
+      color: [number, number, number];
+      mode: string;
+    }
   | { t: 'strokeEnd' }
   | { t: 'loseContext' }
   | { t: 'runSpikes' }

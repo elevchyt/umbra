@@ -207,10 +207,38 @@ Findings.
    the dialog closed. The callback is now captured before the signal is cleared. Worth
    remembering as a shape, not a one-off: in any `Show` callback, read what you need up front.
 
-Still to do in M3: Quick Mask, Transform Selection, Save/Load Selection + Channels panel,
-Grow/Similar, brush engine v1, Pencil/Eraser/Bucket/Gradient/Eyedropper, Fill…/Stroke…,
-clipboard, Crop, History panel completeness, crash-recovery journal, and the Move tool and
-Free Transform deferred out of M2.
+Quick Mask, Grow/Similar, Fill…/Stroke…/Clear, the Eyedropper and brush engine v1 followed.
+Further findings:
+
+5. **The transparency checkerboard covered the whole viewport.** The pass that was meant to
+   clip it to the canvas rect existed but had never been wired up, so a document's edge was
+   invisible and every measurement taken off a screenshot was wrong — which cost real time
+   during the stroke-duplication hunt above before it was spotted.
+
+6. **Opacity vs flow needs a stroke buffer.** Dabs now accumulate in their own plane at the
+   brush's FLOW and are composited onto the layer once at its OPACITY. Painting each dab
+   straight onto the layer, which is the obvious implementation, lets a slow stroke darken
+   without limit and makes 50% opacity mean nothing. The buffer is also what gives Behind and
+   Clear somewhere to act: they operate on alpha rather than colour, so they cannot go through
+   the blend table, and the eraser is simply the brush in Clear mode.
+
+7. **An effect that returns early subscribes to nothing.** Three effects read
+   `if (!client) return;` before touching any store value, and since `client` is not up on the
+   first run they registered no dependencies and never ran again — the engine kept painting
+   with the brush it had at startup while the options bar showed the new settings. Reading
+   every value before the guard fixes it. The same file also has the related trap: spreading a
+   Solid store goes through `ownKeys` and does not subscribe to the individual properties, so
+   `{ ...store.brush }` looks reactive and is not.
+
+8. **Console history outlives a reload.** Two rounds of the debugging above were spent reading
+   stale log lines from a previous page load as if they were current. Anything logged for a
+   one-shot diagnostic needs a token that ties it to the run.
+
+Still to do in M3: Transform Selection, Save/Load Selection + Channels panel, Paint Bucket,
+Gradient, clipboard, Crop, History panel completeness, crash-recovery journal, and the Move
+tool and Free Transform deferred out of M2. Known gaps in what is built: the eraser has no
+live preview (the stroke overlay cannot subtract until the compositor takes a per-layer erase
+input), and the Magic Wand's Sample Size is not yet averaged.
 
 ### M4 — Adjustments (L)
 All adjustments in [05 §A](05-adjustments-filters.md) as destructive commands **and**

@@ -5,6 +5,7 @@
  */
 import { TILE_SIZE } from '@umbra/core/pixels';
 import type { Engine } from './engine.js';
+import { DEFAULT_BRUSH } from '@umbra/kernels/brush';
 import { PointerRing, FLAG_DOWN, FLAG_UP, nowAbs } from './input/ring.js';
 import { describeCaps } from './gpu/caps.js';
 import { Plane, Tile } from './tiles/plane.js';
@@ -237,7 +238,11 @@ async function spikeInputLatency(engine: Engine, ringSab: SharedArrayBuffer): Pr
   writer.drain();
 
   // A 500 px brush on a 4K layer is the budgeted worst case.
-  engine.beginStroke(500, 0.5, [0.1, 0.4, 0.9, 1]);
+  engine.beginStroke(
+    { ...DEFAULT_BRUSH, size: 500, hardness: 0.5, smoothing: 0, pressureSize: false },
+    [0.1, 0.4, 0.9],
+    'normal',
+  );
   const latencies: number[] = [];
 
   for (let i = 0; i < 60; i++) {
