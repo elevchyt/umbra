@@ -1,0 +1,151 @@
+/*
+ * M0 theme tokens. The full four-theme system arrives in M1 (spec 01 §2); these are the
+ * default (second-darkest) values. Every value is a neutral grey — the chrome must never
+ * tint the artwork.
+ */
+:root {
+  --chrome: #323232;
+  --panel: #3a3a3a;
+  --panel-raised: #424242;
+  --pasteboard: #282828;
+  --well: #262626;
+  --border-dark: #1f1f1f;
+  --border-light: #4a4a4a;
+  --text: #d6d6d6;
+  --text-dim: #9a9a9a;
+  --accent: #2f80ed;
+  --ok: #57a773;
+  --bad: #d9534f;
+
+  --ui-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace;
+  --row: 24px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--chrome);
+  color: var(--text);
+  font: 12px/1.4 var(--ui-font);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.workspace {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  height: 100%;
+}
+
+/* Options bar */
+.options-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px;
+  background: var(--chrome);
+  border-bottom: 1px solid var(--border-dark);
+}
+
+.doc-area {
+  position: relative;
+  background: var(--pasteboard);
+  overflow: hidden;
+}
+
+.doc-area canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* Status bar */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 22px;
+  padding: 0 8px;
+  background: var(--chrome);
+  border-top: 1px solid var(--border-dark);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+button {
+  height: var(--row);
+  min-width: 26px;
+  padding: 0 8px;
+  color: var(--text);
+  background: var(--panel-raised);
+  border: 1px solid var(--border-dark);
+  border-radius: 2px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: #4d4d4d; }
+button:active { background: var(--well); }
+
+label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
+input[type='range'] { width: 90px; accent-color: var(--accent); }
+
+.sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border-dark);
+  box-shadow: 1px 0 0 var(--border-light);
+}
+
+.spacer { flex: 1; }
+
+/* Floating stats HUD */
+.hud {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 6px 8px;
+  background: rgba(24, 24, 24, 0.85);
+  border: 1px solid var(--border-dark);
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre;
+  pointer-events: none;
+}
+.hud b { color: var(--text); font-weight: 600; }
+
+/* Spike report */
+.spikes {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 16px;
+  margin: 0;
+  background: var(--pasteboard);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.spikes .pass { color: var(--ok); }
+.spikes .fail { color: var(--bad); }

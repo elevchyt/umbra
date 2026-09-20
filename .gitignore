@@ -1,0 +1,13 @@
+node_modules/
+dist/
+out/
+release/
+*.tsbuildinfo
+.vite/
+coverage/
+perf-results/
+# Generated test fixtures. NOTE the leading '**/': a pattern containing a slash is anchored
+# to this file's directory, so plain "testkit/fixtures/generated/" would NOT match
+# packages/testkit/fixtures/generated/ and the (very large) fixtures would be committed.
+**/testkit/fixtures/generated/
+.DS_Store

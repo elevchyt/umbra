@@ -1,0 +1,29 @@
+{
+  "name": "umbra-monorepo",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @umbra/shell-electron dev",
+    "build": "pnpm --filter @umbra/app build && pnpm --filter @umbra/shell-electron build",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "budget": "node scripts/budget.mjs",
+    "spikes": "pnpm --filter @umbra/shell-electron spikes"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
+    "solid-js": "^1.9.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-solid": "^2.11.14",
+    "vitest": "^5.0.1"
+  }
+}
