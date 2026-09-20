@@ -7,6 +7,7 @@ import {
   expand,
   feather,
   grow,
+  similar,
   invert,
   isEmpty,
   magicWand,
@@ -329,6 +330,63 @@ describe('magic wand', () => {
     grow(m, p, size, 10);
     expect(m[2 * W + 3]).toBe(255);
     expect(m[2 * W + 1]).toBe(255);
+  });
+
+  it('grow floods the whole similar region in one call, not one ring', () => {
+    // A uniform field: one call must reach the far corner, because Grow has no distance.
+    const w = 32;
+    const h = 32;
+    const p = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) p[i * 4 + 3] = 255;
+    const m = createMask(w, h);
+    m[0] = 255;
+    grow(m, p, { width: w, height: h }, 0);
+    expect(m[w * h - 1]).toBe(255);
+  });
+
+  it('grow stops at a dissimilar band', () => {
+    const w = 16;
+    const h = 4;
+    const p = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      const x = i % w;
+      p[i * 4] = x >= 8 ? 255 : 0;
+      p[i * 4 + 3] = 255;
+    }
+    const m = createMask(w, h);
+    m[0] = 255;
+    grow(m, p, { width: w, height: h }, 10);
+    expect(m[7]).toBe(255);
+    expect(m[8]).toBe(0);
+  });
+
+  it('similar picks up matching colours across a gap', () => {
+    // Two red squares with a blue gutter: Similar must take the far one, Grow must not.
+    const w = 12;
+    const h = 4;
+    const p = new Uint8Array(w * h * 4);
+    for (let i = 0; i < w * h; i++) {
+      const x = i % w;
+      const red = x < 4 || x >= 8;
+      p[i * 4] = red ? 255 : 0;
+      p[i * 4 + 2] = red ? 0 : 255;
+      p[i * 4 + 3] = 255;
+    }
+    const m = createMask(w, h);
+    m[0] = 255;
+    similar(m, p, { width: w, height: h }, 8);
+    expect(m[3]).toBe(255);
+    expect(m[9]).toBe(255);
+    expect(m[5]).toBe(0);
+  });
+
+  it('similar on an empty selection is a no-op', () => {
+    const w = 4;
+    const h = 4;
+    const p = new Uint8Array(w * h * 4);
+    const m = createMask(w, h);
+    similar(m, p, { width: w, height: h }, 32);
+    expect(isEmpty(m)).toBe(true);
   });
 });
 

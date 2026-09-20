@@ -13,7 +13,8 @@ import type { GpuCaps } from '../gpu/caps.js';
 import { LayerCompositor, type GpuLayer, type RenderTarget } from './compositor.js';
 import { TileDrawer } from './tile-drawer.js';
 import { AntsRenderer } from './ants.js';
-import type { ViewState } from './view.js';
+import { QuickMaskRenderer, type QuickMaskStyle } from './quick-mask.js';
+import { docToClip, type ViewState } from './view.js';
 import type { Doc, Layer } from '../document.js';
 
 const QUAD_VERT = /* glsl */ `#version 300 es
@@ -22,25 +23,18 @@ layout(location = 0) in vec2 a_corner;
 out vec2 v_uv;
 void main() { v_uv = a_corner; gl_Position = vec4(a_corner * 2.0 - 1.0, 0.0, 1.0); }`;
 
-/** Final present pass: checkerboard under the composite, then straight→premultiplied. */
+/** Present pass: the composite, straight→premultiplied, over whatever is already there. */
 const PRESENT_FRAG = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_composite;
-uniform vec2 u_size;
-uniform float u_checkerSize;
-uniform vec3 u_light;
-uniform vec3 u_dark;
 out vec4 fragColor;
 void main() {
   vec4 c = texture(u_composite, v_uv);
-  vec2 cell = floor(gl_FragCoord.xy / u_checkerSize);
-  float odd = mod(cell.x + cell.y, 2.0);
-  vec3 checker = mix(u_dark, u_light, odd);
-  fragColor = vec4(mix(checker, c.rgb, c.a), 1.0);
+  fragColor = vec4(c.rgb * c.a, c.a);
 }`;
 
-/** Fills the canvas rect so the checkerboard only shows inside the document. */
+/** A quad covering the canvas rect in document space, so it follows zoom and rotation. */
 const CANVAS_MASK_VERT = /* glsl */ `#version 300 es
 precision highp float;
 layout(location = 0) in vec2 a_corner;
@@ -50,6 +44,26 @@ void main() {
   vec2 doc = mix(u_docRect.xy, u_docRect.zw, a_corner);
   vec3 clip = u_docToClip * vec3(doc, 1.0);
   gl_Position = vec4(clip.xy, 0.0, 1.0);
+}`;
+
+/**
+ * The transparency checkerboard, drawn ONLY over the canvas rect so the pasteboard stays
+ * visible around it — a document's edge has to be obvious, and a checkerboard that runs to
+ * the window edge hides exactly that.
+ *
+ * The cells are measured in device pixels rather than document pixels, so they stay the same
+ * size on screen at any zoom. Photoshop does the same.
+ */
+const CHECKER_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+uniform float u_checkerSize;
+uniform vec3 u_light;
+uniform vec3 u_dark;
+out vec4 fragColor;
+void main() {
+  vec2 cell = floor(gl_FragCoord.xy / u_checkerSize);
+  float odd = mod(cell.x + cell.y, 2.0);
+  fragColor = vec4(mix(u_dark, u_light, odd), 1.0);
 }`;
 
 export interface DocumentFrameStats {
@@ -65,7 +79,9 @@ export class DocumentRenderer {
   readonly compositor: LayerCompositor;
   readonly tiles: TileDrawer;
   readonly ants: AntsRenderer;
+  readonly quickMask: QuickMaskRenderer;
   private present: Program;
+  private checker: Program;
   private quad: WebGLBuffer;
   private vao: WebGLVertexArrayObject;
   private stats: DocumentFrameStats = { layerPasses: 0, batchedLayers: 0, tileInstances: 0, level: 0 };
@@ -78,7 +94,9 @@ export class DocumentRenderer {
     this.compositor = new LayerCompositor(gl, caps);
     this.tiles = new TileDrawer(gl, atlas);
     this.ants = new AntsRenderer(gl);
+    this.quickMask = new QuickMaskRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
+    this.checker = new Program(gl, CANVAS_MASK_VERT, CHECKER_FRAG, 'checker');
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -146,6 +164,7 @@ export class DocumentRenderer {
     docRect: Rect,
     pasteboard: [number, number, number] = [0.157, 0.157, 0.157],
     showAnts = true,
+    quickMask: { tex: WebGLTexture; style: QuickMaskStyle } | null = null,
   ): DocumentFrameStats {
     const gl = this.gl;
     const dpr = view.devicePixelRatio;
@@ -167,20 +186,44 @@ export class DocumentRenderer {
     gl.clearColor(pasteboard[0], pasteboard[1], pasteboard[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    gl.bindVertexArray(this.vao);
+
+    // Checkerboard first, clipped to the canvas rect.
+    this.checker.use();
+    this.checker.uMat3('u_docToClip', docToClip(view));
+    gl.uniform4f(
+      this.checker.loc('u_docRect'),
+      docRect.x0,
+      docRect.y0,
+      docRect.x1,
+      docRect.y1,
+    );
+    this.checker.u1f('u_checkerSize', 8 * dpr);
+    gl.uniform3f(this.checker.loc('u_light'), 0.8, 0.8, 0.8);
+    gl.uniform3f(this.checker.loc('u_dark'), 0.6, 0.6, 0.6);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    // Then the artwork over it. The composite is straight alpha and zero outside the canvas,
+    // so a plain "over" leaves the pasteboard untouched.
     this.present.use();
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, composite.tex);
     this.present.u1i('u_composite', 0);
-    this.present.u2f('u_size', vw, vh);
-    this.present.u1f('u_checkerSize', 8 * dpr);
-    gl.uniform3f(this.present.loc('u_light'), 0.8, 0.8, 0.8);
-    gl.uniform3f(this.present.loc('u_dark'), 0.6, 0.6, 0.6);
-    gl.bindVertexArray(this.vao);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
 
-    // Selection outline sits on top of everything, in screen space.
-    if (showAnts) this.ants.draw(view, performance.now());
+    // The rubylith goes over the artwork but under the outline. Photoshop hides the ants in
+    // Quick Mask mode, because the overlay already shows the edge — and shows it better,
+    // since it renders partial coverage the ants' 50% contour throws away.
+    if (quickMask) {
+      this.quickMask.draw(view, quickMask.tex, doc.width, doc.height, quickMask.style);
+    } else if (showAnts) {
+      // Selection outline sits on top of everything, in screen space.
+      this.ants.draw(view, performance.now());
+    }
 
     this.compositor.releaseAll();
     return this.stats;
@@ -234,9 +277,8 @@ export class DocumentRenderer {
     this.tiles.dispose();
     this.ants.dispose();
     this.present.dispose();
+    this.checker.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);
   }
 }
-
-export { CANVAS_MASK_VERT };

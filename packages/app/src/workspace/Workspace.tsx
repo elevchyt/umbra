@@ -254,9 +254,12 @@ export function Workspace() {
       case 'color.defaults':
         store.resetColors();
         break;
-      case 'select.quickMask':
-        setQuickMask((v) => !v);
+      case 'select.quickMask': {
+        const on = !quickMask();
+        setQuickMask(on);
+        send({ t: 'setQuickMask', on });
         break;
+      }
 
       case 'brush.sizeUp':
         setBrushSize((s) => Math.min(5000, s + stepFor(s)));
@@ -320,6 +323,12 @@ export function Workspace() {
         promptAmount('Border Selection', 'Width', 4, (v) =>
           send({ t: 'selectCommand', command: 'border', amount: v }),
         );
+        break;
+      case 'select.grow':
+        send({ t: 'selectCommand', command: 'grow' });
+        break;
+      case 'select.similar':
+        send({ t: 'selectCommand', command: 'similar' });
         break;
       case 'modify.smooth':
         promptAmount('Smooth Selection', 'Sample Radius', 2, (v) =>
@@ -625,7 +634,7 @@ export function Workspace() {
               store.openDialog('colorPicker');
             }}
             quickMask={quickMask()}
-            onToggleQuickMask={() => setQuickMask((v) => !v)}
+            onToggleQuickMask={() => runCommand('select.quickMask')}
             onCycleScreenMode={() => runCommand('view.cycleScreenMode')}
             onEditToolbar={() => runCommand('edit.toolbar')}
           />

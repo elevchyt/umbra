@@ -533,37 +533,122 @@ function coverageFor(diff: number, tolerance: number, antialias: boolean): numbe
   return Math.round(255 * (1 - (diff - soft) / (tolerance - soft)));
 }
 
-/** Select ▸ Grow: re-run the wand from every currently selected pixel. */
+/**
+ * Select ▸ Grow — flood outward from the current selection into adjacent pixels that are
+ * within `tolerance` of the neighbour they spread from. It is the Magic Wand seeded from
+ * every selected pixel at once, so it keeps going until the region stops being similar rather
+ * than growing by a fixed distance the way Expand does.
+ *
+ * Breadth-first from the whole selection boundary, not a fixed number of dilation passes:
+ * one call must reach as far as the similarity does, which is what a user expects from a
+ * command with no distance parameter.
+ */
 export function grow(
   mask: Mask,
   pixels: Uint8Array | Uint8ClampedArray,
   size: MaskSize,
   tolerance: number,
 ): Mask {
-  const out = Uint8Array.from(mask);
   const { width, height } = size;
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      if (mask[y * width + x]! < 128) continue;
-      const seed = (y * width + x) * 4;
-      // Only test the four neighbours; repeated application grows further.
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        const nx = x + dx;
-        const ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
-        const ni = ny * width + nx;
-        if (out[ni]! >= 128) continue;
-        const o = ni * 4;
-        const d = Math.max(
-          Math.abs(pixels[o]! - pixels[seed]!),
-          Math.abs(pixels[o + 1]! - pixels[seed + 1]!),
-          Math.abs(pixels[o + 2]! - pixels[seed + 2]!),
-        );
-        if (d <= tolerance) out[ni] = 255;
+  const n = width * height;
+  // A plain array as a FIFO with a moving head: the queue is at most n entries, and shifting
+  // a JS array would make this quadratic.
+  const queue = new Int32Array(n);
+  let head = 0;
+  let tail = 0;
+  for (let i = 0; i < n; i++) if (mask[i]! >= 128) queue[tail++] = i;
+
+  while (head < tail) {
+    const i = queue[head++]!;
+    const x = i % width;
+    const y = (i / width) | 0;
+    const o = i * 4;
+    for (let k = 0; k < 4; k++) {
+      const nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0);
+      const ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
+      if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+      const ni = ny * width + nx;
+      if (mask[ni]! >= 128) continue;
+      const no = ni * 4;
+      const d = Math.max(
+        Math.abs(pixels[no]! - pixels[o]!),
+        Math.abs(pixels[no + 1]! - pixels[o + 1]!),
+        Math.abs(pixels[no + 2]! - pixels[o + 2]!),
+      );
+      if (d > tolerance) continue;
+      mask[ni] = 255;
+      queue[tail++] = ni;
+    }
+  }
+  return mask;
+}
+
+/**
+ * Select ▸ Similar — every pixel in the image within `tolerance` of ANY currently selected
+ * colour, contiguous or not.
+ *
+ * The selected colours are collected into a 32³ RGB histogram-style lookup rather than
+ * compared pairwise: a large selection can hold hundreds of thousands of pixels, and testing
+ * every image pixel against every selected one is not viable. The grid's cell is 8 levels per
+ * axis, so the tolerance is applied against cell centres with the cell's own half-width
+ * folded in — slightly generous at the boundary, which matches the command being a broad
+ * "more of this" rather than an exact threshold. [fit]
+ */
+export function similar(
+  mask: Mask,
+  pixels: Uint8Array | Uint8ClampedArray,
+  size: MaskSize,
+  tolerance: number,
+): Mask {
+  const { width, height } = size;
+  const n = width * height;
+  const BITS = 5;
+  const CELLS = 1 << BITS; // 32 per axis
+  const SHIFT = 8 - BITS; // 8 levels per cell
+  const present = new Uint8Array(CELLS * CELLS * CELLS);
+  let any = false;
+  for (let i = 0; i < n; i++) {
+    if (mask[i]! < 128) continue;
+    const o = i * 4;
+    const r = pixels[o]! >> SHIFT;
+    const g = pixels[o + 1]! >> SHIFT;
+    const b = pixels[o + 2]! >> SHIFT;
+    present[(r * CELLS + g) * CELLS + b] = 1;
+    any = true;
+  }
+  if (!any) return mask;
+
+  // Cells within `tolerance` of a present cell, measured in cells (rounding up so the whole
+  // tolerance band is covered).
+  const reach = Math.ceil((tolerance + (1 << SHIFT) - 1) / (1 << SHIFT));
+  const near = new Uint8Array(present.length);
+  for (let r = 0; r < CELLS; r++) {
+    for (let g = 0; g < CELLS; g++) {
+      for (let b = 0; b < CELLS; b++) {
+        if (!present[(r * CELLS + g) * CELLS + b]) continue;
+        const r0 = Math.max(0, r - reach);
+        const r1 = Math.min(CELLS - 1, r + reach);
+        const g0 = Math.max(0, g - reach);
+        const g1 = Math.min(CELLS - 1, g + reach);
+        const b0 = Math.max(0, b - reach);
+        const b1 = Math.min(CELLS - 1, b + reach);
+        for (let rr = r0; rr <= r1; rr++) {
+          for (let gg = g0; gg <= g1; gg++) {
+            for (let bb = b0; bb <= b1; bb++) near[(rr * CELLS + gg) * CELLS + bb] = 1;
+          }
+        }
       }
     }
   }
-  mask.set(out);
+
+  for (let i = 0; i < n; i++) {
+    if (mask[i]! >= 128) continue;
+    const o = i * 4;
+    const r = pixels[o]! >> SHIFT;
+    const g = pixels[o + 1]! >> SHIFT;
+    const b = pixels[o + 2]! >> SHIFT;
+    if (near[(r * CELLS + g) * CELLS + b]) mask[i] = 255;
+  }
   return mask;
 }
 

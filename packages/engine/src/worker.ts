@@ -137,6 +137,9 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.endSelect(msg.x, msg.y);
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'setQuickMask':
+        engine?.setQuickMask(msg.on);
+        break;
       case 'cancelSelect':
         engine?.cancelSelect();
         break;
@@ -158,6 +161,8 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
           case 'contract': engine.modifySelection('contract', msg.amount ?? 1); break;
           case 'border': engine.modifySelection('border', msg.amount ?? 1); break;
           case 'smooth': engine.modifySelection('smooth', msg.amount ?? 1); break;
+          case 'grow': engine.growSelection(false); break;
+          case 'similar': engine.growSelection(true); break;
         }
         post({ t: 'doc', doc: engine.summary() });
         break;

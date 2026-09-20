@@ -14,12 +14,14 @@ import {
   feather,
   invert,
   isEmpty,
+  grow,
   magicWand,
   maskBounds,
   rasterizeEllipse,
   rasterizeLine,
   rasterizePolygon,
   rasterizeRect,
+  similar,
   smooth,
   traceBoundary,
   type CombineOp,
@@ -140,6 +142,21 @@ export function applyShape(
     opts.op === 'new' || !current ? createMask(width, height) : Uint8Array.from(current.mask);
   combine(base, shapeMask, opts.op === 'new' ? 'new' : opts.op);
   return { mask: base, width, height };
+}
+
+/**
+ * Select ▸ Grow and Select ▸ Similar. Both read the composited document, because Photoshop
+ * judges similarity on what is on screen rather than on the active layer alone.
+ */
+export function growSelection(
+  sel: Selection,
+  pixels: Uint8Array,
+  tolerance: number,
+  everywhere: boolean,
+): Selection {
+  return derive(sel, (m) =>
+    everywhere ? similar(m, pixels, sel, tolerance) : grow(m, pixels, sel, tolerance),
+  );
 }
 
 export interface WandRequest {

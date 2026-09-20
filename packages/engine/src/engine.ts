@@ -3,10 +3,12 @@
  * neither UI work nor engine work can stall the other (spec 03 §2).
  */
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
+import { EMPTY_RECT, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
 import { probeCaps, type GpuCaps } from './gpu/caps.js';
 import { TileAtlas } from './gpu/atlas.js';
 import { DocumentRenderer } from './render/document-renderer.js';
+import { DEFAULT_QUICK_MASK, type QuickMaskStyle } from './render/quick-mask.js';
 import { DabPainter } from './render/dab.js';
 import {
   fitToScreen,
@@ -47,6 +49,7 @@ import {
   contractSelection,
   borderSelection,
   smoothSelection,
+  growSelection,
   type Selection,
   type SelectShape,
   type CombineOp,
@@ -101,6 +104,14 @@ export class Engine {
   private selectionTex: WebGLTexture | null = null;
   private selectionTexFor: Selection | null = null;
   private outlineFor: Selection | null = null;
+  /** Quick Mask mode: strokes edit the selection instead of pixels. */
+  quickMask = false;
+  quickMaskStyle: QuickMaskStyle = DEFAULT_QUICK_MASK;
+  /**
+   * Region of the selection mask changed since the texture was last uploaded, so a Quick Mask
+   * stroke re-uploads a few hundred rows rather than the whole canvas every frame.
+   */
+  private selectionDirty: Rect = EMPTY_RECT;
   /** In-flight selection gesture. */
   private gesture: {
     tool: string;
@@ -398,6 +409,34 @@ export class Engine {
     const sel = this.doc.selection ?? selectAll(this.doc.width, this.doc.height);
     this.setSelection(invertSelection(sel), 'Inverse');
   }
+  /**
+   * Quick Mask is a VIEW of the selection, not a separate channel: the selection is already a
+   * full-canvas coverage mask, so entering the mode only changes how it is drawn and what a
+   * brush stroke writes to. Entering with nothing selected starts from an empty mask, which is
+   * how Photoshop lets you paint a selection from scratch.
+   */
+  setQuickMask(on: boolean): void {
+    if (this.quickMask === on) return;
+    this.quickMask = on;
+    if (on && !this.doc.selection) {
+      this.doc = { ...this.doc, selection: makeSelection(this.doc.width, this.doc.height) };
+    } else if (!on && this.doc.selection && selectionIsEmpty(this.doc.selection)) {
+      this.doc = { ...this.doc, selection: null };
+    }
+  }
+
+  /** Select ▸ Grow / Similar; both need the composited pixels the wand also reads. */
+  growSelection(everywhere: boolean): void {
+    const sel = this.doc.selection;
+    if (!sel) return;
+    const composite = this.documentPixels();
+    if (!composite) return;
+    this.setSelection(
+      growSelection(sel, composite.pixels, this.selectOptions.tolerance, everywhere),
+      everywhere ? 'Similar' : 'Grow',
+    );
+  }
+
   modifySelection(op: 'feather' | 'expand' | 'contract' | 'border' | 'smooth', amount: number): void {
     const sel = this.doc.selection;
     if (!sel) return;
@@ -506,6 +545,28 @@ export class Engine {
     const sel = this.doc.selection;
     if (!sel) return null;
     const gl = this.gl;
+    if (this.selectionTexFor === sel && this.selectionTex && !rectIsEmpty(this.selectionDirty)) {
+      // Same mask object, edited in place by a Quick Mask stroke: patch the changed rows.
+      const r = this.selectionDirty;
+      gl.bindTexture(gl.TEXTURE_2D, this.selectionTex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, sel.width);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        r.x0,
+        r.y0,
+        r.x1 - r.x0,
+        r.y1 - r.y0,
+        gl.RED,
+        gl.UNSIGNED_BYTE,
+        sel.mask,
+        r.y0 * sel.width + r.x0,
+      );
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+      this.selectionDirty = EMPTY_RECT;
+      return { tex: this.selectionTex, width: sel.width, height: sel.height };
+    }
     if (this.selectionTexFor !== sel || !this.selectionTex) {
       if (this.selectionTex) gl.deleteTexture(this.selectionTex);
       const tex = gl.createTexture();
@@ -519,6 +580,7 @@ export class Engine {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.selectionTex = tex;
       this.selectionTexFor = sel;
+      this.selectionDirty = EMPTY_RECT;
     }
     return { tex: this.selectionTex, width: sel.width, height: sel.height };
   }
@@ -548,6 +610,18 @@ export class Engine {
 
   beginStroke(size: number, hardness: number, color: [number, number, number, number]): void {
     this.strokeParams = { size, hardness, color };
+    this.lastDab = null;
+
+    if (this.quickMask) {
+      // Edit a copy so the pre-stroke mask stays on the undo stack, exactly as a pixel stroke
+      // leaves the pre-stroke tiles there.
+      const sel = this.doc.selection ?? makeSelection(this.doc.width, this.doc.height);
+      const working = { ...sel, mask: Uint8Array.from(sel.mask) };
+      this.doc = { ...this.doc, selection: working };
+      this.selectionTexFor = null;
+      this.painting = true;
+      return;
+    }
 
     let target = this.activePixelLayer();
     if (!target) {
@@ -557,7 +631,6 @@ export class Engine {
     }
     this.strokeLayerId = target.id;
     this.strokeWriter = target.plane.base.writer();
-    this.lastDab = null;
     this.painting = true;
   }
 
@@ -574,6 +647,15 @@ export class Engine {
   }
 
   endStroke(): void {
+    if (this.quickMask) {
+      if (!this.painting) return;
+      this.painting = false;
+      this.lastDab = null;
+      // One history entry for the whole stroke. `this.doc` already holds the edited mask, so
+      // committing it as-is records exactly what the user painted.
+      this.commit(this.doc, 'Quick Mask Brush');
+      return;
+    }
     if (!this.strokeWriter || this.strokeLayerId === null) return;
     const scratch = new Uint8Array(TILE_SIZE * TILE_SIZE * 4);
     // Pull the GPU's work back into the tile store so the CPU tiles are authoritative again.
@@ -610,7 +692,7 @@ export class Engine {
 
     for (const s of samples) {
       if (s.flags & FLAG_DOWN) this.lastDab = null;
-      if (!this.painting || !this.strokeWriter) continue;
+      if (!this.painting || (!this.strokeWriter && !this.quickMask)) continue;
       if (oldest === null) oldest = s.timeAbs;
 
       const doc = docPointAtScreen(this.view, s.x, s.y);
@@ -644,6 +726,10 @@ export class Engine {
   }
 
   private stampDab(x: number, y: number, radius: number): void {
+    if (this.quickMask) {
+      this.stampQuickMaskDab(x, y, radius);
+      return;
+    }
     const writer = this.strokeWriter;
     if (!writer) return;
     this.dabs.paint(
@@ -658,6 +744,57 @@ export class Engine {
       },
       this.selectionTexture(),
     );
+  }
+
+  /**
+   * A dab into the Quick Mask, on the CPU.
+   *
+   * The GPU dab path paints into an atlas slice belonging to a tile; the selection is a flat
+   * full-canvas buffer with no tiles, so there is nothing for it to target. Writing the few
+   * thousand pixels a dab covers directly is both simpler and fast enough — and the dirty rect
+   * it accumulates keeps the texture re-upload proportional to the stroke rather than to the
+   * canvas.
+   *
+   * Brush colour chooses direction, as in Photoshop: black masks (removes from the selection),
+   * white unmasks, and greys land in between.
+   */
+  private stampQuickMaskDab(x: number, y: number, radius: number): void {
+    const sel = this.doc.selection;
+    if (!sel) return;
+    const { mask, width, height } = sel;
+    const [r, g, b, alpha] = this.strokeParams.color;
+    // Rec. 709 luma, the same weighting the greyscale conversion uses. Black paints rubylith
+    // (coverage 0, protected); white paints it away.
+    const target = 255 * (0.2126 * r + 0.7152 * g + 0.0722 * b);
+    const hardness = this.strokeParams.hardness;
+    const inner = radius * hardness;
+    const outer = Math.max(radius, inner + 0.5);
+
+    const x0 = Math.max(0, Math.floor(x - outer));
+    const x1 = Math.min(width, Math.ceil(x + outer) + 1);
+    const y0 = Math.max(0, Math.floor(y - outer));
+    const y1 = Math.min(height, Math.ceil(y + outer) + 1);
+    if (x1 <= x0 || y1 <= y0) return;
+
+    for (let py = y0; py < y1; py++) {
+      const dy = py + 0.5 - y;
+      for (let px = x0; px < x1; px++) {
+        const dx = px + 0.5 - x;
+        const d = Math.hypot(dx, dy);
+        if (d >= outer) continue;
+        // Same falloff as the GPU dab: hard to `inner`, then a smoothstep out to the rim.
+        let a = 1;
+        if (d > inner) {
+          const t = (d - inner) / (outer - inner);
+          a = 1 - t * t * (3 - 2 * t);
+        }
+        a *= alpha;
+        if (a <= 0) continue;
+        const i = py * width + px;
+        mask[i] = Math.round(mask[i]! + (target - mask[i]!) * a);
+      }
+    }
+    this.selectionDirty = rectUnion(this.selectionDirty, { x0, y0, x1, y1 });
   }
 
   // ---- frame ------------------------------------------------------------------------
@@ -675,14 +812,27 @@ export class Engine {
 
     this.processInput();
 
-    // Re-trace the outline only when the selection itself changed.
-    if (this.outlineFor !== this.doc.selection) {
-      this.renderer.ants.setOutline(selectionOutline(this.doc.selection));
-      this.outlineFor = this.doc.selection;
+    // Quick Mask replaces the ants with the overlay, and the mask changes every frame while
+    // painting, so the outline is dropped rather than re-traced. Tracking what the outline was
+    // LAST built from (null included) is what stops a stale outline surviving the mode change
+    // or a new document.
+    const wantAnts = this.showSelectionEdges && !this.quickMask;
+    const outlineFrom = wantAnts ? this.doc.selection : null;
+    if (this.outlineFor !== outlineFrom) {
+      this.renderer.ants.setOutline(selectionOutline(outlineFrom));
+      this.outlineFor = outlineFrom;
     }
 
     this.atlas.beginFrame();
-    const s = this.renderer.render(this.doc, this.view, docRect(this.doc), undefined, this.showSelectionEdges);
+    const overlay = this.quickMask ? this.selectionTexture() : null;
+    const s = this.renderer.render(
+      this.doc,
+      this.view,
+      docRect(this.doc),
+      undefined,
+      wantAnts,
+      overlay ? { tex: overlay.tex, style: this.quickMaskStyle } : null,
+    );
     this.lastPasses = s.layerPasses;
     this.lastInstances = s.tileInstances;
 
