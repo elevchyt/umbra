@@ -90,6 +90,7 @@ import {
   type StrokeState,
 } from '@umbra/kernels/brush';
 import { savePsd } from './psd-save.js';
+import { Journal } from './journal.js';
 import { openPsd } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
 
@@ -738,6 +739,83 @@ export class Engine {
     return [r / weight / 255, g / weight / 255, b / weight / 255];
   }
 
+  // ---- crash recovery ---------------------------------------------------------------------
+
+  readonly journal = new Journal();
+  /** Doc the journal last holds, so an idle session does not rewrite the same bytes. */
+  private journalledDoc: Doc | null = null;
+  private journalDueAt = 0;
+  /** Photoshop's default autosave interval is 10 minutes; a crash journal wants to be denser. */
+  journalIntervalMs = 30_000;
+
+  /**
+   * Write a recovery snapshot when the document has changed and enough time has passed.
+   *
+   * Called from the frame loop rather than a timer so it can never fire while an edit is
+   * half-applied: at this point the document is always a committed, consistent value.
+   */
+  private maybeJournal(now: number): void {
+    if (this.journalIntervalMs <= 0) return;
+    if (this.doc === this.journalledDoc) return;
+    if (this.doc.layers.length === 0) return;
+    if (now < this.journalDueAt) return;
+    // Encoding a PSD blocks this thread for as long as it takes, so it must not land in the
+    // middle of a stroke or a drag. Both end in a committed document a moment later anyway.
+    if (this.painting || this.transform || this.crop) return;
+    this.journalDueAt = now + this.journalIntervalMs;
+    this.journalledDoc = this.doc;
+    try {
+      // No flattened composite: a journal is read back by this program, not by another one,
+      // and the composite would add another full canvas to every snapshot.
+      this.journal.write(savePsd(this.doc, { maximizeCompatibility: false }), {
+        name: this.doc.name,
+        savedAt: Date.now(),
+        width: this.doc.width,
+        height: this.doc.height,
+      });
+    } catch (err) {
+      // A document the PSD writer cannot express yet must not break editing; the next
+      // interval will try again, and the failure is visible in the save path anyway.
+      // Silent failure here would be worse than the noise: it is the difference between a
+      // recoverable crash and an unrecoverable one.
+      console.warn('[journal] snapshot failed', err);
+    }
+  }
+
+  /** Called after an explicit save, so the next start does not offer a stale recovery. */
+  forgetJournal(): void {
+    this.journalledDoc = this.doc;
+    void this.journal.clear();
+  }
+
+  // ---- history --------------------------------------------------------------------------
+
+  /** Jump to any state, as clicking a row in the History panel does. */
+  historyGoto(index: number): boolean {
+    const doc = this.history.goto(index);
+    if (!doc) return false;
+    this.doc = doc;
+    this.compositeCache = null;
+    return true;
+  }
+
+  historySnapshot(name?: string): void {
+    this.history.snapshot(name ?? `Snapshot ${this.history.list().filter((s) => s.snapshot).length}`);
+  }
+
+  historyConfigure(patch: { limit?: number; nonLinear?: boolean }): void {
+    this.history.configure(patch);
+  }
+
+  /** Edit ▸ Toggle Last State (Ctrl+Alt+Z). */
+  toggleLastState(): boolean {
+    const doc = this.history.toggleLast();
+    if (!doc) return false;
+    this.doc = doc;
+    this.compositeCache = null;
+    return true;
+  }
+
   // ---- channels -------------------------------------------------------------------------
 
   /**
@@ -1362,6 +1440,7 @@ export class Engine {
 
     this.processInput();
     this.airbrushTick();
+    this.maybeJournal(start);
 
     // Quick Mask replaces the ants with the overlay, and the mask changes every frame while
     // painting, so the outline is dropped rather than re-traced. Tracking what the outline was
@@ -1377,6 +1456,15 @@ export class Engine {
     this.atlas.beginFrame();
     // The live stroke is drawn from the base level only: it is small, and a mip built from the
     // stroke buffer would be a frame behind the dabs the GPU is still laying down.
+    this.renderer.setEraseOverlay(
+      this.strokeWriter && this.strokeLayerId !== null && this.paintMode === 'clear'
+        ? {
+            plane: new MipPlane(this.strokeWriter.preview(), 0),
+            layerId: this.strokeLayerId,
+            opacity: this.brush.opacity,
+          }
+        : null,
+    );
     this.renderer.setStrokeOverlay(
       this.strokeWriter && this.strokeLayerId !== null && this.paintMode !== 'clear'
         ? {
@@ -1461,6 +1549,12 @@ export class Engine {
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
       hasSelection: !!this.doc.selection,
+      history: this.history.list().map((h) => ({
+        name: h.name,
+        snapshot: h.snapshot,
+        time: h.time,
+      })),
+      historyIndex: this.history.index,
       channels: this.doc.channels.map((c) => ({
         id: c.id,
         name: c.name,

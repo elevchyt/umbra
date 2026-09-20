@@ -9,6 +9,8 @@ import type { FromEngine, ToEngine } from './protocol.js';
 
 let engine: Engine | null = null;
 let ringSab: SharedArrayBuffer | null = null;
+/** Bytes found by `checkRecovery`, held until the user accepts or discards them. */
+let recovered: ArrayBuffer | null = null;
 
 function post(msg: FromEngine, transfer?: Transferable[]): void {
   (self as unknown as Worker).postMessage(msg, transfer ?? []);
@@ -120,6 +122,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       }
       case 'savePsd': {
         if (!engine) break;
+        engine.forgetJournal();
         const buffer = engine.toPsd();
         post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
         break;
@@ -237,6 +240,45 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'channelCommand':
         engine?.channelCommand(msg.command, msg.id, msg.patch);
         if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'checkRecovery': {
+        const found = await engine?.journal.read();
+        if (found) {
+          post({
+            t: 'recovery',
+            name: found.meta.name,
+            savedAt: found.meta.savedAt,
+            width: found.meta.width,
+            height: found.meta.height,
+          });
+          recovered = found.bytes;
+        }
+        break;
+      }
+      case 'recover': {
+        if (!engine || !recovered) break;
+        engine.openPsdBuffer(recovered, 'Recovered');
+        recovered = null;
+        post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
+      case 'discardRecovery':
+        recovered = null;
+        await engine?.journal.clear();
+        break;
+      case 'historyGoto':
+        if (engine?.historyGoto(msg.index)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'historySnapshot':
+        engine?.historySnapshot(msg.name);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'historyConfigure':
+        engine?.historyConfigure({ limit: msg.limit, nonLinear: msg.nonLinear });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'toggleLastState':
+        if (engine?.toggleLastState()) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'setChannelView':
         if (engine) engine.channelView = msg.view as never;

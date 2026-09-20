@@ -855,6 +855,20 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 ::-webkit-scrollbar-corner { background: var(--panel-sunken); }
 
 /* Image Size / Canvas Size */
+.history-rows { overflow-y: auto; flex: 1; }
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  cursor: default;
+  font-size: 11px;
+}
+.history-row:hover { background: var(--row-hover); }
+.history-row.current { background: var(--row-active); }
+/* Undone states stay listed but dimmed: they are reachable until the next edit. */
+.history-row.future { opacity: 0.45; }
+
 /* Channel rows reuse the layer row; their thumb is a plain grey block, not an image. */
 .channel-thumb { background: var(--border-light); }
 

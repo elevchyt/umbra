@@ -75,6 +75,9 @@ const [brush, setBrush] = createStore({
   mode: 'normal' as string,
 });
 
+/** History panel: Photoshop's "Allow Non-Linear History" preference. */
+const [nonLinearHistory, setNonLinearHistory] = createSignal(false);
+
 /** Which channel the canvas shows; mirrors the engine's view setting. */
 const [channelView, setChannelView] = createSignal<'all' | 'r' | 'g' | 'b' | number>('all');
 
@@ -246,6 +249,8 @@ export const store = {
   setCropDeletes,
   channelView,
   setChannelView,
+  nonLinearHistory,
+  setNonLinearHistory,
 
   foreground,
   setForeground,

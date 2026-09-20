@@ -170,6 +170,17 @@ export class DocumentRenderer {
     this.strokeOverlay = overlay;
   }
 
+  /**
+   * A live ERASE stroke. It cannot be an overlay layer — there is no colour that subtracts —
+   * so it previews as a temporary multiplier on the target layer's mask: coverage starts at 1
+   * and the stroke's alpha takes it down. That is exactly what the committed erase will do.
+   */
+  private eraseOverlay: { plane: MipPlane; layerId: number; opacity: number } | null = null;
+
+  setEraseOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number } | null): void {
+    this.eraseOverlay = overlay;
+  }
+
   /** Map a layer list to GPU layers, splicing the live stroke in above its target. */
   private toGpuLayers(layers: readonly Layer[], view: ViewState, clip: Rect): GpuLayer[] {
     const out: GpuLayer[] = [];
@@ -215,10 +226,21 @@ export class DocumentRenderer {
     const live =
       this.liveTransform && this.liveTransform.ids.has(layer.id) ? this.liveTransform.matrix : IDENTITY;
 
-    if (layer.mask && layer.mask.enabled) {
-      const maskPlane = layer.mask.plane;
+    const erase = this.eraseOverlay?.layerId === layer.id ? this.eraseOverlay : null;
+    const maskPlane = layer.mask && layer.mask.enabled ? layer.mask.plane : null;
+
+    if (maskPlane || erase) {
+      out.maskStartsOpaque = !maskPlane && !!erase;
       out.drawMask = (_t: RenderTarget) => {
-        this.tiles.draw(maskPlane, view, clip, true, 1, false, live);
+        if (maskPlane) this.tiles.draw(maskPlane, view, clip, true, 1, false, live);
+        if (erase) {
+          const gl = this.gl;
+          gl.enable(gl.BLEND);
+          // dst *= (1 - srcAlpha): the stroke's coverage removes the layer's.
+          gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+          this.tiles.draw(erase.plane, view, clip, false, erase.opacity, true, live);
+          gl.disable(gl.BLEND);
+        }
       };
     }
 

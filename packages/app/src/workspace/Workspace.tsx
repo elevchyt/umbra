@@ -14,7 +14,7 @@ import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
 import { DocumentTabs, StatusBar } from './Chrome';
-import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
+import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
@@ -62,6 +62,7 @@ export function Workspace() {
   const [pickerTarget, setPickerTarget] = createSignal<'foreground' | 'background'>('foreground');
   const [quickMask, setQuickMask] = createSignal(false);
   const [transforming, setTransforming] = createSignal(false);
+  const [recovery, setRecovery] = createSignal<{ name: string; savedAt: number } | null>(null);
   const [error, setError] = createSignal<string | null>(null);
 
   // ---- keymap -------------------------------------------------------------------------
@@ -78,7 +79,11 @@ export function Workspace() {
           // Headless harnesses: the shell opens the page with a hash and waits for a report.
           if (location.hash === '#spikes') client!.send({ t: 'runSpikes' });
           else if (location.hash === '#parity') client!.send({ t: 'runParity' });
-          else client!.send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
+          else {
+            client!.send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
+            // Offer whatever the last crash left behind, once the editor is usable.
+            client!.send({ t: 'checkRecovery' });
+          }
         },
         onStats: (s) => {
           // Dev aid: the live engine stats are awkward to inspect from the UI thread
@@ -99,6 +104,7 @@ export function Workspace() {
         onParity: (pass, text) => reportToShell(pass, text),
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
         onTransform: setTransforming,
+        onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
         onSampled: (color, toBackground) => {
           // @umbra/core/color works in 0…1, which is also what the engine samples in.
           const rgb = { r: color[0], g: color[1], b: color[2] };
@@ -488,6 +494,9 @@ export function Workspace() {
         promptAmount('Border Selection', 'Width', 4, (v) =>
           send({ t: 'selectCommand', command: 'border', amount: v }),
         );
+        break;
+      case 'edit.toggleLastState':
+        send({ t: 'toggleLastState' });
         break;
       case 'select.saveSelection':
         send({ t: 'saveSelection' });
@@ -992,6 +1001,31 @@ export function Workspace() {
             />
           );
         }}
+      </Show>
+      <Show when={recovery()}>
+        {(r) => (
+          <Dialog
+            title="Recover Document"
+            width={380}
+            okLabel="Recover"
+            onCancel={() => {
+              setRecovery(null);
+              send({ t: 'discardRecovery' });
+            }}
+            onOk={() => {
+              setRecovery(null);
+              send({ t: 'recover' });
+            }}
+          >
+            <div class="sizedlg">
+              <p>
+                “{r().name}” was left unsaved when Umbra last closed, autosaved at{' '}
+                {new Date(r().savedAt).toLocaleString()}.
+              </p>
+              <p class="dim">Recovering opens it as a new document; the current one is untouched.</p>
+            </div>
+          </Dialog>
+        )}
       </Show>
       <Show when={store.dialog()?.id === 'fill'}>
         <FillDialog

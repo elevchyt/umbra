@@ -14,7 +14,7 @@
  * currently drops anything it cannot model. Preserving those bytes needs the vendored codec
  * fork and is tracked as the main remaining PSD risk.
  */
-import { writePsdBuffer, initializeCanvas, type Layer as AgLayer, type Psd } from 'ag-psd';
+import { writePsdUint8Array, initializeCanvas, type Layer as AgLayer, type Psd } from 'ag-psd';
 import { TILE_SIZE, TILE_SHIFT, channelCount, maxValue } from '@umbra/core/pixels';
 import type { BlendMode } from '@umbra/core/blend';
 import { PSD_BLEND_MODE } from '@umbra/psd';
@@ -216,7 +216,9 @@ export function savePsd(doc: Doc, opts: SavePsdOptions = {}): ArrayBuffer {
     psd.imageData = renderComposite(doc) as unknown as ImageData;
   }
 
-  const out = writePsdBuffer(psd, {
+  // `writePsdBuffer` wraps the result in a Node Buffer and throws without one, so it cannot be
+  // used in the worker this runs in — which is everywhere except the tests.
+  const out = writePsdUint8Array(psd, {
     generateThumbnail: false,
     psb: opts.psb,
     // Layers are already cropped to their tight bounds above.

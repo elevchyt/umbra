@@ -158,6 +158,8 @@ export interface GpuLayer {
   drawSource?: (target: RenderTarget) => void;
   /** Paints the mask's coverage into the red channel of the bound target. */
   drawMask?: (target: RenderTarget) => void;
+  /** Start the mask target at full coverage — see `renderMask`. */
+  maskStartsOpaque?: boolean;
   maskDensity?: number;
   children?: GpuLayer[];
   /**
@@ -252,6 +254,15 @@ export class LayerCompositor {
 
   private release(t: RenderTarget): void {
     this.inUse.delete(t);
+  }
+
+  private fill(t: RenderTarget, r: number, g: number, b: number, a: number): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo);
+    gl.viewport(0, 0, t.width, t.height);
+    gl.disable(gl.BLEND);
+    gl.clearColor(r, g, b, a);
+    gl.clear(gl.COLOR_BUFFER_BIT);
   }
 
   private clear(t: RenderTarget): void {
@@ -447,7 +458,10 @@ export class LayerCompositor {
   private renderMask(layer: GpuLayer): RenderTarget | null {
     if (!layer.drawMask) return null;
     const m = this.acquire();
-    this.clear(m);
+    // A mask target normally starts empty (nothing shows); an ERASE preview starts full,
+    // because it multiplies coverage down from 1 rather than painting it up from 0.
+    if (layer.maskStartsOpaque) this.fill(m, 1, 1, 1, 1);
+    else this.clear(m);
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, m.fbo);
     gl.viewport(0, 0, m.width, m.height);

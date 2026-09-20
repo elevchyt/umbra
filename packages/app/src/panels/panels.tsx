@@ -516,18 +516,52 @@ function PropertiesPanel() {
 
 // ---- History --------------------------------------------------------------------------
 
+/**
+ * History panel — spec 01 §4.
+ *
+ * Rows below the current state are dimmed rather than hidden: they are still reachable until
+ * the next edit discards them, and seeing what undo has put aside is most of what the panel is
+ * for. Snapshots sit at the top with their own icon, pinned against the state limit.
+ */
 function HistoryPanel() {
+  const send = (msg: unknown) => store.engine?.(msg);
+  const states = () => store.doc()?.history ?? [];
+  const index = () => store.doc()?.historyIndex ?? 0;
+
   return (
     <div class="history-panel">
-      <div class="history-row current">
-        <Icon name="snapshot" size={14} />
-        <span>{store.doc()?.name ?? 'Untitled'}</span>
+      <div class="history-rows">
+        <For each={states()}>
+          {(s, i) => (
+            <div
+              class="history-row"
+              classList={{ current: i() === index(), future: i() > index() }}
+              onClick={() => send({ t: 'historyGoto', index: i() })}
+              title={new Date(s.time).toLocaleTimeString()}
+            >
+              <Icon name={s.snapshot ? 'snapshot' : 'historyBrush'} size={14} />
+              <span>{s.name}</span>
+            </div>
+          )}
+        </For>
       </div>
-      <div class="panel-placeholder">
-        <p class="dim">
-          History states, snapshots and the history-brush source appear here once the command
-          bus records undo in M2.
-        </p>
+      <div class="panel-footer">
+        <button
+          type="button"
+          class="icon-button"
+          title="Create new snapshot"
+          onClick={() => send({ t: 'historySnapshot' })}
+        >
+          <Icon name="snapshot" size={14} />
+        </button>
+        <Checkbox
+          checked={store.nonLinearHistory()}
+          onChange={(v) => {
+            store.setNonLinearHistory(v);
+            send({ t: 'historyConfigure', nonLinear: v });
+          }}
+          label="Non-Linear"
+        />
       </div>
     </div>
   );

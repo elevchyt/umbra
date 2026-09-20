@@ -159,8 +159,7 @@ later), Fill… / Stroke… dialogs, clipboard (copy, copy merged, paste, paste 
 into), History panel complete (snapshots, non-linear option), crash-recovery journal.
 **Exit:** dogfood-able for basic photo compositing & painting; latency budgets green.
 
-**Progress (selections done, painting in progress).** The selection stack is complete end to
-end: kernel (`@umbra/kernels/selection` — rect/ellipse/polygon/line rasterising with
+**M3 complete.** The selection stack is complete end to end: kernel (`@umbra/kernels/selection` — rect/ellipse/polygon/line rasterising with
 anti-aliased coverage, combine ops, exact Felzenszwalb distance transform behind
 Expand/Contract/Border, three-box-pass Feather, majority-vote Smooth, scanline flood fill
 behind the Magic Wand, boundary tracing), engine state (selection lives on `Doc`, so undo
@@ -207,7 +206,11 @@ Findings.
    the dialog closed. The callback is now captured before the signal is cleared. Worth
    remembering as a shape, not a one-off: in any `Show` callback, read what you need up front.
 
-Quick Mask, Grow/Similar, Fill…/Stroke…/Clear, the Eyedropper and brush engine v1 followed.
+Quick Mask, Grow/Similar, Fill…/Stroke…/Clear, the Eyedropper and brush engine v1 followed,
+then the Move tool and Free Transform (deferred out of M2), the clipboard, the Paint Bucket and
+Gradient, Crop, the Channels panel with Save/Load Selection, the History panel and the
+crash-recovery journal. **M3 is complete.**
+
 Further findings:
 
 5. **The transparency checkerboard covered the whole viewport.** The pass that was meant to
@@ -215,7 +218,7 @@ Further findings:
    invisible and every measurement taken off a screenshot was wrong — which cost real time
    during the stroke-duplication hunt above before it was spotted.
 
-6. **Opacity vs flow needs a stroke buffer.** Dabs now accumulate in their own plane at the
+6. **Opacity vs flow needs a stroke buffer.** Dabs accumulate in their own plane at the
    brush's FLOW and are composited onto the layer once at its OPACITY. Painting each dab
    straight onto the layer, which is the obvious implementation, lets a slow stroke darken
    without limit and makes 50% opacity mean nothing. The buffer is also what gives Behind and
@@ -234,11 +237,32 @@ Further findings:
    stale log lines from a previous page load as if they were current. Anything logged for a
    one-shot diagnostic needs a token that ties it to the run.
 
-Still to do in M3: Transform Selection, Save/Load Selection + Channels panel, Paint Bucket,
-Gradient, clipboard, Crop, History panel completeness, crash-recovery journal, and the Move
-tool and Free Transform deferred out of M2. Known gaps in what is built: the eraser has no
-live preview (the stroke overlay cannot subtract until the compositor takes a per-layer erase
-input), and the Magic Wand's Sample Size is not yet averaged.
+9. **PSD saving had never run outside the tests, and did not work.** `writePsdBuffer` wraps its
+   result in a Node `Buffer` and throws without one, so File ▸ Save As failed in the worker —
+   which is every real invocation. The node tests passed throughout because they have a
+   `Buffer`. It surfaced only when the crash journal (which saves a PSD) was verified in the
+   browser. `writePsdUint8Array` is the browser-safe entry point.
+
+   The lesson is the M0 one again in a different costume: a test that exercises a path in an
+   environment the product never runs in proves less than it appears to.
+
+10. **A live Move or Transform must not rewrite pixels.** The layer's tiles are drawn THROUGH
+    the matrix instead, so dragging a 4K layer costs nothing and the pixels are resampled
+    exactly once, on commit. The same idea makes a whole-pixel move lossless: `shiftPlane`
+    re-keys tiles and reuses the tile objects outright when the offset is a multiple of the
+    tile size. A Move that resampled would soften a layer slightly on every nudge — the kind
+    of bug a user notices after an hour and cannot explain.
+
+11. **The eraser cannot be an overlay layer.** There is no colour that subtracts, so a live
+    erase previews as a temporary multiplier on the target layer's mask: coverage starts at 1
+    and the stroke's alpha takes it down, which is exactly what the committed erase does.
+
+**Known gaps carried into M4.** With a selection active, Photoshop's Free Transform acts on
+the selected pixels only; that needs the selection lifted into a floating layer, so for now it
+transforms the whole layer. The Magic Wand's Sample Size is not averaged. The crash journal
+writes a full PSD on a 30-second timer, which for a large document is seconds of worker time —
+it is skipped during strokes and drags, but an incremental journal is the real answer. Gradient
+presets are the three built-ins; the stop editor arrives with the preset manager.
 
 ### M4 — Adjustments (L)
 All adjustments in [05 §A](05-adjustments-filters.md) as destructive commands **and**

@@ -29,6 +29,9 @@ export interface DocSummary {
   activeLayerIds: number[];
   hasSelection: boolean;
   channels: { id: number; name: string; visible: boolean; indicates: 'masked' | 'selected' }[];
+  /** The History panel's rows, oldest first; `historyIndex` is the one in effect. */
+  history: { name: string; snapshot: boolean; time: number }[];
+  historyIndex: number;
   selectionBounds: { x0: number; y0: number; x1: number; y1: number } | null;
   /** Features in the opened file that we do not model yet (spec 07 §1.3). */
   warnings?: { layer: string; features: string[] }[];
@@ -113,6 +116,13 @@ export type ToEngine =
   | { t: 'loadSelection'; channelId: number; op?: string; invert?: boolean }
   | { t: 'channelCommand'; command: string; id?: number; patch?: Record<string, unknown> }
   | { t: 'setChannelView'; view: string | number }
+  | { t: 'historyGoto'; index: number }
+  | { t: 'historySnapshot'; name?: string }
+  | { t: 'historyConfigure'; limit?: number; nonLinear?: boolean }
+  | { t: 'toggleLastState' }
+  | { t: 'checkRecovery' }
+  | { t: 'recover' }
+  | { t: 'discardRecovery' }
   | { t: 'beginCrop' }
   | { t: 'setCropRect'; x0: number; y0: number; x1: number; y1: number }
   | { t: 'commitCrop' }
@@ -185,4 +195,5 @@ export type FromEngine =
   | { t: 'error'; message: string }
   | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
   | { t: 'sampled'; color: [number, number, number]; toBackground: boolean }
-  | { t: 'transform'; active: boolean };
+  | { t: 'transform'; active: boolean }
+  | { t: 'recovery'; name: string; savedAt: number; width: number; height: number };

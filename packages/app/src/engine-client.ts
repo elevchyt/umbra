@@ -22,6 +22,7 @@ export interface EngineClientEvents {
   onDoc?: (doc: DocSummary) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
+  onRecovery?: (info: { name: string; savedAt: number; width: number; height: number }) => void;
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onParity?: (pass: boolean, text: string) => void;
@@ -103,6 +104,9 @@ export class EngineClient {
       case 'transform':
         this.transformActive = msg.active;
         this.events.onTransform?.(msg.active);
+        break;
+      case 'recovery':
+        this.events.onRecovery?.(msg);
         break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);

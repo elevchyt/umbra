@@ -127,7 +127,7 @@ export const MENUS: MenuDef[] = [
     items: [
       { label: 'Undo', cmd: 'edit.undo', shortcut: 'Ctrl+Z', done: true },
       { label: 'Redo', cmd: 'edit.redo', shortcut: 'Ctrl+Shift+Z', done: true },
-      { label: 'Toggle Last State', cmd: 'edit.toggleLastState', shortcut: 'Ctrl+Alt+Z' },
+      { label: 'Toggle Last State', cmd: 'edit.toggleLastState', shortcut: 'Ctrl+Alt+Z', done: true },
       { label: 'Fade…', cmd: 'edit.fade', shortcut: 'Ctrl+Shift+F' },
       sep,
       { label: 'Cut', cmd: 'edit.cut', shortcut: 'Ctrl+X', done: true },
