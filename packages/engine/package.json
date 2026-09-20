@@ -10,6 +10,7 @@
     "./*": "./src/*.ts"
   },
   "dependencies": {
-    "@umbra/core": "workspace:*"
+    "@umbra/core": "workspace:*",
+    "@umbra/kernels": "workspace:*"
   }
 }

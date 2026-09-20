@@ -53,7 +53,8 @@ export type ToEngine =
   | { t: 'strokeBegin'; size: number; hardness: number; color: [number, number, number, number] }
   | { t: 'strokeEnd' }
   | { t: 'loseContext' }
-  | { t: 'runSpikes' };
+  | { t: 'runSpikes' }
+  | { t: 'runParity' };
 
 export type FromEngine =
   | { t: 'ready'; caps: GpuCaps }
@@ -62,4 +63,5 @@ export type FromEngine =
   | { t: 'contextLost' }
   | { t: 'contextRestored' }
   | { t: 'spikes'; pass: boolean; text: string }
+  | { t: 'parity'; pass: boolean; text: string }
   | { t: 'error'; message: string };

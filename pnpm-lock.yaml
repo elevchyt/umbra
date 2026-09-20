@@ -55,6 +55,9 @@ importers:
       '@umbra/core':
         specifier: workspace:*
         version: link:../core
+      '@umbra/kernels':
+        specifier: workspace:*
+        version: link:../kernels
 
   packages/kernels:
     dependencies:

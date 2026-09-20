@@ -20,6 +20,8 @@ export default defineConfig({
       { find: /^@umbra\/psd\/(.*)$/, replacement: `${pkg('psd')}/$1` },
       { find: '@umbra/psd', replacement: `${pkg('psd')}/index.ts` },
       { find: /^@umbra\/ui\/(.*)$/, replacement: `${pkg('ui')}/$1` },
+      { find: /^@umbra\/kernels\/(.*)$/, replacement: `${pkg('kernels')}/$1` },
+      { find: '@umbra/kernels', replacement: `${pkg('kernels')}/index.ts` },
     ],
   },
   test: {

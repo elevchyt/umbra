@@ -17,6 +17,12 @@ import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, Sh
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
+/** Hand a headless harness its result; the Electron main process is waiting on this. */
+function reportToShell(pass: boolean, text: string): void {
+  const shell = (globalThis as Record<string, any>).umbraShell;
+  shell?.reportSpikes?.({ pass, text });
+}
+
 export function Workspace() {
   let canvasRef!: HTMLCanvasElement;
   let docAreaRef!: HTMLDivElement;
@@ -41,7 +47,10 @@ export function Workspace() {
       client = new EngineClient(canvasRef, {
         onReady: () => {
           store.setEngineReady(true);
-          client!.send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
+          // Headless harnesses: the shell opens the page with a hash and waits for a report.
+          if (location.hash === '#spikes') client!.send({ t: 'runSpikes' });
+          else if (location.hash === '#parity') client!.send({ t: 'runParity' });
+          else client!.send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
         },
         onStats: (s) => {
           // Dev aid: the live engine stats are awkward to inspect from the UI thread
@@ -58,9 +67,14 @@ export function Workspace() {
             store.setTabs(0, 'name', d.name);
           }
         },
+        onSpikes: (pass, text) => reportToShell(pass, text),
+        onParity: (pass, text) => reportToShell(pass, text),
         onContextLost: () => store.setContextLost(true),
         onContextRestored: () => store.setContextLost(false),
-        onError: (m) => setError(m),
+        onError: (m) => {
+          setError(m);
+          if (location.hash) reportToShell(false, `ERROR: ${m}`);
+        },
       });
       client.paintMode = PAINT_TOOLS.has(store.activeTool());
     } catch (e) {

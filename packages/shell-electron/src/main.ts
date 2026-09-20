@@ -9,6 +9,8 @@ const APP_ROOT = join(here, '..', '..', 'app', 'dist');
 
 const DEV_URL = process.env.UMBRA_DEV_URL ?? '';
 const SPIKES = process.argv.includes('--spikes');
+const PARITY = process.argv.includes('--parity');
+const HEADLESS = SPIKES || PARITY;
 
 /**
  * Cross-origin isolation is required for SharedArrayBuffer, which carries the pointer-input
@@ -110,7 +112,7 @@ async function createWindow(): Promise<BrowserWindow> {
   });
 
   win.once('ready-to-show', () => {
-    if (!SPIKES) win.show();
+    if (!HEADLESS) win.show();
   });
 
   // Never navigate away from our own origin, and open real links in the user's browser.
@@ -122,7 +124,7 @@ async function createWindow(): Promise<BrowserWindow> {
   // No renderer may request camera, mic, geolocation and so on.
   win.webContents.session.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
 
-  const hash = SPIKES ? '#spikes' : '';
+  const hash = SPIKES ? '#spikes' : PARITY ? '#parity' : '';
   if (DEV_URL) await win.loadURL(DEV_URL + hash);
   else await win.loadURL('app://umbra/index.html' + hash);
 
@@ -144,7 +146,7 @@ void app.whenReady().then(async () => {
     arch: process.arch,
   }));
 
-  if (SPIKES) {
+  if (HEADLESS) {
     const win = await createWindow();
     const timeoutMs = 180_000;
     const done = new Promise<{ pass: boolean; text: string }>((resolve) => {

@@ -21,6 +21,7 @@ export interface EngineClientEvents {
   onStats?: (stats: EngineStats) => void;
   onDoc?: (doc: DocSummary) => void;
   onSpikes?: (pass: boolean, text: string) => void;
+  onParity?: (pass: boolean, text: string) => void;
   onContextLost?: () => void;
   onContextRestored?: () => void;
   onError?: (message: string) => void;
@@ -85,6 +86,9 @@ export class EngineClient {
         break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);
+        break;
+      case 'parity':
+        this.events.onParity?.(msg.pass, msg.text);
         break;
       case 'contextLost':
         this.events.onContextLost?.();

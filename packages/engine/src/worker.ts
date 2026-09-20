@@ -81,6 +81,13 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.caps.loseContext?.loseContext();
         setTimeout(() => engine?.caps.loseContext?.restoreContext(), 600);
         break;
+      case 'runParity': {
+        if (!engine) throw new Error('engine not initialised');
+        const { runParity } = await import('./parity-run.js');
+        const { pass, text } = runParity(engine.gl, engine.caps);
+        post({ t: 'parity', pass, text });
+        break;
+      }
       case 'runSpikes': {
         if (!engine || !ringSab) throw new Error('engine not initialised');
         const { pass, text } = await runSpikes(engine, ringSab);

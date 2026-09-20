@@ -8,7 +8,8 @@
     "build": "node build.mjs",
     "start": "pnpm build && electron dist/main.js",
     "dev": "node dev.mjs",
-    "spikes": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --spikes"
+    "spikes": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --spikes",
+    "parity": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --parity"
   },
   "devDependencies": {
     "electron": "^44.4.3",
