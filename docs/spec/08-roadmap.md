@@ -272,7 +272,15 @@ panel (icon grid + presets); Histogram panel (channels, expanded/all-channels vi
 cached-data warning); Info panel (dual readouts, before/after during adjustment, samplers);
 fill layers (solid/gradient/pattern); PSD read/write for all of them; adjustment fusion in
 the compositor.
-**Exit:** adjustment golden suite vs Photoshop within ±2/255 (±1 where formula is documented).
+**Exit (revised, open question 3 answered "no Photoshop").** There is no pixel oracle, so the
+bar is split. Documented adjustments — Levels, Curves, Exposure, Invert, Posterize, Threshold,
+Channel Mixer, Gradient Map, Black & White, Photo Filter, Desaturate — must match their own
+published definition exactly, tested against an independent implementation of the formula.
+Proprietary ones — Vibrance, Selective Color, Shadows/Highlights, Auto Tone/Contrast/Color,
+HDR Toning, Match Color — are approximated, tagged `[fit]`, and must state in the code what
+the approximation is and what evidence would settle it. Every adjustment must additionally be
+self-consistent: identity parameters are a no-op, the destructive command and the adjustment
+layer agree to ±1/255, and a round trip through PSD preserves the parameters.
 
 ### M5 — Filters I + Smart Objects (XL)
 Filter framework (registry, auto-dialogs with zoomable preview + on-canvas preview, selection/
@@ -384,7 +392,10 @@ greyed-out rules by mode/depth/target identical to Photoshop.
 2. Licence of Umbra itself (MIT / GPL / proprietary) — affects which reference code (Krita =
    GPL, GIMP = GPL) may be *read for ideas only* vs adapted. Default assumption: permissive;
    therefore **no GPL code is copied**, only papers/specs/MIT-Apache sources.
-3. Whether a licensed Photoshop install is available to generate parity goldens (strongly
-   recommended; otherwise rely on embedded composites in third-party PSDs + Photopea
-   cross-checks).
+3. ~~Whether a licensed Photoshop install is available to generate parity goldens.~~
+   **Answered 2026-09-21: no Photoshop.** So there is no pixel oracle, and the strategy is:
+   implement every documented formula exactly and test it against its own definition; for the
+   proprietary ones, approximate, tag `[fit]`, and record in the code what the guess is and
+   what would settle it. Cross-checks come from embedded composites in third-party PSDs and
+   from Photopea. M4's exit criterion softens accordingly — see M4.
 4. ML model pack: which segmentation model (MobileSAM-class ~40 MB vs U²-Net-class ~5 MB).
