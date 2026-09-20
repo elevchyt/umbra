@@ -83,6 +83,7 @@ export type ToEngine =
   | { t: 'fit' }
   | { t: 'actualPixels' }
   | { t: 'openBitmap'; bitmap: ImageBitmap; name: string }
+  | { t: 'placeBitmap'; bitmap: ImageBitmap; name: string }
   | { t: 'openPsd'; buffer: ArrayBuffer; name: string }
   | { t: 'setLayerVisible'; id: number; visible: boolean }
   | { t: 'setLayerOpacity'; id: number; opacity: number }
@@ -105,6 +106,7 @@ export type ToEngine =
   | { t: 'commitTransform'; method?: string }
   | { t: 'cancelTransform' }
   | { t: 'nudge'; dx: number; dy: number }
+  | { t: 'clipboard'; op: string }
   | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean }
   | {
       t: 'fill';

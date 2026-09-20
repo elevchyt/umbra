@@ -195,6 +195,20 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.nudge(msg.dx, msg.dy);
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'clipboard': {
+        if (!engine) break;
+        switch (msg.op) {
+          case 'copy': engine.copy(false); break;
+          case 'copyMerged': engine.copy(true); break;
+          case 'cut': engine.cut(); break;
+          case 'paste': engine.paste('normal'); break;
+          case 'pasteInPlace': engine.paste('inPlace'); break;
+          case 'pasteInto': engine.paste('into'); break;
+          case 'pasteOutside': engine.paste('outside'); break;
+        }
+        post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;
@@ -230,6 +244,10 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         break;
       case 'redo':
         if (engine?.redo()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'placeBitmap':
+        engine?.placeBitmap(msg.bitmap, msg.name);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'openBitmap':
         engine?.openBitmap(msg.bitmap, msg.name);

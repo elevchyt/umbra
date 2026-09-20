@@ -60,6 +60,7 @@ import * as ImageCmd from './commands/image.js';
 import type { Resample } from './commands/image.js';
 import * as FillCmd from './commands/fill.js';
 import * as TransformCmd from './commands/transform.js';
+import * as ClipCmd from './commands/clipboard.js';
 import {
   IDENTITY,
   about,
@@ -273,6 +274,26 @@ export class Engine {
     this.doc = { ...emptyDoc(width, height, name), layers: [layer], activeLayerIds: [layer.id] };
     this.history = new History(this.doc, 'Open');
     this.view = fitToScreen(this.view, width, height);
+  }
+
+  /**
+   * Add a bitmap as a new layer, centred on the view — what pasting an image from the system
+   * clipboard or dropping a file onto an open document should do. `openBitmap` replaces the
+   * document instead, which is right for File ▸ Open and wrong for everything else.
+   */
+  placeBitmap(bitmap: ImageBitmap, name: string): void {
+    const { plane, width, height } = planeFromImageBitmap(bitmap);
+    const dx = Math.round(this.view.centre.x - width / 2);
+    const dy = Math.round(this.view.centre.y - height / 2);
+    const layer = makePixelLayer(name, TransformCmd.shiftPlane(plane, dx, dy));
+    this.commit(
+      {
+        ...this.doc,
+        layers: [...this.doc.layers, layer],
+        activeLayerIds: [layer.id],
+      },
+      'Place',
+    );
   }
 
   openPsdBuffer(buffer: ArrayBuffer, name: string): void {
@@ -712,6 +733,45 @@ export class Engine {
     // Sampling empty canvas gives white, as Photoshop does over transparency.
     if (weight <= 0) return [1, 1, 1];
     return [r / weight / 255, g / weight / 255, b / weight / 255];
+  }
+
+  // ---- clipboard ------------------------------------------------------------------------
+
+  /**
+   * The application clipboard. It is deliberately NOT the system clipboard: the system one
+   * carries a flattened bitmap, which would lose the soft selection edge and the exact
+   * coordinates Paste in Place needs. Importing an image FROM the system clipboard goes
+   * through the normal open path instead.
+   */
+  private clipboard: ClipCmd.Clipboard | null = null;
+
+  get hasClipboard(): boolean {
+    return this.clipboard !== null;
+  }
+
+  copy(merged: boolean): void {
+    if (merged) {
+      const composite = this.documentPixels();
+      if (!composite) return;
+      this.clipboard = ClipCmd.copyMerged(this.doc, composite) ?? this.clipboard;
+      return;
+    }
+    this.clipboard = ClipCmd.copy(this.doc) ?? this.clipboard;
+  }
+
+  cut(): void {
+    const next = ClipCmd.copy(this.doc);
+    if (!next) return;
+    this.clipboard = next;
+    this.commit(ClipCmd.clearSelection(this.doc), 'Cut');
+  }
+
+  paste(mode: ClipCmd.PasteMode): void {
+    if (!this.clipboard) return;
+    this.commit(
+      ClipCmd.paste(this.doc, this.clipboard, mode, this.view.centre),
+      mode === 'inPlace' ? 'Paste in Place' : mode === 'normal' ? 'Paste' : 'Paste Into',
+    );
   }
 
   // ---- move & transform ---------------------------------------------------------------

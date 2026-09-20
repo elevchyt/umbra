@@ -118,6 +118,24 @@ export function Workspace() {
       return;
     }
 
+    /**
+     * An image on the system clipboard becomes a new layer. The application clipboard keeps
+     * planes and coordinates, which the system one cannot carry, so the two are separate:
+     * Edit ▸ Paste uses ours, and a system image arrives here as a placed bitmap.
+     */
+    const onPaste = async (e: ClipboardEvent) => {
+      if (isTextEntry(e.target)) return;
+      const item = [...(e.clipboardData?.items ?? [])].find((i) => i.type.startsWith('image/'));
+      if (!item) return;
+      const file = item.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      const bitmap = await createImageBitmap(file);
+      send({ t: 'placeBitmap', bitmap, name: file.name || 'Pasted Image' });
+    };
+    window.addEventListener('paste', onPaste);
+    onCleanup(() => window.removeEventListener('paste', onPaste));
+
     const ro = new ResizeObserver(([entry]) => {
       const r = entry!.contentRect;
       client?.resize(Math.max(1, r.width), Math.max(1, r.height));
@@ -361,6 +379,27 @@ export function Workspace() {
         break;
       case 'transform.rotate90cw':
         send({ t: 'imageCommand', command: 'rotate', angle: 90 });
+        break;
+      case 'edit.cut':
+        send({ t: 'clipboard', op: 'cut' });
+        break;
+      case 'edit.copy':
+        send({ t: 'clipboard', op: 'copy' });
+        break;
+      case 'edit.copyMerged':
+        send({ t: 'clipboard', op: 'copyMerged' });
+        break;
+      case 'edit.paste':
+        send({ t: 'clipboard', op: 'paste' });
+        break;
+      case 'edit.pasteInPlace':
+        send({ t: 'clipboard', op: 'pasteInPlace' });
+        break;
+      case 'edit.pasteInto':
+        send({ t: 'clipboard', op: 'pasteInto' });
+        break;
+      case 'edit.pasteOutside':
+        send({ t: 'clipboard', op: 'pasteOutside' });
         break;
       case 'edit.fill':
         store.openDialog('fill');
