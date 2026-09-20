@@ -14,6 +14,8 @@ import { LayerCompositor, type GpuLayer, type RenderTarget } from './compositor.
 import { TileDrawer } from './tile-drawer.js';
 import { AntsRenderer } from './ants.js';
 import { QuickMaskRenderer, type QuickMaskStyle } from './quick-mask.js';
+import { HandlesRenderer } from './handles.js';
+import { IDENTITY, type Mat } from '@umbra/kernels/matrix';
 import { docToClip, type ViewState } from './view.js';
 import type { BlendMode } from '@umbra/core/blend';
 import { MipPlane } from '../tiles/mip.js';
@@ -82,6 +84,7 @@ export class DocumentRenderer {
   readonly tiles: TileDrawer;
   readonly ants: AntsRenderer;
   readonly quickMask: QuickMaskRenderer;
+  readonly handles: HandlesRenderer;
   private present: Program;
   private checker: Program;
   private quad: WebGLBuffer;
@@ -97,6 +100,7 @@ export class DocumentRenderer {
     this.tiles = new TileDrawer(gl, atlas);
     this.ants = new AntsRenderer(gl);
     this.quickMask = new QuickMaskRenderer(gl);
+    this.handles = new HandlesRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
     this.checker = new Program(gl, CANVAS_MASK_VERT, CHECKER_FRAG, 'checker');
     this.quad = gl.createBuffer();
@@ -127,6 +131,16 @@ export class DocumentRenderer {
     opacity: number;
     mode: BlendMode;
   } | null = null;
+
+  /**
+   * A live Move or Free Transform. The listed layers draw through `matrix` instead of being
+   * rewritten, so dragging is free and the pixels are resampled exactly once, on commit.
+   */
+  private liveTransform: { ids: ReadonlySet<number>; matrix: Mat } | null = null;
+
+  setLiveTransform(t: { ids: ReadonlySet<number>; matrix: Mat } | null): void {
+    this.liveTransform = t;
+  }
 
   setStrokeOverlay(
     overlay: { plane: MipPlane; layerId: number; opacity: number; mode: BlendMode } | null,
@@ -176,10 +190,13 @@ export class DocumentRenderer {
       maskDensity: layer.mask?.density ?? 1,
     };
 
+    const live =
+      this.liveTransform && this.liveTransform.ids.has(layer.id) ? this.liveTransform.matrix : IDENTITY;
+
     if (layer.mask && layer.mask.enabled) {
       const maskPlane = layer.mask.plane;
       out.drawMask = (_t: RenderTarget) => {
-        this.tiles.draw(maskPlane, view, clip, true);
+        this.tiles.draw(maskPlane, view, clip, true, 1, false, live);
       };
     }
 
@@ -189,7 +206,7 @@ export class DocumentRenderer {
       const plane = layer.plane;
       out.drawSource = (_t: RenderTarget) => {
         this.stats.layerPasses++;
-        this.stats.tileInstances += this.tiles.draw(plane, view, clip);
+        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, 1, false, live);
       };
       const ch = layer.blending?.channels;
       out.plain =
@@ -201,7 +218,7 @@ export class DocumentRenderer {
         (!ch || (ch.r && ch.g && ch.b));
       out.drawBatched = (opacity: number) => {
         this.stats.batchedLayers++;
-        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, opacity, true);
+        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, opacity, true, live);
       };
     }
     return out;
@@ -214,6 +231,7 @@ export class DocumentRenderer {
     pasteboard: [number, number, number] = [0.157, 0.157, 0.157],
     showAnts = true,
     quickMask: { tex: WebGLTexture; style: QuickMaskStyle } | null = null,
+    transformBox: { box: Rect; matrix: Mat } | null = null,
   ): DocumentFrameStats {
     const gl = this.gl;
     const dpr = view.devicePixelRatio;
@@ -273,6 +291,8 @@ export class DocumentRenderer {
       // Selection outline sits on top of everything, in screen space.
       this.ants.draw(view, performance.now());
     }
+    // The transform box goes above even the ants: it is what the pointer is acting on.
+    if (transformBox) this.handles.draw(view, transformBox.box, transformBox.matrix);
 
     this.compositor.releaseAll();
     return this.stats;
@@ -327,6 +347,8 @@ export class DocumentRenderer {
     this.ants.dispose();
     this.present.dispose();
     this.checker.dispose();
+    this.quickMask.dispose();
+    this.handles.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);
   }

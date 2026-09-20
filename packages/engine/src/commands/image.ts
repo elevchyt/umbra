@@ -27,7 +27,7 @@ function keysKernel(x: number, a: number): number {
   return 0;
 }
 
-const KERNEL_A: Record<string, number> = {
+export const KERNEL_A: Record<string, number> = {
   // Community measurement puts Photoshop's plain Bicubic near -0.75; Smoother/Sharper are
   // softer and harder variants. Tagged [fit] until goldens settle them (spec 05 §7).
   bicubic: -0.75,
@@ -36,7 +36,7 @@ const KERNEL_A: Record<string, number> = {
 };
 
 /** Sample a plane with straight alpha, premultiplying so transparent pixels cannot bleed. */
-function sampleBilinear(read: (x: number, y: number, out: Float32Array) => void, x: number, y: number, out: Float32Array): void {
+export function sampleBilinear(read: (x: number, y: number, out: Float32Array) => void, x: number, y: number, out: Float32Array): void {
   const x0 = Math.floor(x);
   const y0 = Math.floor(y);
   const fx = x - x0;
@@ -56,7 +56,7 @@ function sampleBilinear(read: (x: number, y: number, out: Float32Array) => void,
   }
 }
 
-function sampleCubic(
+export function sampleCubic(
   read: (x: number, y: number, out: Float32Array) => void,
   x: number,
   y: number,
@@ -93,7 +93,7 @@ function sampleCubic(
  * well as to its pixels. Assuming RGBA here reads four bytes out of a one-byte-per-pixel tile,
  * which silently destroys the mask — so the layout has to be respected.
  */
-function planeReader(plane: Plane): (x: number, y: number, out: Float32Array) => void {
+export function planeReader(plane: Plane): (x: number, y: number, out: Float32Array) => void {
   const n = channelCount(plane.format.layout);
   const max = maxValue(plane.format.sample);
   return (x, y, out) => {
@@ -117,7 +117,7 @@ function planeReader(plane: Plane): (x: number, y: number, out: Float32Array) =>
 }
 
 /** Writer matching `planeReader`, so single-channel planes stay single-channel. */
-function planeWriter(plane: Plane) {
+export function planeWriter(plane: Plane) {
   const n = channelCount(plane.format.layout);
   const writer = Plane.empty(plane.format, n === 1 ? [0] : undefined).writer();
   const put = (x: number, y: number, px: Float32Array): void => {
@@ -178,7 +178,7 @@ export function resamplePlane(plane: Plane, sx: number, sy: number, method: Resa
   return writer.commit();
 }
 
-function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane): Layer[] {
+export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane): Layer[] {
   return layers.map((l) => {
     const mask = l.mask ? { ...l.mask, plane: new MipPlane(fn(l.mask.plane.base)) } : l.mask;
     if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn) };

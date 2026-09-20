@@ -163,6 +163,38 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (color) post({ t: 'sampled', color, toBackground: msg.toBackground });
         break;
       }
+      case 'beginTransform':
+        if (engine?.beginTransform(msg.transient, msg.selectionOnly ?? false)) {
+          post({ t: 'transform', active: true });
+        }
+        break;
+      case 'transformDragBegin':
+        engine?.beginTransformDrag(msg.x, msg.y, msg.rotate);
+        break;
+      case 'transformDragMove':
+        engine?.updateTransformDrag(msg.x, msg.y, msg.constrain, msg.fromCentre);
+        break;
+      case 'transformDragEnd':
+        if (!engine) break;
+        engine.endTransformDrag();
+        if (!engine.transformActive) {
+          post({ t: 'transform', active: false });
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
+      case 'commitTransform':
+        engine?.commitTransform((msg.method ?? 'bicubic') as never);
+        post({ t: 'transform', active: false });
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'cancelTransform':
+        engine?.cancelTransform();
+        post({ t: 'transform', active: false });
+        break;
+      case 'nudge':
+        engine?.nudge(msg.dx, msg.dy);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'setQuickMask':
         engine?.setQuickMask(msg.on);
         break;

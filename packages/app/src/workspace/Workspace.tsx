@@ -45,6 +45,14 @@ function reportToShell(pass: boolean, text: string): void {
   shell?.reportSpikes?.({ pass, text });
 }
 
+/** Arrow keys move by one document pixel, or ten with Shift. */
+const ARROW_NUDGE: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
+};
+
 export function Workspace() {
   let canvasRef!: HTMLCanvasElement;
   let docAreaRef!: HTMLDivElement;
@@ -52,6 +60,7 @@ export function Workspace() {
 
   const [pickerTarget, setPickerTarget] = createSignal<'foreground' | 'background'>('foreground');
   const [quickMask, setQuickMask] = createSignal(false);
+  const [transforming, setTransforming] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
 
   // ---- keymap -------------------------------------------------------------------------
@@ -88,6 +97,7 @@ export function Workspace() {
         onSpikes: (pass, text) => reportToShell(pass, text),
         onParity: (pass, text) => reportToShell(pass, text),
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
+        onTransform: setTransforming,
         onSampled: (color, toBackground) => {
           // @umbra/core/color works in 0…1, which is also what the engine samples in.
           const rgb = { r: color[0], g: color[1], b: color[2] };
@@ -127,6 +137,7 @@ export function Workspace() {
     client.paintMode = PAINT_TOOLS.has(tool);
     client.selectTool = SELECT_TOOLS.has(tool) ? tool : null;
     client.sampleSize = tool === 'eyedropper' ? size : null;
+    client.moveTool = tool === 'move';
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -330,6 +341,27 @@ export function Workspace() {
         store.openDialog('shortcuts');
         break;
 
+      case 'transform.commit':
+        send({ t: 'commitTransform' });
+        break;
+      case 'transform.cancel':
+        send({ t: 'cancelTransform' });
+        break;
+      case 'edit.freeTransform':
+        send({ t: 'beginTransform', transient: false });
+        break;
+      case 'select.transformSelection':
+        send({ t: 'beginTransform', transient: false, selectionOnly: true });
+        break;
+      case 'transform.again':
+      case 'transform.scale':
+      case 'transform.rotate':
+      case 'transform.skew':
+        send({ t: 'beginTransform', transient: false });
+        break;
+      case 'transform.rotate90cw':
+        send({ t: 'imageCommand', command: 'rotate', angle: 90 });
+        break;
       case 'edit.fill':
         store.openDialog('fill');
         break;
@@ -555,6 +587,28 @@ export function Workspace() {
       if (isTextEntry(e.target)) return;
       // Any modal swallows the shell's shortcuts, including the small Select ▸ Modify dialogs.
       if (store.dialog() || amountPrompt()) return;
+      // A transform box owns Enter, Escape and the arrow keys while it is open.
+      if (transforming()) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          send({ t: 'commitTransform' });
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          send({ t: 'cancelTransform' });
+          return;
+        }
+      }
+      const arrow = ARROW_NUDGE[e.key];
+      if (arrow && (transforming() || store.activeTool() === 'move')) {
+        e.preventDefault();
+        // Shift nudges by 10, as it does everywhere in Photoshop.
+        const step = e.shiftKey ? 10 : 1;
+        send({ t: 'nudge', dx: arrow[0] * step, dy: arrow[1] * step });
+        return;
+      }
+
       // Escape abandons an in-flight selection gesture; Enter commits one. Neither should
       // swallow the key when no gesture is running.
       if (client?.isSelecting && (e.key === 'Escape' || e.key === 'Enter')) {

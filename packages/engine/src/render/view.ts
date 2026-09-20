@@ -77,6 +77,12 @@ export function visibleDocRect(v: ViewState): Rect {
   );
 }
 
+/** Screen point for a document point — the inverse of `docPointAtScreen`. */
+export function screenPointAtDoc(v: ViewState, x: number, y: number): Point {
+  const m = docToScreen(v);
+  return { x: m.a * x + m.c * y + m.e, y: m.b * x + m.d * y + m.f };
+}
+
 export function docPointAtScreen(v: ViewState, sx: number, sy: number): Point {
   const m = screenToDoc(v);
   return { x: m.a * sx + m.c * sy + m.e, y: m.b * sx + m.d * sy + m.f };

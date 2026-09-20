@@ -58,6 +58,18 @@ export interface EngineStats {
   centreY: number;
   /** Most recent input→pixels latency in ms, or null when nothing was painted. */
   lastLatencyMs: number | null;
+  /**
+   * The live transform, so the options bar's X/Y/W/H/angle fields can follow the handles.
+   * It rides on the stats message because it changes every frame while a handle is dragged,
+   * which is exactly the cadence stats already have.
+   */
+  transform: {
+    x: number;
+    y: number;
+    scaleX: number;
+    scaleY: number;
+    rotation: number;
+  } | null;
 }
 
 export type ToEngine =
@@ -86,6 +98,13 @@ export type ToEngine =
   | { t: 'endSelect'; x?: number; y?: number }
   | { t: 'cancelSelect' }
   | { t: 'setQuickMask'; on: boolean }
+  | { t: 'beginTransform'; transient: boolean; selectionOnly?: boolean }
+  | { t: 'transformDragBegin'; x: number; y: number; rotate: boolean }
+  | { t: 'transformDragMove'; x: number; y: number; constrain: boolean; fromCentre: boolean }
+  | { t: 'transformDragEnd' }
+  | { t: 'commitTransform'; method?: string }
+  | { t: 'cancelTransform' }
+  | { t: 'nudge'; dx: number; dy: number }
   | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean }
   | {
       t: 'fill';
@@ -132,4 +151,5 @@ export type FromEngine =
   | { t: 'parity'; pass: boolean; text: string }
   | { t: 'error'; message: string }
   | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
-  | { t: 'sampled'; color: [number, number, number]; toBackground: boolean };
+  | { t: 'sampled'; color: [number, number, number]; toBackground: boolean }
+  | { t: 'transform'; active: boolean };

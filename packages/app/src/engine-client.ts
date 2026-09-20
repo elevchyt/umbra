@@ -21,6 +21,7 @@ export interface EngineClientEvents {
   onStats?: (stats: EngineStats) => void;
   onDoc?: (doc: DocSummary) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
+  onTransform?: (active: boolean) => void;
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onParity?: (pass: boolean, text: string) => void;
@@ -89,6 +90,10 @@ export class EngineClient {
       case 'sampled':
         this.events.onSampled?.(msg.color, msg.toBackground);
         break;
+      case 'transform':
+        this.transformActive = msg.active;
+        this.events.onTransform?.(msg.active);
+        break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);
         break;
@@ -127,6 +132,11 @@ export class EngineClient {
   selectTool: string | null = null;
   /** Set while the Eyedropper is active; the number is the sample square's edge in doc px. */
   sampleSize: number | null = null;
+  /** True while a Free Transform box is open, so the pointer drives handles, not tools. */
+  transformActive = false;
+  /** True when the Move tool is selected, so a drag transforms rather than pans. */
+  moveTool = false;
+  private transformDragging = false;
   /** Combine mode chosen in the options bar; modifier keys override it for one gesture. */
   selectOp = 'new';
   private selecting = false;
@@ -197,6 +207,18 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      // A live transform owns the pointer: handles first, then dragging the box body.
+      if ((this.transformActive || this.moveTool) && e.button === 0) {
+        const p = toLocal(e);
+        if (!this.transformActive) {
+          // The Move tool opens a transient box on press and commits it on release.
+          this.send({ t: 'beginTransform', transient: true });
+          this.transformActive = true;
+        }
+        this.send({ t: 'transformDragBegin', x: p.x, y: p.y, rotate: e.altKey && e.shiftKey });
+        this.transformDragging = true;
+        return;
+      }
       if (this.sampleSize !== null && e.button === 0) {
         const p = toLocal(e);
         // Alt-click sets the background colour, as everywhere in Photoshop.
@@ -236,6 +258,17 @@ export class EngineClient {
     // pointerrawupdate delivers samples at full tablet rate, ahead of pointermove.
     const moveEvent = 'onpointerrawupdate' in canvas ? 'pointerrawupdate' : 'pointermove';
     canvas.addEventListener(moveEvent, ((e: PointerEvent) => {
+      if (this.transformDragging) {
+        const p = toLocal(e);
+        this.send({
+          t: 'transformDragMove',
+          x: p.x,
+          y: p.y,
+          constrain: e.shiftKey,
+          fromCentre: e.altKey,
+        });
+        return;
+      }
       if (this.sampling && this.sampleSize !== null) {
         const p = toLocal(e);
         this.send({ t: 'sample', x: p.x, y: p.y, size: this.sampleSize, toBackground: e.altKey });
@@ -268,6 +301,10 @@ export class EngineClient {
         this.selecting = false;
       }
       // A polygon gesture deliberately survives the button release.
+      if (this.transformDragging) {
+        this.transformDragging = false;
+        this.send({ t: 'transformDragEnd' });
+      }
       if (this.paintMode && this.ready) write(e, FLAG_UP);
       this.sampling = false;
       this.panning = false;

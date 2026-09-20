@@ -57,7 +57,25 @@ import {
 } from './selection.js';
 import * as LayerCmd from './commands/layers.js';
 import * as ImageCmd from './commands/image.js';
+import type { Resample } from './commands/image.js';
 import * as FillCmd from './commands/fill.js';
+import * as TransformCmd from './commands/transform.js';
+import {
+  IDENTITY,
+  about,
+  apply as applyMat,
+  compose,
+  composeAll,
+  decompose as decomposeMat,
+  fromRectToQuad,
+  invert as invertMat,
+  isIdentity,
+  rotate as rotateMat,
+  scale as scaleMat,
+  translate as translateMat,
+  type Mat,
+} from '@umbra/kernels/matrix';
+import { hitHandle, handlePoint, type HandleId } from './render/handles.js';
 import type { PaintMode } from './commands/fill.js';
 import {
   DEFAULT_BRUSH,
@@ -70,6 +88,19 @@ import {
 import { savePsd } from './psd-save.js';
 import { openPsd } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
+
+/** The Free Transform options bar's numbers, derived from the live matrix. */
+function transformReadout(box: Rect, m: Mat) {
+  const d = decomposeMat(m);
+  const origin = applyMat(m, { x: box.x0, y: box.y0 });
+  return {
+    x: origin.x,
+    y: origin.y,
+    scaleX: d.scaleX,
+    scaleY: d.scaleY,
+    rotation: (d.rotation * 180) / Math.PI,
+  };
+}
 
 const STROKE_SPACING = 0.25; // fraction of diameter, Photoshop's default
 
@@ -123,6 +154,28 @@ export class Engine {
   private selectionTex: WebGLTexture | null = null;
   private selectionTexFor: Selection | null = null;
   private outlineFor: Selection | null = null;
+  /**
+   * Move / Free Transform. One state serves both: the Move tool is a transform restricted to
+   * translation that commits on pointer-up, and Free Transform is the same box left open until
+   * Enter. `base` is the untransformed bounding box; `matrix` is what the handles have built.
+   */
+  private transform: {
+    box: Rect;
+    matrix: Mat;
+    ids: number[];
+    /** Transform the selection outline instead of pixels (Select ▸ Transform Selection). */
+    selectionOnly: boolean;
+    /** The selection as it was when the transform opened, so dragging re-derives from it. */
+    baseSelection: Selection | null;
+    /** True for the Move tool, which commits as soon as the button is released. */
+    transient: boolean;
+    drag: {
+      handle: HandleId | 'body' | 'rotate';
+      startScreen: Point;
+      startMatrix: Mat;
+    } | null;
+  } | null = null;
+
   /** Quick Mask mode: strokes edit the selection instead of pixels. */
   quickMask = false;
   quickMaskStyle: QuickMaskStyle = DEFAULT_QUICK_MASK;
@@ -661,6 +714,182 @@ export class Engine {
     return [r / weight / 255, g / weight / 255, b / weight / 255];
   }
 
+  // ---- move & transform ---------------------------------------------------------------
+
+  get transformActive(): boolean {
+    return this.transform !== null;
+  }
+
+  /**
+   * Open a transform box. `transient` is the Move tool: same machinery, but it commits on
+   * pointer-up instead of waiting for Enter, which is the only real difference between
+   * dragging a layer and transforming it.
+   */
+  beginTransform(transient: boolean, selectionOnly = false): boolean {
+    if (this.transform) return true;
+    const ids = this.doc.activeLayerIds.length > 0 ? [...this.doc.activeLayerIds] : [];
+    const box = selectionOnly
+      ? TransformCmd.selectionBoundsOf(this.doc)
+      : TransformCmd.transformBounds(this.doc, ids);
+    if (!box) return false;
+    this.transform = {
+      box,
+      matrix: IDENTITY,
+      ids: ids.length > 0 ? ids : this.fallbackLayerIds(),
+      selectionOnly,
+      baseSelection: this.doc.selection,
+      transient,
+      drag: null,
+    };
+    return true;
+  }
+
+  private fallbackLayerIds(): number[] {
+    for (let i = this.doc.layers.length - 1; i >= 0; i--) {
+      const l = this.doc.layers[i]!;
+      if (l.kind === 'pixel') return [l.id];
+    }
+    return [];
+  }
+
+  /** The handle under a screen point, for the cursor and for starting a drag. */
+  transformHandleAt(x: number, y: number): HandleId | 'body' | null {
+    const t = this.transform;
+    if (!t) return null;
+    const h = hitHandle(t.box, t.matrix, this.view, x, y);
+    if (h) return h;
+    // Inside the box drags it; Photoshop moves the content from anywhere within.
+    const inv = invertMat(t.matrix);
+    if (!inv) return null;
+    const p = docPointAtScreen(this.view, x, y);
+    const local = applyMat(inv, p);
+    const inside =
+      local.x >= t.box.x0 && local.x <= t.box.x1 && local.y >= t.box.y0 && local.y <= t.box.y1;
+    return inside ? 'body' : null;
+  }
+
+  beginTransformDrag(x: number, y: number, rotateHandle: boolean): boolean {
+    const t = this.transform;
+    if (!t) return false;
+    const handle = rotateHandle ? 'rotate' : this.transformHandleAt(x, y);
+    if (!handle) return false;
+    t.drag = { handle, startScreen: { x, y }, startMatrix: t.matrix };
+    return true;
+  }
+
+  /**
+   * Update the in-flight drag. `constrain` is Shift (keep the aspect ratio, or snap rotation
+   * to 15°) and `fromCentre` is Alt, both matching Photoshop's modifiers.
+   */
+  updateTransformDrag(x: number, y: number, constrain: boolean, fromCentre: boolean): void {
+    const t = this.transform;
+    if (!t?.drag) return;
+    const start = docPointAtScreen(this.view, t.drag.startScreen.x, t.drag.startScreen.y);
+    const now = docPointAtScreen(this.view, x, y);
+    const { box } = t;
+    const w = box.x1 - box.x0;
+    const h = box.y1 - box.y0;
+    if (w === 0 || h === 0) return;
+
+    if (t.drag.handle === 'body') {
+      t.matrix = compose(t.drag.startMatrix, translateMat(now.x - start.x, now.y - start.y));
+      return;
+    }
+
+    const centre = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
+
+    if (t.drag.handle === 'rotate') {
+      const pivot = applyMat(t.drag.startMatrix, centre);
+      let angle = Math.atan2(now.y - pivot.y, now.x - pivot.x) - Math.atan2(start.y - pivot.y, start.x - pivot.x);
+      // Shift snaps to 15°, as Photoshop's rotate does.
+      if (constrain) angle = Math.round(angle / (Math.PI / 12)) * (Math.PI / 12);
+      t.matrix = compose(t.drag.startMatrix, about(rotateMat(angle), pivot));
+      return;
+    }
+
+    // Scaling: work in the box's own space, so a rotated box still scales along its own axes.
+    const inv = invertMat(t.drag.startMatrix);
+    if (!inv) return;
+    const localStart = applyMat(inv, start);
+    const localNow = applyMat(inv, now);
+    const dx = localNow.x - localStart.x;
+    const dy = localNow.y - localStart.y;
+
+    const id = t.drag.handle;
+    const movesX = id === 'w' || id === 'e' || id.length === 2;
+    const movesY = id === 'n' || id === 's' || id.length === 2;
+    const west = id.includes('w');
+    const north = id.includes('n');
+
+    let sx = movesX ? (west ? (w - dx) / w : (w + dx) / w) : 1;
+    let sy = movesY ? (north ? (h - dy) / h : (h + dy) / h) : 1;
+    if (constrain && movesX && movesY) {
+      // Keep the aspect ratio by taking the larger change, which is what feels responsive.
+      const k = Math.abs(sx) > Math.abs(sy) ? sx : sy;
+      sx = k;
+      sy = k;
+    }
+
+    // The anchor is the opposite corner, unless Alt scales about the centre.
+    const anchor = fromCentre
+      ? centre
+      : {
+          x: movesX ? (west ? box.x1 : box.x0) : centre.x,
+          y: movesY ? (north ? box.y1 : box.y0) : centre.y,
+        };
+    t.matrix = compose(about(scaleMat(sx, sy), anchor), t.drag.startMatrix);
+  }
+
+  /** End the pointer drag. The Move tool commits here; Free Transform waits for Enter. */
+  endTransformDrag(): void {
+    const t = this.transform;
+    if (!t) return;
+    t.drag = null;
+    if (t.transient) this.commitTransform();
+  }
+
+  /** Nudge by the arrow keys, which the Move tool supports with no drag at all. */
+  nudge(dx: number, dy: number): void {
+    if (this.transform) {
+      this.transform.matrix = compose(this.transform.matrix, translateMat(dx, dy));
+      if (this.transform.transient) this.commitTransform();
+      return;
+    }
+    this.commit(TransformCmd.transformLayers(this.doc, translateMat(dx, dy)), 'Move');
+  }
+
+  commitTransform(method: Resample = 'bicubic'): void {
+    const t = this.transform;
+    if (!t) return;
+    this.transform = null;
+    if (isIdentity(t.matrix)) return;
+
+    if (t.selectionOnly) {
+      if (!t.baseSelection) return;
+      this.setSelection(TransformCmd.transformSelection(t.baseSelection, t.matrix), 'Transform Selection');
+      return;
+    }
+
+    let next = TransformCmd.transformLayers(this.doc, t.matrix, method, t.ids);
+    // A selection moves with the pixels when they are dragged, as Photoshop does for a
+    // floating selection — otherwise the marching ants would be left behind.
+    if (next.selection && !t.transient) next = { ...next, selection: next.selection };
+    this.commit(next, t.transient ? 'Move' : 'Free Transform');
+  }
+
+  cancelTransform(): void {
+    this.transform = null;
+  }
+
+  /** Replace the transform with an exact matrix, for the options bar's numeric fields. */
+  setTransformMatrix(m: Mat): void {
+    if (this.transform) this.transform.matrix = m;
+  }
+
+  transformState(): { box: Rect; matrix: Mat } | null {
+    return this.transform ? { box: this.transform.box, matrix: this.transform.matrix } : null;
+  }
+
   // ---- fill & stroke ------------------------------------------------------------------
 
   /**
@@ -926,6 +1155,12 @@ export class Engine {
           }
         : null,
     );
+    // Layers under a live transform draw through its matrix rather than being rewritten.
+    this.renderer.setLiveTransform(
+      this.transform && !this.transform.selectionOnly && !isIdentity(this.transform.matrix)
+        ? { ids: new Set(this.transform.ids), matrix: this.transform.matrix }
+        : null,
+    );
     const overlay = this.quickMask ? this.selectionTexture() : null;
     const s = this.renderer.render(
       this.doc,
@@ -934,6 +1169,7 @@ export class Engine {
       undefined,
       wantAnts,
       overlay ? { tex: overlay.tex, style: this.quickMaskStyle } : null,
+      this.transformState(),
     );
     this.lastPasses = s.layerPasses;
     this.lastInstances = s.tileInstances;
@@ -979,6 +1215,7 @@ export class Engine {
       centreX: this.view.centre.x,
       centreY: this.view.centre.y,
       lastLatencyMs: this.lastLatencyMs,
+      transform: this.transform ? transformReadout(this.transform.box, this.transform.matrix) : null,
     };
   }
 

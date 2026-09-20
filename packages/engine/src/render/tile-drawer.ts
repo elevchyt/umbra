@@ -12,6 +12,7 @@ import { TileAtlas } from '../gpu/atlas.js';
 import { MipPlane, levelForScale, tileSpan } from '../tiles/mip.js';
 import { tilesInRect } from '../tiles/plane.js';
 import { docToClip, visibleDocRect, type ViewState } from './view.js';
+import { IDENTITY, invert, transformedBounds, type Mat } from '@umbra/kernels/matrix';
 
 const VERT = /* glsl */ `#version 300 es
 precision highp float;
@@ -60,6 +61,24 @@ void main() {
   fragColor = u_premultiply > 0.5 ? vec4(c.rgb * c.a, c.a) : c;
 }`;
 
+/**
+ * `view · m` as the column-major 3×3 the shader wants. The tile quad is built in plane space,
+ * so the layer's own transform has to be applied first and the view transform second.
+ */
+function mul3(view: Float32Array, m: Mat): Float32Array {
+  const a = [m.a, m.b, 0, m.c, m.d, 0, m.e, m.f, 1];
+  const out = new Float32Array(9);
+  for (let col = 0; col < 3; col++) {
+    for (let row = 0; row < 3; row++) {
+      out[col * 3 + row] =
+        view[0 * 3 + row]! * a[col * 3 + 0]! +
+        view[1 * 3 + row]! * a[col * 3 + 1]! +
+        view[2 * 3 + row]! * a[col * 3 + 2]!;
+    }
+  }
+  return out;
+}
+
 export class TileDrawer {
   private program: Program;
   private quad: WebGLBuffer;
@@ -103,6 +122,12 @@ export class TileDrawer {
     isMask = false,
     opacity = 1,
     premultiply = false,
+    /**
+     * An extra transform applied to the plane before the view transform. This is how a live
+     * Move or Free Transform previews: the layer's tiles are drawn moved rather than rewritten,
+     * so dragging costs nothing and the pixels are only resampled once, on commit.
+     */
+    matrix: Mat = IDENTITY,
   ): number {
     const gl = this.gl;
     const visible = rectIntersect(visibleDocRect(view), clip);
@@ -112,12 +137,17 @@ export class TileDrawer {
     const span = tileSpan(level);
     const layer = plane.level(level);
 
+    // With a transform in play, the tiles that end up visible are the ones whose PRE-image
+    // covers the visible rect, so the search area is mapped back through the inverse.
+    const inverse = invert(matrix);
+    if (!inverse) return 0;
+    const source = matrix === IDENTITY ? visible : transformedBounds(inverse, visible);
     const cells = [
       ...tilesInRect({
-        x0: visible.x0 / (1 << level),
-        y0: visible.y0 / (1 << level),
-        x1: visible.x1 / (1 << level),
-        y1: visible.y1 / (1 << level),
+        x0: source.x0 / (1 << level),
+        y0: source.y0 / (1 << level),
+        x1: source.x1 / (1 << level),
+        y1: source.y1 / (1 << level),
       }),
     ];
     if (this.data.length < cells.length * 3) {
@@ -145,7 +175,7 @@ export class TileDrawer {
     gl.bindVertexArray(this.vao);
     this.atlas.bind(0);
     this.program.u1i('u_atlas', 0);
-    this.program.uMat3('u_docToClip', docToClip(view));
+    this.program.uMat3('u_docToClip', mul3(docToClip(view), matrix));
     this.program.u1f('u_tileSpan', span);
     this.program.u1f('u_isMask', isMask ? 1 : 0);
     this.program.u1f('u_opacity', opacity);

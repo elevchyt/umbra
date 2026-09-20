@@ -81,6 +81,24 @@ export function OptionsBar(props: OptionsBarProps) {
       <Separator />
 
       <Switch fallback={<UnimplementedNote name={tool()?.name ?? 'Tool'} />}>
+        {/* A live transform takes the whole row, whatever tool is selected. */}
+        <Match when={store.stats()?.transform}>
+          {(t) => (
+            <>
+              <NumberField label="X" value={Math.round(t().x)} onChange={() => {}} suffix="px" width={52} disabled />
+              <NumberField label="Y" value={Math.round(t().y)} onChange={() => {}} suffix="px" width={52} disabled />
+              <Separator />
+              <NumberField label="W" value={Math.round(t().scaleX * 100)} onChange={() => {}} suffix="%" width={46} disabled />
+              <NumberField label="H" value={Math.round(t().scaleY * 100)} onChange={() => {}} suffix="%" width={46} disabled />
+              <Separator />
+              <NumberField label="Angle" value={Math.round(t().rotation)} onChange={() => {}} suffix="°" width={46} disabled />
+              <Spacer />
+              {/* Photoshop's ✗ / ✓; the keyboard equivalents are Escape and Enter. */}
+              <IconButton icon="close" title="Cancel transform (Esc)" onClick={() => props.onCommand('transform.cancel')} />
+              <IconButton icon="check" title="Commit transform (Enter)" onClick={() => props.onCommand('transform.commit')} />
+            </>
+          )}
+        </Match>
         <Match when={store.activeTool() === 'move'}>
           <Checkbox checked={autoSelect()} onChange={setAutoSelect} label="Auto-Select" />
           <Select
