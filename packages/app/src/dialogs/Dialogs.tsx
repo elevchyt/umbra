@@ -436,3 +436,120 @@ export function ShortcutsDialog(props: { rows: { keys: string; label: string }[]
     </Dialog>
   );
 }
+
+// ---- Image Size / Canvas Size --------------------------------------------------------------
+
+export function ImageSizeDialog(props: {
+  width: number;
+  height: number;
+  onApply: (w: number, h: number, method: string) => void;
+  onCancel: () => void;
+}) {
+  const [w, setW] = createSignal(props.width);
+  const [h, setH] = createSignal(props.height);
+  const [link, setLink] = createSignal(true);
+  const [method, setMethod] = createSignal('bicubic');
+  const ratio = props.height === 0 ? 1 : props.width / props.height;
+
+  return (
+    <Dialog
+      title="Image Size"
+      width={380}
+      onOk={() => props.onApply(Math.max(1, Math.round(w())), Math.max(1, Math.round(h())), method())}
+      onCancel={props.onCancel}
+    >
+      <div class="sizedlg">
+        <div class="dim">
+          Original: {props.width} × {props.height} px
+        </div>
+        <NumberField
+          label="Width"
+          value={w()}
+          onChange={(v) => {
+            setW(v);
+            // Constrain Proportions, on by default as in Photoshop.
+            if (link()) setH(Math.round(v / ratio));
+          }}
+          min={1}
+          max={300000}
+          suffix="px"
+          width={78}
+        />
+        <NumberField
+          label="Height"
+          value={h()}
+          onChange={(v) => {
+            setH(v);
+            if (link()) setW(Math.round(v * ratio));
+          }}
+          min={1}
+          max={300000}
+          suffix="px"
+          width={78}
+        />
+        <Checkbox checked={link()} onChange={setLink} label="Constrain Proportions" />
+        <Select
+          label="Resample"
+          value={method()}
+          options={[
+            { value: 'bicubic', label: 'Bicubic (smooth gradients)' },
+            { value: 'bicubicSmoother', label: 'Bicubic Smoother (enlargement)' },
+            { value: 'bicubicSharper', label: 'Bicubic Sharper (reduction)' },
+            { value: 'bilinear', label: 'Bilinear' },
+            { value: 'nearest', label: 'Nearest Neighbour (hard edges)' },
+          ]}
+          onChange={setMethod}
+          width={220}
+        />
+      </div>
+    </Dialog>
+  );
+}
+
+const ANCHORS = [
+  ['topLeft', 'top', 'topRight'],
+  ['left', 'center', 'right'],
+  ['bottomLeft', 'bottom', 'bottomRight'],
+] as const;
+
+export function CanvasSizeDialog(props: {
+  width: number;
+  height: number;
+  onApply: (w: number, h: number, anchor: string) => void;
+  onCancel: () => void;
+}) {
+  const [w, setW] = createSignal(props.width);
+  const [h, setH] = createSignal(props.height);
+  const [anchor, setAnchor] = createSignal<string>('center');
+
+  return (
+    <Dialog
+      title="Canvas Size"
+      width={340}
+      onOk={() => props.onApply(Math.max(1, Math.round(w())), Math.max(1, Math.round(h())), anchor())}
+      onCancel={props.onCancel}
+    >
+      <div class="sizedlg">
+        <div class="dim">
+          Current: {props.width} × {props.height} px
+        </div>
+        <NumberField label="Width" value={w()} onChange={setW} min={1} max={300000} suffix="px" width={78} />
+        <NumberField label="Height" value={h()} onChange={setH} min={1} max={300000} suffix="px" width={78} />
+        <div class="anchor-label dim">Anchor</div>
+        <div class="anchor-grid">
+          <For each={ANCHORS.flat()}>
+            {(a) => (
+              <button
+                type="button"
+                class="anchor-cell"
+                classList={{ active: anchor() === a }}
+                title={a}
+                onClick={() => setAnchor(a)}
+              />
+            )}
+          </For>
+        </div>
+      </div>
+    </Dialog>
+  );
+}

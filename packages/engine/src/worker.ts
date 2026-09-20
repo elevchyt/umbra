@@ -82,6 +82,48 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.toggleGroup(msg.id);
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'layerCommand': {
+        if (!engine) break;
+        const id = msg.id ?? engine.doc.activeLayerIds[0];
+        switch (msg.command) {
+          case 'add': engine.addLayer(); break;
+          case 'delete': if (id !== undefined) engine.deleteLayer(id); break;
+          case 'duplicate': if (id !== undefined) engine.duplicateLayer(id); break;
+          case 'raise': if (id !== undefined) engine.reorderLayer(id, 1); break;
+          case 'lower': if (id !== undefined) engine.reorderLayer(id, -1); break;
+          case 'group': engine.groupLayers(msg.ids ?? (id !== undefined ? [id] : [])); break;
+          case 'ungroup': if (id !== undefined) engine.ungroupLayers(id); break;
+          case 'mergeDown': if (id !== undefined) engine.mergeDown(id); break;
+          case 'mergeVisible': engine.mergeVisible(); break;
+          case 'flatten': engine.flatten(); break;
+          case 'stampVisible': engine.stampVisible(); break;
+        }
+        post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
+      case 'imageCommand': {
+        if (!engine) break;
+        switch (msg.command) {
+          case 'imageSize':
+            engine.imageSize(msg.width!, msg.height!, (msg.method ?? 'bicubic') as never);
+            break;
+          case 'canvasSize':
+            engine.canvasSize(msg.width!, msg.height!, (msg.anchor ?? 'center') as never);
+            break;
+          case 'rotate': engine.rotateImage((msg.angle ?? 90) as never); break;
+          case 'flip': engine.flipImage(!!msg.horizontal); break;
+          case 'trim': engine.trimImage(); break;
+          case 'revealAll': engine.revealAll(); break;
+        }
+        post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
+      case 'savePsd': {
+        if (!engine) break;
+        const buffer = engine.toPsd();
+        post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
+        break;
+      }
       case 'undo':
         if (engine?.undo()) post({ t: 'doc', doc: engine.summary() });
         break;

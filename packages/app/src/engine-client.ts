@@ -21,6 +21,7 @@ export interface EngineClientEvents {
   onStats?: (stats: EngineStats) => void;
   onDoc?: (doc: DocSummary) => void;
   onSpikes?: (pass: boolean, text: string) => void;
+  onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onParity?: (pass: boolean, text: string) => void;
   onContextLost?: () => void;
   onContextRestored?: () => void;
@@ -89,6 +90,9 @@ export class EngineClient {
         break;
       case 'parity':
         this.events.onParity?.(msg.pass, msg.text);
+        break;
+      case 'psdSaved':
+        this.events.onPsdSaved?.(msg.name, msg.buffer);
         break;
       case 'contextLost':
         this.events.onContextLost?.();

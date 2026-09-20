@@ -34,6 +34,9 @@ import {
   type PixelLayer,
 } from './document.js';
 import { History } from './history.js';
+import * as LayerCmd from './commands/layers.js';
+import * as ImageCmd from './commands/image.js';
+import { savePsd } from './psd-save.js';
 import { openPsd } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
 
@@ -252,6 +255,75 @@ export class Engine {
         l.kind === 'group' ? { ...l, expanded: !l.expanded } : l,
       ),
     };
+  }
+
+  // ---- tree & image commands ------------------------------------------------------------
+
+  /** Run a pure document command and push one history state. */
+  private apply(name: string, fn: (d: Doc) => Doc): void {
+    const next = fn(this.doc);
+    if (next === this.doc) return;
+    this.commit(next, name);
+  }
+
+  addLayer(): void {
+    this.apply('New Layer', (d) => LayerCmd.addLayer(d, 'Layer'));
+  }
+  deleteLayer(id: number): void {
+    this.apply('Delete Layer', (d) => LayerCmd.deleteLayer(d, id));
+  }
+  duplicateLayer(id: number): void {
+    this.apply('Duplicate Layer', (d) => LayerCmd.duplicateLayer(d, id));
+  }
+  reorderLayer(id: number, delta: number): void {
+    this.apply(delta > 0 ? 'Bring Forward' : 'Send Backward', (d) => LayerCmd.reorderLayer(d, id, delta));
+  }
+  groupLayers(ids: number[]): void {
+    this.apply('Group Layers', (d) => LayerCmd.groupLayers(d, ids));
+  }
+  ungroupLayers(id: number): void {
+    this.apply('Ungroup Layers', (d) => LayerCmd.ungroup(d, id));
+  }
+  mergeDown(id: number): void {
+    this.apply('Merge Layers', (d) => LayerCmd.mergeDown(d, id));
+  }
+  mergeVisible(): void {
+    this.apply('Merge Visible', (d) => LayerCmd.mergeVisible(d));
+  }
+  flatten(): void {
+    this.apply('Flatten Image', (d) => LayerCmd.flatten(d));
+  }
+  stampVisible(): void {
+    this.apply('Stamp Visible', (d) => LayerCmd.stampVisible(d));
+  }
+
+  imageSize(width: number, height: number, method: ImageCmd.Resample): void {
+    this.apply('Image Size', (d) => ImageCmd.imageSize(d, width, height, method));
+    this.fit();
+  }
+  canvasSize(width: number, height: number, anchor: ImageCmd.Anchor): void {
+    this.apply('Canvas Size', (d) => ImageCmd.canvasSize(d, width, height, anchor));
+    this.fit();
+  }
+  rotateImage(angle: ImageCmd.Rotation): void {
+    this.apply('Rotate Canvas', (d) => ImageCmd.rotateImage(d, angle));
+    this.fit();
+  }
+  flipImage(horizontal: boolean): void {
+    this.apply('Flip Canvas', (d) => ImageCmd.flipImage(d, horizontal));
+  }
+  trimImage(): void {
+    this.apply('Trim', (d) => ImageCmd.trim(d));
+    this.fit();
+  }
+  revealAll(): void {
+    this.apply('Reveal All', (d) => ImageCmd.revealAll(d));
+    this.fit();
+  }
+
+  /** Serialise the document to a PSD for the shell to write to disk. */
+  toPsd(): ArrayBuffer {
+    return savePsd(this.doc);
   }
 
   undo(): boolean {

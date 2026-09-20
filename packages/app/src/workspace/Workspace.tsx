@@ -13,9 +13,31 @@ import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
 import { DocumentTabs, StatusBar } from './Chrome';
-import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog } from '../dialogs/Dialogs';
+import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
+
+/**
+ * Write a produced file wherever the platform can: a native Save dialog under Electron,
+ * a browser download otherwise. The engine only ever hands us bytes; where they land is a
+ * shell concern (spec 03 §2.1).
+ */
+async function deliverFile(name: string, buffer: ArrayBuffer): Promise<void> {
+  const shell = (globalThis as Record<string, any>).umbraShell;
+  if (shell?.saveFile) {
+    const path = await shell.saveFile(name, buffer);
+    store.setStatusMessage(path ? `Saved ${path}` : 'Save cancelled');
+  } else {
+    const url = URL.createObjectURL(new Blob([buffer], { type: 'image/vnd.adobe.photoshop' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+    store.setStatusMessage(`Downloaded ${name}`);
+  }
+  setTimeout(() => store.setStatusMessage(null), 4000);
+}
 
 /** Hand a headless harness its result; the Electron main process is waiting on this. */
 function reportToShell(pass: boolean, text: string): void {
@@ -69,6 +91,7 @@ export function Workspace() {
         },
         onSpikes: (pass, text) => reportToShell(pass, text),
         onParity: (pass, text) => reportToShell(pass, text),
+        onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
         onContextLost: () => store.setContextLost(true),
         onContextRestored: () => store.setContextLost(false),
         onError: (m) => {
@@ -143,6 +166,12 @@ export function Workspace() {
       case 'file.exit':
         window.close();
         break;
+      case 'file.save':
+      case 'file.saveAs':
+      case 'file.saveCopy':
+        send({ t: 'savePsd', name: psdName() });
+        break;
+
       case 'edit.undo':
         send({ t: 'undo' });
         break;
@@ -245,6 +274,70 @@ export function Workspace() {
         store.openDialog('shortcuts');
         break;
 
+      // Layer menu
+      case 'layer.new':
+        send({ t: 'layerCommand', command: 'add' });
+        break;
+      case 'layer.delete':
+        send({ t: 'layerCommand', command: 'delete' });
+        break;
+      case 'layer.duplicate':
+        send({ t: 'layerCommand', command: 'duplicate' });
+        break;
+      case 'arrange.forward':
+        send({ t: 'layerCommand', command: 'raise' });
+        break;
+      case 'arrange.backward':
+        send({ t: 'layerCommand', command: 'lower' });
+        break;
+      case 'layer.group':
+        send({ t: 'layerCommand', command: 'group' });
+        break;
+      case 'layer.ungroup':
+        send({ t: 'layerCommand', command: 'ungroup' });
+        break;
+      case 'layer.mergeDown':
+        send({ t: 'layerCommand', command: 'mergeDown' });
+        break;
+      case 'layer.mergeVisible':
+        send({ t: 'layerCommand', command: 'mergeVisible' });
+        break;
+      case 'layer.flatten':
+        send({ t: 'layerCommand', command: 'flatten' });
+        break;
+      case 'layer.stampVisible':
+        send({ t: 'layerCommand', command: 'stampVisible' });
+        break;
+
+      // Image menu
+      case 'image.imageSize':
+        store.openDialog('imageSize');
+        break;
+      case 'image.canvasSize':
+        store.openDialog('canvasSize');
+        break;
+      case 'image.rotate90cw':
+        send({ t: 'imageCommand', command: 'rotate', angle: 90 });
+        break;
+      case 'image.rotate90ccw':
+        send({ t: 'imageCommand', command: 'rotate', angle: 270 });
+        break;
+      case 'image.rotate180':
+        send({ t: 'imageCommand', command: 'rotate', angle: 180 });
+        break;
+      case 'image.flipH':
+        send({ t: 'imageCommand', command: 'flip', horizontal: true });
+        break;
+      case 'image.flipV':
+        send({ t: 'imageCommand', command: 'flip', horizontal: false });
+        break;
+      case 'image.trim':
+        send({ t: 'imageCommand', command: 'trim' });
+        break;
+      case 'image.revealAll':
+        send({ t: 'imageCommand', command: 'revealAll' });
+        break;
+
       default: {
         const info = COMMAND_BY_ID.get(cmd);
         store.setStatusMessage(
@@ -253,6 +346,12 @@ export function Workspace() {
         setTimeout(() => store.setStatusMessage(null), 4000);
       }
     }
+  }
+
+  /** Current document name with a .psd extension, for the Save dialog's default. */
+  function psdName(): string {
+    const name = store.doc()?.name ?? 'Untitled';
+    return /\.psd$|\.psb$/i.test(name) ? name : `${name.replace(/\.[^.]+$/, '')}.psd`;
   }
 
   /** Photoshop's [ and ] step by a size-dependent amount rather than a flat 1 px. */
@@ -570,6 +669,28 @@ export function Workspace() {
             store.closeDialog();
             if (pickerTarget() === 'foreground') store.setForeground(c);
             else store.setBackground(c);
+          }}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'imageSize'}>
+        <ImageSizeDialog
+          width={store.doc()?.width ?? 0}
+          height={store.doc()?.height ?? 0}
+          onCancel={store.closeDialog}
+          onApply={(w, h, method) => {
+            store.closeDialog();
+            send({ t: 'imageCommand', command: 'imageSize', width: w, height: h, method });
+          }}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'canvasSize'}>
+        <CanvasSizeDialog
+          width={store.doc()?.width ?? 0}
+          height={store.doc()?.height ?? 0}
+          onCancel={store.closeDialog}
+          onApply={(w, h, anchor) => {
+            store.closeDialog();
+            send({ t: 'imageCommand', command: 'canvasSize', width: w, height: h, anchor });
           }}
         />
       </Show>

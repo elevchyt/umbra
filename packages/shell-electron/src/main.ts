@@ -1,4 +1,5 @@
-import { app, BrowserWindow, protocol, net, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, protocol, net, ipcMain, shell, dialog } from 'electron';
+import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -137,6 +138,22 @@ app.on('window-all-closed', () => {
 
 void app.whenReady().then(async () => {
   serveApp();
+
+  ipcMain.handle('umbra:save-file', async (event, name: string, data: ArrayBuffer) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const ext = name.split('.').pop() ?? 'psd';
+    const { canceled, filePath } = await dialog.showSaveDialog(win!, {
+      defaultPath: name,
+      filters: [
+        { name: 'Photoshop', extensions: ['psd', 'psb'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (canceled || !filePath) return null;
+    void ext;
+    await writeFile(filePath, Buffer.from(data));
+    return filePath;
+  });
 
   ipcMain.handle('umbra:versions', () => ({
     electron: process.versions.electron,

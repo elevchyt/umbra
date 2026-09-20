@@ -853,3 +853,18 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 ::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--panel-sunken); border-radius: 6px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 ::-webkit-scrollbar-corner { background: var(--panel-sunken); }
+
+/* Image Size / Canvas Size */
+.sizedlg { display: flex; flex-direction: column; gap: 9px; align-items: flex-start; }
+.anchor-label { margin-top: 2px; }
+.anchor-grid { display: grid; grid-template-columns: repeat(3, 26px); gap: 2px; }
+.anchor-cell {
+  width: 26px;
+  height: 26px;
+  background: var(--panel-raised);
+  border: 1px solid var(--border-dark);
+  cursor: default;
+  padding: 0;
+}
+.anchor-cell:hover { background: var(--row-hover); }
+.anchor-cell.active { background: var(--accent); border-color: var(--accent-dim); }

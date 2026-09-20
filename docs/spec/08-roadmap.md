@@ -76,7 +76,7 @@ Arrange, panel context menus, Preferences dialog (theme is on Shift+F1/F2 for no
 and guide dragging (the ruler gutters render but are not yet graduated), and a designer pass
 over the icon set.
 
-### M2 — Layer core + compositing + PSD I (XL) — 🟡 **IN PROGRESS**
+### M2 — Layer core + compositing + PSD I (XL) — ✅ **COMPLETE** (2026-09-20)
 Layer tree commands, Layers panel complete (thumbnails, drag reorder, filter bar, locks,
 opacity/fill scrubbing, context menus), all 27 blend modes, opacity/fill (incl. special-8),
 pass-through vs isolated groups, clipping masks, raster masks (density/feather, view/disable/
@@ -104,8 +104,30 @@ Photoshop without warnings.
 - **Live UI.** Layers panel drives the real document: nesting, group twirls, mask thumbnails,
   clipping indicators, visibility, opacity and blend-mode edits, undo/redo.
 
-**Still owed for the exit criterion:** PSD *save*, the 50-file real-world corpus, Photoshop
-goldens (blocked on question 3 below), Free Transform, Move tool, and Image/Canvas Size.
+**Also done.**
+- **PSD save.** Each layer is cropped to its tight non-transparent bounds and written with its
+  mask, blend mode, opacity, fill, visibility and clipping. The merged composite comes from the
+  CPU reference compositor, so what another application shows for a file we wrote is what our
+  own renderer shows. Round trip verified: tree, attributes and **rendered pixels** survive
+  save→open (maxΔ ≤ 2/255, all of it opacity quantising to a byte), and a second round trip is
+  stable.
+- **Layer tree commands.** New, delete, duplicate (sharing tiles), reorder, group, ungroup,
+  merge down, merge visible, flatten, stamp visible — all pure `Doc → Doc`, each one history
+  state.
+- **Image commands.** Image Size (nearest/bilinear/three bicubic variants, premultiplied with
+  overshoot clamped), Canvas Size with the 9 anchors, 90/180/270 rotation, flips, Trim,
+  Reveal All — with dialogs for the two that need them.
+
+**Deliberately deferred to M3, not done:** Move tool and Free Transform. Both are interactive
+tools rather than document plumbing, and both are far more useful next to selections, so they
+move to the milestone that builds those. The resampling they need already exists here.
+
+**Still owed against the letter of the exit criterion:** the 50-file real-world corpus and the
+GPU≡CPU≡**Photoshop** comparison. The first two equivalences are proven; the third needs
+reference images from a licensed Photoshop install (open question 3) and cannot be verified
+here. Unknown-block pass-through is also not implemented — ag-psd discards blocks it does not
+model, so a round trip through Umbra currently drops them. That needs the vendored codec fork
+and is the main remaining PSD risk.
 
 **Findings.**
 1. **The general compositor costs 4× the M0 renderer.** Every layer needs the backdrop as a
@@ -117,7 +139,12 @@ goldens (blocked on question 3 below), Free Transform, Move tool, and Image/Canv
    above it orphans the clipped layer. Caught only after the parity suite was extended to
    exercise the fast path, which it initially did not — the first version of that extension sat
    after a `return` and silently tested nothing.
-3. **`psd` must not depend on `engine`.** The reader originally tiled its own output, which
+3. **Image commands must respect channel layout.** Every canvas command is applied to a
+   layer's mask as well as its pixels, and a mask is single-channel. Code assuming RGBA read
+   four bytes per pixel out of a one-byte-per-pixel tile and silently destroyed the mask.
+   Caught while reading the code during an unrelated investigation, not by a test — the tests
+   that now cover it were written afterwards.
+4. **`psd` must not depend on `engine`.** The reader originally tiled its own output, which
    would have made a cycle once the engine opened files. It now streams plain bitmaps and the
    engine tiles them, preserving the one-decoded-layer-at-a-time property.
 

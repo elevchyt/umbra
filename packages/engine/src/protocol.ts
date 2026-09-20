@@ -74,6 +74,9 @@ export type ToEngine =
   | { t: 'setLayerBlendMode'; id: number; mode: string }
   | { t: 'selectLayer'; id: number }
   | { t: 'toggleGroup'; id: number }
+  | { t: 'layerCommand'; command: string; id?: number; ids?: number[]; delta?: number }
+  | { t: 'imageCommand'; command: string; width?: number; height?: number; anchor?: string; method?: string; angle?: number; horizontal?: boolean }
+  | { t: 'savePsd'; name: string }
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'synthetic'; layers: number; width: number; height: number }
@@ -92,4 +95,5 @@ export type FromEngine =
   | { t: 'contextRestored' }
   | { t: 'spikes'; pass: boolean; text: string }
   | { t: 'parity'; pass: boolean; text: string }
-  | { t: 'error'; message: string };
+  | { t: 'error'; message: string }
+  | { t: 'psdSaved'; name: string; buffer: ArrayBuffer };
