@@ -23,6 +23,7 @@ export interface EngineClientEvents {
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
   onProbe?: (msg: { tag?: string } & import('@umbra/engine').ProbeReply) => void;
+  onFilterBox?: (msg: unknown) => void;
   onLuts?: (msg: { list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }) => void;
   onReplaceColorPreview?: (p: { pixels: Uint8Array; width: number; height: number }) => void;
   onPatterns?: (list: import('@umbra/engine').PatternSummary[]) => void;
@@ -124,6 +125,9 @@ export class EngineClient {
         break;
       case 'probe':
         this.events.onProbe?.(msg);
+        break;
+      case 'filterBox':
+        this.events.onFilterBox?.(msg);
         break;
       case 'luts':
         this.events.onLuts?.(msg);

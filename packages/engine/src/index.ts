@@ -63,3 +63,5 @@ export {
   type ChannelPick,
   type ApplyBlend,
 } from '@umbra/kernels/applyimage';
+export { FILTERS, FILTER_BY_ID } from '@umbra/kernels/filters/index';
+export { defaultsOf, type FilterDef, type FilterParams, type ParamSpec, type ParamValue } from '@umbra/kernels/filters/types';

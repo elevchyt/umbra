@@ -10,6 +10,11 @@
  * today; everything else renders greyed.
  */
 
+import { FILTER_BY_ID } from '@umbra/engine';
+
+/** A Filter-menu leaf, enabled exactly when the filter registry implements it. */
+const filterItem = (label: string, cmd: string): MenuNode => (FILTER_BY_ID.has(cmd) ? { label, cmd, done: true } : { label, cmd });
+
 export interface MenuNode {
   /** Divider line; no other field applies. */
   separator?: true;
@@ -128,7 +133,7 @@ export const MENUS: MenuDef[] = [
       { label: 'Undo', cmd: 'edit.undo', shortcut: 'Ctrl+Z', done: true },
       { label: 'Redo', cmd: 'edit.redo', shortcut: 'Ctrl+Shift+Z', done: true },
       { label: 'Toggle Last State', cmd: 'edit.toggleLastState', shortcut: 'Ctrl+Alt+Z', done: true },
-      { label: 'Fade…', cmd: 'edit.fade', shortcut: 'Ctrl+Shift+F' },
+      { label: 'Fade…', cmd: 'edit.fade', shortcut: 'Ctrl+Shift+F', done: true },
       sep,
       { label: 'Cut', cmd: 'edit.cut', shortcut: 'Ctrl+X', done: true },
       { label: 'Copy', cmd: 'edit.copy', shortcut: 'Ctrl+C', done: true },
@@ -599,7 +604,7 @@ export const MENUS: MenuDef[] = [
   {
     label: 'Filter',
     items: [
-      { label: 'Last Filter', cmd: 'filter.last', shortcut: 'Ctrl+Alt+F' },
+      { label: 'Last Filter', cmd: 'filter.last', shortcut: 'Ctrl+Alt+F', done: true },
       sep,
       { label: 'Convert for Smart Filters', cmd: 'filter.convertForSmart' },
       sep,
@@ -610,16 +615,16 @@ export const MENUS: MenuDef[] = [
       { label: 'Liquify…', cmd: 'filter.liquify', shortcut: 'Ctrl+Shift+X' },
       { label: 'Vanishing Point…', cmd: 'filter.vanishingPoint', shortcut: 'Ctrl+Alt+V' },
       sep,
-      { label: 'Blur', items: ['Average', 'Blur', 'Blur More', 'Box Blur…', 'Gaussian Blur…', 'Lens Blur…', 'Motion Blur…', 'Radial Blur…', 'Shape Blur…', 'Smart Blur…', 'Surface Blur…'].map((l) => ({ label: l, cmd: `blur.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
+      { label: 'Blur', items: ['Average', 'Blur', 'Blur More', 'Box Blur…', 'Gaussian Blur…', 'Lens Blur…', 'Motion Blur…', 'Radial Blur…', 'Shape Blur…', 'Smart Blur…', 'Surface Blur…'].map((l) => filterItem(l, `blur.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
       { label: 'Blur Gallery', items: ['Field Blur…', 'Iris Blur…', 'Tilt-Shift…', 'Path Blur…', 'Spin Blur…'].map((l) => ({ label: l, cmd: `blurGallery.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Distort', items: ['Displace…', 'Pinch…', 'Polar Coordinates…', 'Ripple…', 'Shear…', 'Spherize…', 'Twirl…', 'Wave…', 'ZigZag…'].map((l) => ({ label: l, cmd: `distort.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Noise', items: ['Add Noise…', 'Despeckle', 'Dust & Scratches…', 'Median…', 'Reduce Noise…'].map((l) => ({ label: l, cmd: `noise.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Pixelate', items: ['Color Halftone…', 'Crystallize…', 'Facet', 'Fragment', 'Mezzotint…', 'Mosaic…', 'Pointillize…'].map((l) => ({ label: l, cmd: `pixelate.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Render', items: ['Flame…', 'Picture Frame…', 'Tree…', 'Clouds', 'Difference Clouds', 'Fibers…', 'Lens Flare…'].map((l) => ({ label: l, cmd: `render.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Sharpen', items: ['Sharpen', 'Sharpen Edges', 'Sharpen More', 'Smart Sharpen…', 'Unsharp Mask…'].map((l) => ({ label: l, cmd: `sharpen.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Stylize', items: ['Diffuse…', 'Emboss…', 'Extrude…', 'Find Edges', 'Oil Paint…', 'Solarize', 'Tiles…', 'Trace Contour…', 'Wind…'].map((l) => ({ label: l, cmd: `stylize.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Video', items: ['De-Interlace…', 'NTSC Colors'].map((l) => ({ label: l, cmd: `video.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
-      { label: 'Other', items: ['Custom…', 'High Pass…', 'HSB/HSL', 'Maximum…', 'Minimum…', 'Offset…'].map((l) => ({ label: l, cmd: `other.${l.replace(/[^a-z]/gi, '').toLowerCase()}` })) },
+      { label: 'Distort', items: ['Displace…', 'Pinch…', 'Polar Coordinates…', 'Ripple…', 'Shear…', 'Spherize…', 'Twirl…', 'Wave…', 'ZigZag…'].map((l) => filterItem(l, `distort.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Noise', items: ['Add Noise…', 'Despeckle', 'Dust & Scratches…', 'Median…', 'Reduce Noise…'].map((l) => filterItem(l, `noise.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Pixelate', items: ['Color Halftone…', 'Crystallize…', 'Facet', 'Fragment', 'Mezzotint…', 'Mosaic…', 'Pointillize…'].map((l) => filterItem(l, `pixelate.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Render', items: ['Flame…', 'Picture Frame…', 'Tree…', 'Clouds', 'Difference Clouds', 'Fibers…', 'Lens Flare…'].map((l) => filterItem(l, `render.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Sharpen', items: ['Sharpen', 'Sharpen Edges', 'Sharpen More', 'Smart Sharpen…', 'Unsharp Mask…'].map((l) => filterItem(l, `sharpen.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Stylize', items: ['Diffuse…', 'Emboss…', 'Extrude…', 'Find Edges', 'Oil Paint…', 'Solarize', 'Tiles…', 'Trace Contour…', 'Wind…'].map((l) => filterItem(l, `stylize.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Video', items: ['De-Interlace…', 'NTSC Colors'].map((l) => filterItem(l, `video.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
+      { label: 'Other', items: ['Custom…', 'High Pass…', 'HSB/HSL', 'Maximum…', 'Minimum…', 'Offset…'].map((l) => filterItem(l, `other.${l.replace(/[^a-z]/gi, '').toLowerCase()}`)) },
     ],
   },
   {

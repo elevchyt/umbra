@@ -70,6 +70,10 @@ import * as MaskCmd from './commands/masks.js';
 import * as AdjustCmd from './commands/adjust.js';
 import * as SpatialCmd from './commands/spatial.js';
 import * as MaskPaint from './commands/mask-paint.js';
+import * as FilterCmd from './commands/filter.js';
+import { FILTER_BY_ID, type FilterParams } from '@umbra/kernels/filters/index';
+import { compositePixel } from '@umbra/kernels/blend';
+import type { BlendMode as FadeMode } from '@umbra/core/blend';
 import { colorStats, replaceColorMask, SPATIAL_LABEL, type SpatialAdjustment } from '@umbra/kernels/spatial';
 import {
   applyImage,
@@ -301,8 +305,9 @@ export class Engine {
   // ---- document ---------------------------------------------------------------------
 
   private commit(doc: Doc, historyName: string): void {
-    // Any committed edit makes a spatial preview stale.
+    // Any committed edit makes a spatial preview stale, and ends what Fade could fade.
     this.previewDoc = null;
+    this.fadeState = null;
     this.doc = doc;
     this.history.push(historyName, doc);
     this.compositeCache = null;
@@ -925,9 +930,11 @@ export class Engine {
     this.previewDoc = null;
     const id = this.adjustTarget();
     if (id === null) return false;
+    const before = this.doc;
     const next = AdjustCmd.applyAdjustment(this.doc, id, adjustment);
     if (next === this.doc) return false;
     this.commit(next, ADJUSTMENT_LABEL[adjustment.kind]);
+    this.fadeState = { before, after: next, name: ADJUSTMENT_LABEL[adjustment.kind], layerId: id, mask: false };
     return true;
   }
 
@@ -978,9 +985,12 @@ export class Engine {
     this.previewDoc = null;
     const id = this.adjustTarget();
     if (id === null) return false;
+    const before = this.doc;
     const next = SpatialCmd.applySpatial(this.doc, id, adj, this.spatialContext(adj));
     if (next === this.doc) return false;
     this.commit(next, SPATIAL_LABEL[adj.kind]);
+    // HDR Toning flattens, so there is no single "before" layer to fade against.
+    if (adj.kind !== 'hdrToning') this.fadeState = { before, after: next, name: SPATIAL_LABEL[adj.kind], layerId: id, mask: false };
     return true;
   }
 
@@ -1002,6 +1012,140 @@ export class Engine {
       }
     }
     return { pixels, width: w, height: h };
+  }
+
+  // ---- filters -------------------------------------------------------------------------
+
+  /** Filter ▸ Last Filter: the last filter applied, with its parameters. */
+  private lastFilterRun: { id: string; params: FilterParams } | null = null;
+
+  private filterRun(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number]): FilterCmd.FilterRun | null {
+    const def = FILTER_BY_ID.get(id);
+    return def ? { def, params, foreground: fg, background: bg } : null;
+  }
+
+  private filterDoc(run: FilterCmd.FilterRun): Doc | null {
+    const target = this.paintTarget();
+    if (!target) return null;
+    const next = FilterCmd.applyFilter(this.doc, target.id, target.mask, run);
+    return next === this.doc ? null : next;
+  }
+
+  applyFilter(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number]): boolean {
+    this.previewDoc = null;
+    const run = this.filterRun(id, params, fg, bg);
+    if (!run) return false;
+    const before = this.doc;
+    const next = this.filterDoc(run);
+    if (!next) return false;
+    const target = this.paintTarget()!;
+    this.commit(next, run.def.label);
+    this.lastFilterRun = { id, params };
+    this.fadeState = { before, after: next, name: run.def.label, layerId: target.id, mask: target.mask };
+    return true;
+  }
+
+  /** Filter ▸ Last Filter: the same filter and settings again. */
+  repeatLastFilter(fg: [number, number, number], bg: [number, number, number]): boolean {
+    const last = this.lastFilterRun;
+    return last ? this.applyFilter(last.id, last.params, fg, bg) : false;
+  }
+
+  previewFilter(id: string | null, params: FilterParams | null, fg: [number, number, number], bg: [number, number, number]): void {
+    const run = id && params ? this.filterRun(id, params, fg, bg) : null;
+    this.previewDoc = run ? this.filterDoc(run) : null;
+  }
+
+  /**
+   * The filter dialog's preview box: a document rectangle before and after, computed on that
+   * rectangle alone (plus the filter's pad) — fast whatever the document size.
+   */
+  filterBox(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number], rect: Rect): { before: Uint8Array; after: Uint8Array; width: number; height: number; rect: Rect } | null {
+    const run = this.filterRun(id, params, fg, bg);
+    const target = this.paintTarget();
+    if (!run || !target) return null;
+    const layer = findLayer(this.doc.layers, target.id);
+    if (!layer) return null;
+    const r = {
+      x0: Math.max(0, Math.floor(rect.x0)),
+      y0: Math.max(0, Math.floor(rect.y0)),
+      x1: Math.min(this.doc.width, Math.ceil(rect.x1)),
+      y1: Math.min(this.doc.height, Math.ceil(rect.y1)),
+    };
+    if (r.x1 <= r.x0 || r.y1 <= r.y0) return null;
+    const canvasRect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+    const plane = target.mask ? layer.mask?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
+    if (!plane) return null;
+    const canvas = bitmapFromPlane(plane, canvasRect).data;
+    const after = FilterCmd.filterRegion(this.doc, canvas, r, run, this.doc.selection?.mask ?? null);
+    const w = r.x1 - r.x0;
+    const h = r.y1 - r.y0;
+    const before = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) before.set(canvas.subarray(((r.y0 + y) * this.doc.width + r.x0) * 4, ((r.y0 + y) * this.doc.width + r.x1) * 4), y * w * 4);
+    return { before, after: new Uint8Array(after.buffer), width: w, height: h, rect: r };
+  }
+
+  // ---- Edit ▸ Fade ------------------------------------------------------------------------
+
+  /**
+   * What Fade can fade: the step just taken by a filter, adjustment or brush stroke, as the
+   * document before and after it and the one layer (or mask) it changed. Any other commit
+   * clears it — Fade is only offered immediately after.
+   */
+  private fadeState: { before: Doc; after: Doc; name: string; layerId: number; mask: boolean } | null = null;
+
+  get fadeName(): string | null {
+    return this.fadeState && this.history.current === this.fadeState.after ? this.fadeState.name : null;
+  }
+
+  private fadeDoc(opacity: number, mode: FadeMode): Doc | null {
+    const f = this.fadeState;
+    if (!f || this.history.current !== f.after) return null;
+    const lb = findLayer(f.before.layers, f.layerId);
+    const la = findLayer(f.after.layers, f.layerId);
+    if (!lb || !la) return null;
+    const rect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+    if (f.mask) {
+      if (!lb.mask || !la.mask) return null;
+      const b = bitmapFromPlane(lb.mask.plane.base, rect).data;
+      const a = bitmapFromPlane(la.mask.plane.base, rect).data;
+      const grey = new Uint8Array(this.doc.width * this.doc.height);
+      for (let i = 0; i < grey.length; i++) {
+        const out = compositePixel(mode, [b[i * 4]! / 255, b[i * 4]! / 255, b[i * 4]! / 255], 1, [a[i * 4]! / 255, a[i * 4]! / 255, a[i * 4]! / 255], opacity);
+        grey[i] = Math.round(out.color[0] * 255);
+      }
+      return MaskPaint.setMaskFromGrey(f.after, f.layerId, grey);
+    }
+    if (lb.kind !== 'pixel' || la.kind !== 'pixel') return null;
+    const b = bitmapFromPlane(lb.plane.base, rect).data;
+    const a = bitmapFromPlane(la.plane.base, rect).data;
+    const out = new Uint8ClampedArray(b.length);
+    for (let i = 0; i < b.length; i += 4) {
+      if (b[i + 3] === 0 && a[i + 3] === 0) continue;
+      // The result of the step, faded onto the state before it with the chosen mode.
+      const r = compositePixel(mode, [b[i]! / 255, b[i + 1]! / 255, b[i + 2]! / 255], b[i + 3]! / 255, [a[i]! / 255, a[i + 1]! / 255, a[i + 2]! / 255], (a[i + 3]! / 255) * opacity);
+      // Fading never grows coverage past what either state had.
+      const alpha = Math.min(r.alpha, Math.max(b[i + 3]!, a[i + 3]!) / 255);
+      out[i] = Math.round(r.color[0] * 255);
+      out[i + 1] = Math.round(r.color[1] * 255);
+      out[i + 2] = Math.round(r.color[2] * 255);
+      out[i + 3] = Math.round(alpha * 255);
+    }
+    const plane = new MipPlane(SpatialCmd.writeRaster(lb.plane.base, this.doc.width, this.doc.height, out));
+    return { ...f.after, layers: updateLayer(f.after.layers, f.layerId, (l) => ({ ...l, plane }) as typeof l) };
+  }
+
+  previewFade(opacity: number | null, mode: FadeMode): void {
+    this.previewDoc = opacity === null ? null : this.fadeDoc(opacity, mode);
+  }
+
+  fade(opacity: number, mode: FadeMode): boolean {
+    this.previewDoc = null;
+    const name = this.fadeState?.name;
+    const next = this.fadeDoc(opacity, mode);
+    if (!next || !name) return false;
+    this.commit(next, `Fade ${name}`);
+    return true;
   }
 
   // ---- Apply Image and Calculations -------------------------------------------------------
@@ -1987,12 +2131,15 @@ export class Engine {
 
     const strokePlane = this.strokeWriter.commit();
     const id = this.strokeLayerId;
+    const before = this.doc;
+    const intoMask = this.strokeIntoMask;
     this.commit(
       this.strokeIntoMask
         ? MaskPaint.compositeStrokeIntoMask(this.doc, id, strokePlane, this.brush.opacity)
         : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
       this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
+    this.fadeState = { before, after: this.doc, name: this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
     this.strokeIntoMask = false;
     this.strokeWriter = null;
     this.strokeState = null;
@@ -2254,6 +2401,8 @@ export class Engine {
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
       maskTarget: this.paintTarget()?.mask ? this.doc.activeLayerIds[0] ?? null : null,
+      lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
+      fadeName: this.fadeName,
       hasSelection: !!this.doc.selection,
       history: this.history.list().map((h) => ({
         name: h.name,

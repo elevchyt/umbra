@@ -4,12 +4,14 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
 import { SpatialDialog } from '../adjust/spatial';
 import { ApplyImageDialog, CalculationsDialog } from '../adjust/applyimage';
+import { FilterDialog, colours as filterColours } from '../filters/FilterDialog';
+import { FadeDialog } from '../filters/FadeDialog';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -121,6 +123,7 @@ export function Workspace() {
         },
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
+        onFilterBox: (m) => window.dispatchEvent(new CustomEvent('umbra:filter-box', { detail: m })),
         onProbe: (m) => {
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraProbe = m;
           store.setProbe({ cursor: m.cursor, samplers: m.tag ? store.probe()?.samplers ?? [] : m.samplers });
@@ -331,6 +334,20 @@ export function Workspace() {
     }
     if (cmd.startsWith('workspace.') && WORKSPACE_BY_ID.has(cmd.slice('workspace.'.length))) {
       store.resetLayout(WORKSPACE_BY_ID.get(cmd.slice('workspace.'.length))!.layout);
+      return;
+    }
+    // Filters come from the registry, like panel toggles: one handler for all of them.
+    const filter = FILTER_BY_ID.get(cmd);
+    if (filter) {
+      const doc = store.doc();
+      const active = doc?.layers.find((l) => l.id === doc.activeLayerIds[0]);
+      if (!active || (active.kind !== 'pixel' && doc?.maskTarget !== active.id)) {
+        flash(`Could not complete ${filter.label} because the target layer is not a pixel layer.`);
+        return;
+      }
+      // Filters with no settings run at once, as Blur and Find Edges do in Photoshop.
+      if (filter.params.length === 0) send({ t: 'applyFilter', id: cmd, params: {}, ...filterColours() });
+      else store.openDialog('filter', cmd);
       return;
     }
 
@@ -683,6 +700,12 @@ export function Workspace() {
         store.openDialog('spatial', initial);
         break;
       }
+      case 'filter.last':
+        send({ t: 'lastFilter', ...filterColours() });
+        break;
+      case 'edit.fade':
+        if (store.doc()?.fadeName) store.openDialog('fade');
+        break;
       case 'image.applyImage':
         store.openDialog('applyImage');
         break;
@@ -1085,6 +1108,9 @@ export function Workspace() {
     // Keyboard-only commands (D, X, Q, [ and ], Tab…) are not menu items and are always
     // live; only a MENU command can be "not built yet".
     if (!entry) return true;
+    // Built, but only meaningful in a state: there has to be a filter to repeat, a step to fade.
+    if (cmd === 'filter.last') return !!store.doc()?.lastFilter;
+    if (cmd === 'edit.fade') return !!store.doc()?.fadeName;
     return !!entry.done;
   };
 
@@ -1317,6 +1343,12 @@ export function Workspace() {
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
         />
+      </Show>
+      <Show when={store.dialog()?.id === 'filter'}>
+        <FilterDialog id={store.dialog()!.payload as string} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'fade'}>
+        <FadeDialog name={store.doc()?.fadeName ?? ''} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'applyImage'}>
         <ApplyImageDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />

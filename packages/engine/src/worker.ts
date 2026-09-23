@@ -16,6 +16,9 @@ let recovered: ArrayBuffer | null = null;
 /** The newest CPU preview not yet computed — see 'previewSpatial'. */
 let pendingPreview: (() => void) | null = null;
 let previewScheduled = false;
+/** The filter dialog's preview box, latest wins likewise. */
+let pendingBox: (() => void) | null = null;
+let boxScheduled = false;
 
 function latestPreview(run: () => void): void {
   pendingPreview = run;
@@ -247,6 +250,45 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'applyImage':
         pendingPreview = null;
         if (engine?.applyImage(msg.options)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'applyFilter':
+        pendingPreview = null;
+        if (engine?.applyFilter(msg.id, msg.params, msg.fg, msg.bg)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'previewFilter': {
+        const m = msg;
+        latestPreview(() => engine?.previewFilter(m.id, m.params, m.fg, m.bg));
+        break;
+      }
+      case 'filterBox': {
+        // Latest wins, separately from the canvas preview: both run while a slider moves.
+        const m = msg;
+        pendingBox = () => {
+          const r = engine?.filterBox(m.id, m.params, m.fg, m.bg, m.rect);
+          if (r) post({ t: 'filterBox', seq: m.seq, ...r }, [r.before.buffer, r.after.buffer]);
+        };
+        if (!boxScheduled) {
+          boxScheduled = true;
+          setTimeout(() => {
+            boxScheduled = false;
+            const run = pendingBox;
+            pendingBox = null;
+            run?.();
+          }, 0);
+        }
+        break;
+      }
+      case 'lastFilter':
+        if (engine?.repeatLastFilter(msg.fg, msg.bg)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'previewFade': {
+        const m = msg;
+        latestPreview(() => engine?.previewFade(m.opacity, m.mode as never));
+        break;
+      }
+      case 'fade':
+        pendingPreview = null;
+        if (engine?.fade(msg.opacity, msg.mode as never)) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'calculations':
         if (engine?.calculations(msg.options)) post({ t: 'doc', doc: engine.summary() });

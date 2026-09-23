@@ -262,6 +262,8 @@ export type DialogId =
   | 'fillLayer'
   | 'spatial'
   | 'applyImage'
+  | 'filter'
+  | 'fade'
   | 'calculations'
   | 'definePattern';
 

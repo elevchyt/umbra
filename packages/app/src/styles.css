@@ -1040,3 +1040,8 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .histogram-graph.small { height: 48px; }
 /* The edit target — pixels or mask — is framed, as Photoshop frames the targeted thumbnail. */
 .layer-thumb.targeted, .layer-mask-thumb.targeted { outline: 1px solid var(--text); outline-offset: 1px; }
+.filter-box { width: 220px; height: 220px; align-self: center; border: 1px solid var(--border-dark); cursor: grab; background: #808080; image-rendering: pixelated; }
+.filter-zoom { justify-content: center; }
+.point-pick { position: relative; width: 120px; background: var(--panel-sunken); border: 1px solid var(--border-dark); cursor: crosshair; }
+.point-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border: 1px solid #fff; box-shadow: 0 0 0 1px #000; border-radius: 50%; pointer-events: none; }
+.kernel-grid { display: grid; gap: 2px; }

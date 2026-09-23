@@ -1,0 +1,209 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`every filter > Add Noise: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "9eda5737",
+  "8b7874d5",
+  "53dfb8c",
+]
+`;
+
+exports[`every filter > Average: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "72765a05",
+  "72765a05",
+  "72765a05",
+]
+`;
+
+exports[`every filter > Blur More: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3763d593",
+  "3763d593",
+  "3763d593",
+]
+`;
+
+exports[`every filter > Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "2d11e099",
+  "2d11e099",
+  "2d11e099",
+]
+`;
+
+exports[`every filter > Box Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "847644c3",
+  "1f707e1f",
+  "cae96db9",
+]
+`;
+
+exports[`every filter > Custom: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a2f741a3",
+  "cdde5c05",
+  "270ee2a5",
+]
+`;
+
+exports[`every filter > Despeckle: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "ca3304f8",
+  "ca3304f8",
+  "ca3304f8",
+]
+`;
+
+exports[`every filter > Dust & Scratches: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "6f9176f1",
+  "79201c76",
+  "5989e137",
+]
+`;
+
+exports[`every filter > Gaussian Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "ca1e8673",
+  "3ca5e9ea",
+  "dc3bbcc1",
+]
+`;
+
+exports[`every filter > HSB/HSL: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "b4cc2bdc",
+  "944ee9cd",
+  "5999637d",
+]
+`;
+
+exports[`every filter > High Pass: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "6f193955",
+  "11378e8b",
+  "6debfa83",
+]
+`;
+
+exports[`every filter > Maximum: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "2c879d59",
+  "d2fc0dce",
+  "6bac5ecc",
+]
+`;
+
+exports[`every filter > Median: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "855d13a8",
+  "8449a4d0",
+  "76ad0dd3",
+]
+`;
+
+exports[`every filter > Minimum: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "ce9dea6e",
+  "4c09bae8",
+  "265c8de8",
+]
+`;
+
+exports[`every filter > Motion Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "2451fa99",
+  "d293ff45",
+  "760ff937",
+]
+`;
+
+exports[`every filter > Offset: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1c5a691d",
+  "ac47e6c5",
+  "76c82c1d",
+]
+`;
+
+exports[`every filter > Radial Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "302ca257",
+  "541a6cf8",
+  "88f68b59",
+]
+`;
+
+exports[`every filter > Reduce Noise: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "bb5c13f6",
+  "7159ccc2",
+  "4dfc85ae",
+]
+`;
+
+exports[`every filter > Shape Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "6e2398e",
+  "b11080f4",
+  "3a335723",
+]
+`;
+
+exports[`every filter > Sharpen Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "776eb7c1",
+  "776eb7c1",
+  "776eb7c1",
+]
+`;
+
+exports[`every filter > Sharpen More: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "69f3a05",
+  "69f3a05",
+  "69f3a05",
+]
+`;
+
+exports[`every filter > Sharpen: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "f6aa7f04",
+  "f6aa7f04",
+  "f6aa7f04",
+]
+`;
+
+exports[`every filter > Smart Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1b7e28f3",
+  "270ee2a5",
+  "d9e1ae27",
+]
+`;
+
+exports[`every filter > Smart Sharpen: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e2283a60",
+  "bfda5d70",
+  "3e84088b",
+]
+`;
+
+exports[`every filter > Surface Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "518ee428",
+  "7a125184",
+  "b1961831",
+]
+`;
+
+exports[`every filter > Unsharp Mask: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3d5c5d8f",
+  "1c5a691d",
+  "2eb0e706",
+]
+`;

@@ -7,6 +7,7 @@ import { WORKSPACES, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, parseChord, chordKey, chordLabel, EXTRA_BINDINGS, isTextEntry } from '../keymap/keymap';
 import { ICONS } from '@umbra/ui/icons/icons';
 import { parseNumeric, toPixels, fromPixels } from '@umbra/ui/widgets/numeric';
+import { FILTER_BY_ID } from '@umbra/engine';
 
 function walk(nodes: MenuNode[], fn: (n: MenuNode, path: string[]) => void, path: string[] = []) {
   for (const n of nodes) {
@@ -325,8 +326,17 @@ describe('menu enablement matches the handlers', () => {
   const body = source.slice(start, end);
   const handled = new Set([...body.matchAll(/case '([^']+)':/g)].map((m) => m[1]!));
   const menuCommands = COMMANDS.filter(
-    (c) => !PANEL_BY_COMMAND[c.cmd] && !c.cmd.startsWith('workspace.'),
+    (c) => !PANEL_BY_COMMAND[c.cmd] && !c.cmd.startsWith('workspace.') && !FILTER_BY_ID.has(c.cmd),
   );
+
+  it('every filter menu item is enabled exactly when the registry implements it', () => {
+    const filterItems = COMMANDS.filter((c) => /^(blur|distort|noise|pixelate|render|sharpen|stylize|video|other)\./.test(c.cmd));
+    const wrong = filterItems.filter((c) => !!c.done !== FILTER_BY_ID.has(c.cmd)).map((c) => c.cmd);
+    expect(wrong).toEqual([]);
+    // And every registered filter has a menu item — a filter nobody can reach is dead code.
+    const reachable = new Set(filterItems.map((c) => c.cmd));
+    expect([...FILTER_BY_ID.keys()].filter((id) => !reachable.has(id))).toEqual([]);
+  });
 
   it('every enabled menu item has a handler', () => {
     const dead = menuCommands.filter((c) => c.done && !handled.has(c.cmd)).map((c) => c.cmd);

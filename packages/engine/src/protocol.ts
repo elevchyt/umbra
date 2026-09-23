@@ -5,6 +5,9 @@ import type { Adjustment } from '@umbra/kernels/adjust';
 import type { FillContent } from '@umbra/kernels/fill';
 import type { SpatialAdjustment } from '@umbra/kernels/spatial';
 import type { ApplyImageOptions, CalculationsOptions } from '@umbra/kernels/applyimage';
+import type { FilterParams } from '@umbra/kernels/filters/types';
+
+type Rgb3 = [number, number, number];
 
 /**
  * A fill layer's content as the UI sees it: the same as the model, except a pattern is named
@@ -71,6 +74,10 @@ export interface DocSummary {
   activeLayerIds: number[];
   /** The active layer when its MASK is the edit target (always so for adjustment/fill layers). */
   maskTarget: number | null;
+  /** Filter ▸ Last Filter's filter, once one has been applied. */
+  lastFilter: { id: string; label: string } | null;
+  /** What Edit ▸ Fade would fade, while it can ("Gaussian Blur"); null otherwise. */
+  fadeName: string | null;
   hasSelection: boolean;
   channels: { id: number; name: string; visible: boolean; indicates: 'masked' | 'selected' }[];
   /** The History panel's rows, oldest first; `historyIndex` is the one in effect. */
@@ -182,6 +189,14 @@ export type ToEngine =
   | { t: 'previewApplyImage'; options: ApplyImageOptions | null }
   | { t: 'applyImage'; options: ApplyImageOptions }
   | { t: 'calculations'; options: CalculationsOptions }
+  | { t: 'applyFilter'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3 }
+  /** Latest wins. `id` null ends the on-canvas preview. */
+  | { t: 'previewFilter'; id: string | null; params: FilterParams | null; fg: Rgb3; bg: Rgb3 }
+  /** The dialog's preview box: a document rectangle, answered with before and after. */
+  | { t: 'filterBox'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; rect: { x0: number; y0: number; x1: number; y1: number }; seq: number }
+  | { t: 'lastFilter'; fg: Rgb3; bg: Rgb3 }
+  | { t: 'fade'; opacity: number; mode: string }
+  | { t: 'previewFade'; opacity: number | null; mode: string }
   | { t: 'requestReplaceColorPreview'; color: [number, number, number]; fuzziness: number; size: number }
   /** A .cube or .3dl file the user picked; the reply is the updated `luts` list. */
   | { t: 'loadLut'; fileName: string; bytes: Uint8Array }
@@ -270,6 +285,7 @@ export type FromEngine =
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
+  | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }
   | { t: 'luts'; list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }
