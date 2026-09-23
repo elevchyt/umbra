@@ -9,23 +9,24 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M4 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
-Photoshop's adjustments (destructive and as adjustment layers), fill layers and masks work;
-filters, layer styles, vector and type do not.
+**M0–M5 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
+Photoshop's adjustments (destructive and as adjustment layers), fill layers, masks, the
+Filter menu (58 filters and the 47-effect Filter Gallery), smart objects and smart filters
+work; layer styles, vector and type do not.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
 > Most of the UI is present because M1's exit criterion was that a Photoshop user finds
-> everything where they expect it — **325 of 505 menu commands are not built yet** (greyed out,
+> everything where they expect it — **340 of 572 menu commands are not built yet** (greyed out,
 > not silently inert). That file is the running checklist, and it
 > separates *broken* (cheap bugs) from *not built yet* (the roadmap). It carries the script
 > that regenerates it, because the hand-maintained flags in the source have been wrong before.
 
 | | |
 |---|---|
-| Tests | 464 across 28 files |
+| Tests | 727 across 31 files |
 | GPU ≡ CPU parity | 126/126 cases — every blend mode, every adjustment, fill layers, and real documents through the renderer |
-| Payload | 167 KB UI + 150 KB worker, gzipped |
+| Payload | 203 KB UI + 195 KB worker, gzipped |
 | Compositing | 100 layers at 4K, ~8 ms/frame |
 
 ## What works
@@ -41,6 +42,13 @@ live preview, presets, eyedroppers and on-image tools, and all 16 as adjustment 
 in Properties and saved to PSD. Solid Color, Gradient and Pattern fill layers; painting into
 layer masks; Apply Image and Calculations; the Info (with before/after), Histogram,
 Adjustments and Patterns panels; the Color Sampler tool.
+
+Filters: 58 across Blur (with Lens Blur), Distort, Noise, Pixelate, Render, Sharpen, Stylize,
+Video and Other, each with a zoomable before/after preview box and on-canvas preview, plus
+Last Filter and Edit ▸ Fade; the Filter Gallery's 47 effects with stackable effect layers.
+Smart objects: Convert, Place Embedded, Open as Smart Object, Edit Contents in a tab,
+instances, lossless transforms, Convert to Layers, Rasterize — and smart filters with
+per-filter blending and a paintable filter mask, all saved to and read from PSD.
 
 ## Running it
 

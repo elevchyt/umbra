@@ -371,6 +371,63 @@ effect layers dialog). Smart objects: convert, embedded edit in tab, linked, pla
 non-destructively, **smart filters** with mask + per-filter blending options; PSD read/write.
 **Exit:** each filter has a golden test at 3 parameter sets; smart-filter PSDs from Photoshop
 render within threshold for supported filters.
+**Exit (revised, no Photoshop — as for M4).** Every filter and every Filter Gallery effect runs
+at three parameter sets with a sanity check (premultiplied, finite) and a golden checksum —
+regression nets, not an oracle — and passes the region contract: a crop grown by the declared
+pad reproduces the full run within 1/255, which is what makes the preview box exact.
+Documented filters (Gaussian, Box, Median, Maximum/Minimum, High Pass, Custom, Offset,
+De-Interlace, Twirl's formula, Displace's) are tested against their definitions; the rest are
+`[fit]` and say so in their `model`. Smart objects must render as the destructive filter
+would, scale down and up losslessly, and survive PSD round trips (placement, contents,
+instances, nesting, every mapped filter descriptor through the codec). PSDs written by
+Photoshop open showing Photoshop's own stored rendering, exactly, until an object is edited.
+
+**Status (2026-09-23): complete**, with the deferrals below. 58 filters in the registry
+(Blur incl. Lens Blur, Distort, Noise, Pixelate, Render bar Flame/Picture Frame/Tree,
+Sharpen, Stylize, Video, Other) with auto-generated dialogs, a zoomable before/after preview
+box, on-canvas preview, Last Filter and Edit ▸ Fade; the Filter Gallery with all 47 effects in
+six folders and stackable effect layers; smart objects (convert, New via Copy, instances,
+Edit Contents in a tab, Place Embedded, Open as Smart Object, Convert to Layers, Rasterize,
+lossless transforms through every geometric command) with smart filters (edit, reorder,
+per-filter blending, eye, a paintable filter mask seeded from the selection); PSD read/write
+of all of it. 727 tests.
+
+Deferred, with reasons: linked smart objects (Place Linked, Relink, Update Modified, Embed/
+Convert to Linked), Replace/Export Contents and Stack Mode need file watching or a second
+open document (M11); smart-filter masks in PSD and perspective/warped placements (M9, with
+the warps); GPU execution of filters (smart objects re-render on the CPU, ≈2 s for a
+canvas-sized blurred object on a 2400×1600 document); Clarity/Dehaze/Grain adjustment
+layers wait for the Develop kernels; Flame, Picture Frame and Tree are post-1.0.
+
+**Findings.**
+1. **Randomness must be keyed to the document, not the buffer.** Every noise, texture, seed
+   grid and hatch reads `hash2(documentX, documentY, seed)`, never a sequential PRNG over the
+   buffer; otherwise the preview box (a crop) and OK (the whole layer) disagree. The pad test
+   enforces it for all 105 filters and effects.
+2. **Region-of-interest is a contract, and it is testable.** Each filter declares how far an
+   output pixel reads (`pad`, or `'full'` for Twirl-like ones). The test crops, grows by the
+   pad, runs, and compares to the full run; a wrong pad fails at once. Summed-area tables and
+   floating sums stay within the tolerance; running box blurs past σ 12 would not, which is
+   why thresholds are only ever applied after exact convolutions.
+3. **The Filter Gallery is one filter whose parameter is its stack.** Encoding the effect
+   layers as JSON in a single registry parameter gave the gallery the preview box, on-canvas
+   preview, Last Filter, Fade and smart-filter support without a line of special casing.
+4. **A smart object is a pixel layer that knows how to remake its pixels.** It carries its
+   rendered plane, so the compositor, clipboard, journal and PSD writer needed no new case;
+   geometric commands compose their matrix into the transform and re-render from the
+   contents, which is what makes scale-down-and-up lossless.
+5. **Lend the filter mask the layer-mask slot.** Rather than teach brush, fill, gradient,
+   filters and Apply Image a third target, a filter-mask edit swaps the filter mask into
+   `mask`, runs the ordinary operation, swaps it back and re-renders.
+6. **Every smart object in a PSD carries a warp.** ag-psd (and Photoshop) write a "custom"
+   envelope whose mesh is the regular grid; only a mesh off that grid is a real warp.
+7. **Open shows the file's rendering; decode later.** Embedded PNG/JPEG contents need the
+   browser's asynchronous decoder, but a smart object opens showing the pixels Photoshop
+   stored, so contents can arrive after the document opens with nothing re-rendered — and
+   filters Umbra lacks keep showing until the object is edited.
+8. **Photoshop's filter descriptors do not carry every setting.** Clouds' high contrast (an
+   Alt-click there), Wind's randomness, Maximum/Minimum's Preserve and Radial Blur's centre
+   come back at defaults; the codec round-trip test lists them explicitly.
 
 ### M6 — Layer styles + advanced blending (L)
 All 10 effects + multi-instance, Layer Style dialog (exact layout: left list w/ checkboxes,
