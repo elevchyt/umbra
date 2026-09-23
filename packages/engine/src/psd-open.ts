@@ -35,7 +35,13 @@ import {
   type Doc,
   type Layer,
   type RasterMask,
+  type SmartFilter,
+  type SmartObjectLayer,
+  type SmartSource,
 } from './document.js';
+import type { Filter as AgFilter } from 'ag-psd';
+import { makeSmartLayer, makeSource, whiteMask } from './smart.js';
+import { fromPsdFilter, isAffineQuad, isIdentityWarp, quadToMatrix } from './psd-smart.js';
 
 const MASK_FORMAT: PlaneFormat = { layout: 'A', sample: 'u8' };
 
@@ -119,6 +125,30 @@ export interface OpenPsdResult {
   warnings: { layer: string; features: string[] }[];
   /** Patterns stored in the file, for the pattern library. */
   patterns: PatternDef[];
+  /**
+   * Smart objects whose contents are a picture (PNG, JPEG…): decoding one needs the browser,
+   * which is asynchronous, so they open showing the file's own rendering and the caller
+   * decodes these and fills the sources in. Nested documents' pending pictures are included.
+   */
+  pendingSources: PendingSource[];
+}
+
+export interface PendingSource {
+  source: SmartSource;
+  bytes: Uint8Array;
+  type: string;
+}
+
+const MIME: Record<string, string> = { 'png ': 'image/png', JPEG: 'image/jpeg', 'GIFf': 'image/gif', WEBP: 'image/webp' };
+
+/** An embedded file's kind, by its type code or, failing that, its first bytes. */
+function embeddedKind(f: { type?: string; data?: Uint8Array }): 'psd' | string | null {
+  const d = f.data;
+  if (!d || d.length < 4) return null;
+  if (d[0] === 0x38 && d[1] === 0x42 && d[2] === 0x50 && d[3] === 0x53) return 'psd';
+  if (d[0] === 0x89 && d[1] === 0x50) return 'image/png';
+  if (d[0] === 0xff && d[1] === 0xd8) return 'image/jpeg';
+  return f.type ? (MIME[f.type] ?? null) : null;
 }
 
 export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.psd'): OpenPsdResult {
@@ -143,6 +173,34 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
   });
 
   const warnings: { layer: string; features: string[] }[] = [];
+  const pendingSources: PendingSource[] = [];
+  // One source per embedded file, so every instance of it shares one, as in Photoshop.
+  const sources = new Map<string, SmartSource | null>();
+  const linkedById = new Map((info.linkedFiles ?? []).map((f) => [f.id, f]));
+  const sourceFor = (id: string, width: number, height: number, features: string[]): SmartSource | null => {
+    if (sources.has(id)) return sources.get(id)!;
+    const file = linkedById.get(id);
+    let source: SmartSource | null = null;
+    const kind = file ? embeddedKind(file) : null;
+    if (file && kind === 'psd') {
+      try {
+        const inner = openPsd(file.data!, file.name);
+        source = makeSource(file.name, { ...inner.doc, name: file.name });
+        pendingSources.push(...inner.pendingSources);
+        for (const w of inner.warnings) warnings.push({ layer: `${file.name} ▸ ${w.layer}`, features: w.features });
+      } catch {
+        features.push('smart object contents (unreadable)');
+      }
+    } else if (file && kind) {
+      // A picture: an empty stand-in of the right size until the caller decodes it.
+      source = makeSource(file.name, { ...emptyDoc(width, height, file.name) });
+      pendingSources.push({ source, bytes: file.data!, type: kind });
+    } else {
+      features.push(file ? `smart object contents (${file.type ?? 'unknown'} file)` : 'linked smart object (file not embedded)');
+    }
+    sources.set(id, source);
+    return source;
+  };
   const patterns: PatternDef[] = (info.patterns ?? []).map((p) => ({
     id: p.id,
     name: p.name,
@@ -150,6 +208,36 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
     height: p.bounds.h,
     data: p.data,
   }));
+
+  /**
+   * A smart object layer. It shows the pixels Photoshop stored for it — its own rendering —
+   * until something changes; from then on it re-renders from the contents.
+   */
+  const smartLayer = (it: PsdLayerInfo, plane: Plane, common: Partial<SmartObjectLayer>, features: string[]): SmartObjectLayer | null => {
+    const placed = it.placed as { id: string; transform: number[]; nonAffineTransform?: number[]; width?: number; height?: number; warp?: unknown; filter?: { enabled?: boolean; maskEnabled?: boolean; list?: AgFilter[] } };
+    const q = placed.nonAffineTransform ?? placed.transform;
+    const w = placed.width ?? Math.round(Math.hypot(q[2]! - q[0]!, q[3]! - q[1]!));
+    const h = placed.height ?? Math.round(Math.hypot(q[6]! - q[0]!, q[7]! - q[1]!));
+    const source = sourceFor(placed.id, w, h, features);
+    if (!source) return null;
+    if (!isAffineQuad(q)) features.push('perspective smart object transform (affine part kept)');
+    if (!isIdentityWarp(placed.warp)) features.push('smart object warp');
+    const size = { width: info.width, height: info.height };
+    const filters: SmartFilter[] = [];
+    for (const f of placed.filter?.list ?? []) {
+      const r = fromPsdFilter(f, size);
+      if ('unsupported' in r) features.push(`smart filter "${r.unsupported}"`);
+      else filters.push({ ...r, id: nextLayerId() });
+    }
+    if (filters.length && info.hasFilterMasks) features.push('smart filter mask (not read; the filters apply everywhere)');
+    return makeSmartLayer(it.name, source, quadToMatrix(q, source.doc.width, source.doc.height), size, {
+      ...common,
+      filters,
+      filtersEnabled: placed.filter?.enabled !== false,
+      filterMask: filters.length ? { ...whiteMask(), enabled: placed.filter?.maskEnabled !== false } : undefined,
+      plane: new MipPlane(plane),
+    });
+  };
 
   const build = (items: PsdLayerInfo[]): Layer[] =>
     items.map((it) => {
@@ -218,6 +306,11 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         });
       }
       const plane = planes.get(it.index) ?? Plane.empty(RGBA8);
+      if (it.placed) {
+        const smart = smartLayer(it, plane, common, features);
+        if (features.length && !warnings.some((w) => w.layer === it.name)) warnings.push({ layer: it.name, features });
+        if (smart) return smart;
+      }
       return makePixelLayer(it.name, plane, common);
     });
 
@@ -227,7 +320,7 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
     layers,
     activeLayerIds: layers.length ? [layers[layers.length - 1]!.id] : [],
   };
-  return { doc, warnings, patterns };
+  return { doc, warnings, patterns, pendingSources };
 }
 
 export { Tile };

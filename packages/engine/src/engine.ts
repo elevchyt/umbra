@@ -119,7 +119,7 @@ import {
 } from '@umbra/kernels/brush';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
-import { openPsd } from './psd-open.js';
+import { openPsd, type PendingSource } from './psd-open.js';
 import type { DocSummary, EngineStats } from './protocol.js';
 
 /** The Free Transform options bar's numbers, derived from the live matrix. */
@@ -349,9 +349,13 @@ export class Engine {
     );
   }
 
+  /** Smart objects' embedded pictures still to decode — see `resolvePendingSources`. */
+  private pendingSources: PendingSource[] = [];
+
   openPsdBuffer(buffer: ArrayBuffer, name: string): void {
     this.dropContents();
-    const { doc, warnings, patterns } = openPsd(buffer, name);
+    const { doc, warnings, patterns, pendingSources } = openPsd(buffer, name);
+    this.pendingSources = pendingSources;
     for (const p of patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
     this.warnings = warnings;
     this.doc = doc;
@@ -1329,9 +1333,44 @@ export class Engine {
     return true;
   }
 
+  /**
+   * Decode smart objects' embedded pictures with the browser's decoder (asynchronous, hence
+   * after the open) and give them their real contents. Nothing re-renders: they already show
+   * the file's rendering. Resolves true when the document changed.
+   */
+  async resolvePendingSources(): Promise<boolean> {
+    const pending = this.pendingSources;
+    this.pendingSources = [];
+    if (pending.length === 0) return false;
+    const decoded: SmartSource[] = [];
+    for (const p of pending) {
+      try {
+        const bitmap = await createImageBitmap(new Blob([p.bytes as BlobPart], { type: p.type }));
+        const { plane, width, height } = planeFromImageBitmap(bitmap);
+        const layer = makePixelLayer(p.source.name.replace(/\.[^.]+$/, ''), plane);
+        const inner = { ...emptyDoc(width, height, p.source.name), layers: [layer], activeLayerIds: [layer.id] };
+        decoded.push(Smart.makeSource(p.source.name, inner, p.source.id, { bytes: p.bytes, type: p.type }));
+      } catch {
+        // An undecodable picture leaves the stand-in: the layer still shows the file's pixels.
+      }
+    }
+    let doc = this.doc;
+    for (const src of decoded) doc = Smart.swapSource(doc, src);
+    if (doc === this.doc) return false;
+    // The file's contents belong to the state it opened in, not to a step of their own.
+    if (this.history.list().length === 1) this.history = new History(doc, this.history.list()[0]!.name);
+    else this.history.amend(this.history.list()[this.history.index]!.name, doc);
+    this.doc = doc;
+    return true;
+  }
+
   /** A file's contents as a document: a PSD's layers, or a picture as one layer. */
   private contentsFrom(file: { name: string; bitmap?: ImageBitmap; psd?: ArrayBuffer }): Doc | null {
-    if (file.psd) return openPsd(file.psd, file.name).doc;
+    if (file.psd) {
+      const opened = openPsd(file.psd, file.name);
+      this.pendingSources.push(...opened.pendingSources);
+      return opened.doc;
+    }
     if (!file.bitmap) return null;
     const { plane, width, height } = planeFromImageBitmap(file.bitmap);
     const layer = makePixelLayer(file.name.replace(/\.[^.]+$/, ''), plane);

@@ -20,7 +20,8 @@ import type { BlendMode } from '@umbra/core/blend';
 import { PSD_BLEND_MODE } from '@umbra/psd';
 import { compositeDocument } from '@umbra/kernels/composite';
 import { rectIsEmpty, type Rect } from '@umbra/core/geom';
-import type { Doc, Layer } from './document.js';
+import type { Doc, Layer, SmartSource } from './document.js';
+import { matrixToQuad, toPsdFilter } from './psd-smart.js';
 import type { Plane } from './tiles/plane.js';
 import { tilesInRect } from './tiles/plane.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
@@ -132,7 +133,41 @@ export function bitmapFromPlane(plane: Plane, rect: Rect): PixelData {
   return { data: out, width, height };
 }
 
-function toAgLayer(layer: Layer, doc: Doc): AgLayer {
+/** Embedded smart-object contents collected while writing layers, one file per source. */
+interface LinkedOut {
+  bySource: Map<number, string>;
+  files: { id: string; name: string; type: string; creator: string; data: Uint8Array }[];
+}
+
+let uuidSeq = 0;
+function uuid(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  // Tests without WebCrypto: unique within a run, which is all a file needs.
+  const n = (++uuidSeq).toString(16).padStart(12, '0');
+  return `00000000-0000-4000-8000-${n}`;
+}
+
+const FILE_TYPE: Record<string, string> = { 'image/png': 'png ', 'image/jpeg': 'JPEG', 'image/gif': 'GIFf', 'image/webp': 'WEBP' };
+
+/** The contents a smart object's source writes: its original file, or itself as a PSB. */
+function linkedFileFor(source: SmartSource, out: LinkedOut): string {
+  const known = out.bySource.get(source.id);
+  if (known) return known;
+  const id = uuid();
+  out.bySource.set(source.id, id);
+  if (source.file) {
+    out.files.push({ id, name: source.name, type: FILE_TYPE[source.file.type] ?? 'png ', creator: '8BIM', data: source.file.bytes });
+  } else {
+    // Photoshop draws a smart object from the embedded file's composite, so it is written.
+    const psb = /\.psb$/i.test(source.name);
+    const bytes = new Uint8Array(savePsd(source.doc, { maximizeCompatibility: true, psb }));
+    out.files.push({ id, name: source.name, type: psb ? '8BPB' : '8BPS', creator: '8BIM', data: bytes });
+  }
+  return id;
+}
+
+function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
   const common: AgLayer = {
     name: layer.name,
     opacity: layer.opacity,
@@ -160,7 +195,7 @@ function toAgLayer(layer: Layer, doc: Doc): AgLayer {
   }
 
   if (layer.kind === 'group') {
-    return { ...common, opened: layer.expanded, children: layer.children.map((c) => toAgLayer(c, doc)) };
+    return { ...common, opened: layer.expanded, children: layer.children.map((c) => toAgLayer(c, doc, linked)) };
   }
 
   if (layer.kind === 'adjustment') {
@@ -171,6 +206,23 @@ function toAgLayer(layer: Layer, doc: Doc): AgLayer {
   if (layer.kind === 'fill') {
     const source = (layer.psdExtra as { vectorFill?: unknown } | undefined)?.vectorFill;
     return { ...common, left: 0, top: 0, right: 0, bottom: 0, vectorFill: toPsdFill(layer.content, source) as AgLayer['vectorFill'] };
+  }
+
+  if (layer.kind === 'smart') {
+    const { width, height } = layer.source.doc;
+    const list = layer.filters.map((f) => toPsdFilter(f, doc)).filter((f): f is NonNullable<typeof f> => !!f);
+    const placedLayer: NonNullable<AgLayer['placedLayer']> = {
+      id: linkedFileFor(layer.source, linked),
+      placed: uuid(),
+      type: 'raster',
+      transform: matrixToQuad(layer.transform, width, height),
+      width,
+      height,
+    };
+    if (list.length) {
+      placedLayer.filter = { enabled: layer.filtersEnabled, validAtPosition: true, maskEnabled: !!layer.filterMask?.enabled, maskLinked: true, maskExtendWithWhite: true, list };
+    }
+    common.placedLayer = placedLayer;
   }
 
   const rect = tightBounds(layer.plane.base);
@@ -222,8 +274,11 @@ export function savePsd(doc: Doc, opts: SavePsdOptions = {}): ArrayBuffer {
     channels: 4,
     bitsPerChannel: 8,
     colorMode: 3, // RGB
-    children: doc.layers.map((l) => toAgLayer(l, doc)),
+    children: [],
   };
+  const linked: LinkedOut = { bySource: new Map(), files: [] };
+  psd.children = doc.layers.map((l) => toAgLayer(l, doc, linked));
+  if (linked.files.length) psd.linkedFiles = linked.files;
 
   // Pattern fill layers name their pattern by id; the pixels go in the file's pattern table.
   const patterns = new Map<string, PatternDef>();

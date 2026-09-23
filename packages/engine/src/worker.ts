@@ -83,6 +83,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'openPsd':
         engine?.openPsdBuffer(msg.buffer, msg.name);
         if (engine) post({ t: 'doc', doc: engine.summary() });
+        void engine?.resolvePendingSources().then((changed) => changed && engine && post({ t: 'doc', doc: engine.summary() }));
         break;
       case 'setLayerVisible':
         engine?.setLayerVisible(msg.id, msg.visible);
@@ -277,6 +278,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         break;
       case 'placeEmbedded':
         if (engine?.placeEmbedded(msg)) post({ t: 'doc', doc: engine.summary() });
+        void engine?.resolvePendingSources().then((changed) => changed && engine && post({ t: 'doc', doc: engine.summary() }));
         break;
       case 'smartFilterOp':
         pendingPreview = null;
@@ -465,6 +467,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'recover': {
         if (!engine || !recovered) break;
         engine.openPsdBuffer(recovered, 'Recovered');
+        void engine.resolvePendingSources().then((changed) => changed && engine && post({ t: 'doc', doc: engine.summary() }));
         recovered = null;
         // Once recovered, the autosave IS the open document. Leaving it on disk offered the
         // same recovery again on every launch; the next edit journals afresh anyway.

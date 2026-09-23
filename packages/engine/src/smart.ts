@@ -375,3 +375,35 @@ export function instanceCount(doc: Doc, sourceId: number): number {
   for (const { layer } of walkLayers(doc.layers)) if (layer.kind === 'smart' && layer.source.id === sourceId) n++;
   return n;
 }
+
+/**
+ * Put a source in place without re-rendering: every layer showing it keeps its pixels. For
+ * contents that arrive after a document opened (an embedded picture decoded later) — the
+ * file's own rendering is what should show until something changes. Nested documents are
+ * searched too.
+ */
+export function swapSource(doc: Doc, source: SmartSource): Doc {
+  const visit = (layers: readonly Layer[]): readonly Layer[] => {
+    let changed = false;
+    const out = layers.map((l) => {
+      if (l.kind === 'group') {
+        const children = visit(l.children);
+        if (children === l.children) return l;
+        changed = true;
+        return { ...l, children };
+      }
+      if (l.kind !== 'smart') return l;
+      if (l.source.id === source.id) {
+        changed = true;
+        return { ...l, source };
+      }
+      const inner = visit(l.source.doc.layers);
+      if (inner === l.source.doc.layers) return l;
+      changed = true;
+      return { ...l, source: { ...l.source, doc: { ...l.source.doc, layers: inner } } };
+    });
+    return changed ? out : layers;
+  };
+  const layers = visit(doc.layers);
+  return layers === doc.layers ? doc : { ...doc, layers };
+}

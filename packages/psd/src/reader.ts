@@ -59,6 +59,8 @@ export interface PsdLayerInfo {
   adjustment?: unknown;
   /** Fill layers: ag-psd's decoded `vectorFill`. */
   vectorFill?: unknown;
+  /** Smart objects: ag-psd's `placedLayer` (transform, contents id, smart filters). */
+  placed?: unknown;
 }
 
 export interface PsdDocInfo {
@@ -70,6 +72,10 @@ export interface PsdDocInfo {
   layers: PsdLayerInfo[];
   /** Patterns stored in the file, which pattern fill layers refer to by id. */
   patterns?: { id: string; name: string; bounds: { w: number; h: number }; data: Uint8Array }[];
+  /** Smart objects' contents, embedded as whole files (a PSB, a PNG…), by id. */
+  linkedFiles?: { id: string; name: string; type?: string; data?: Uint8Array }[];
+  /** True when the file stores smart-filter masks, which are not read yet. */
+  hasFilterMasks?: boolean;
 }
 
 export interface PsdReadCallbacks {
@@ -89,7 +95,7 @@ function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   // is a shape layer, which it does not yet.
   if (layer.vectorMask) out.push(layer.vectorFill ? 'shape layer' : 'vector mask');
   if (layer.effects) out.push('layer effects');
-  if (layer.placedLayer) out.push('smart object');
+  // Smart objects are modelled; only what they cannot carry is reported, by the engine.
   return out.length ? out : undefined;
 }
 
@@ -117,7 +123,8 @@ export function readPsdDocument(
     useRawData: true,
     skipCompositeImageData: true,
     skipThumbnail: true,
-    skipLinkedFilesData: true,
+    // Smart objects' contents are needed to edit them.
+    skipLinkedFilesData: false,
   });
 
   let index = 0;
@@ -152,6 +159,7 @@ export function readPsdDocument(
       };
       if (layer.adjustment) info.adjustment = layer.adjustment;
       if (layer.vectorFill && !layer.vectorMask) info.vectorFill = layer.vectorFill;
+      if (layer.placedLayer) info.placed = layer.placedLayer;
 
       if (layer.children) {
         info.children = convert(layer.children);
@@ -196,6 +204,8 @@ export function readPsdDocument(
     colorMode: psd.colorMode ?? 3,
     layers: convert(psd.children),
     patterns: (psd as { patterns?: PsdDocInfo['patterns'] }).patterns,
+    linkedFiles: psd.linkedFiles?.map((f) => ({ id: f.id, name: f.name, type: f.type, data: f.data })),
+    hasFilterMasks: (psd.filterEffectsMasks?.length ?? 0) > 0,
   };
 }
 

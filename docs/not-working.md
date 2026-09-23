@@ -196,6 +196,14 @@ implementation.
       Linked), Replace Contents, Export Contents and Stack Mode are not built — they need file
       watching and a second open document (M11). Place Embedded does not start a Free
       Transform afterwards as Photoshop does.
+- [x] **Smart objects in PSD**: they open and save as smart objects (placed layer + embedded
+      contents, PSB or the original PNG/JPEG), instances share contents, they nest, and the
+      crash journal keeps them. 53 filters map to Photoshop's smart-filter descriptors both
+      ways; a filter Photoshop lacks (the Filter Gallery stack, Lens Blur, Oil Paint…) is left
+      out of the file, and one Umbra lacks is reported on open — the stored pixels show it
+      either way until the object is edited.
+- [ ] **Smart-filter masks are not read from or written to PSD**, and perspective or warped
+      placements keep only their affine part; opening says so.
 - [ ] **Painting on a smart filter's mask is not built.** The mask renders, disables and
       deletes, and comes from the selection, but brushes do not target it yet.
 - [ ] **Smart objects render on the CPU**: each edit re-renders the object (≈2 s for a
