@@ -5,12 +5,14 @@
  * Image Size resamples, and its interpolation choice is the one Photoshop exposes; the kernel
  * constants that decide how close a match it is are tagged [fit] in spec 05 §7.
  */
+import { scale as scaleMat, translate as translateMat, type Mat } from '@umbra/kernels/matrix';
+import { retransform } from '../smart.js';
 import { TILE_SIZE, TILE_SHIFT, channelCount, maxValue } from '@umbra/core/pixels';
 import { rectUnion, rectIsEmpty, type Rect } from '@umbra/core/geom';
 import { Plane } from '../tiles/plane.js';
 import { MipPlane } from '../tiles/mip.js';
 import { tightBounds } from '../psd-save.js';
-import { walkLayers, type Doc, type Layer } from '../document.js';
+import { walkLayers, type Doc, type Layer, type SmartObjectLayer } from '../document.js';
 
 export type Resample =
   | 'nearest'
@@ -178,13 +180,28 @@ export function resamplePlane(plane: Plane, sx: number, sy: number, method: Resa
   return writer.commit();
 }
 
-export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane): Layer[] {
+/**
+ * Apply a plane operation to every layer. Smart objects go through `smart` when given — the
+ * geometric commands compose their matrix into the object's transform and re-render it, so
+ * the contents are never resampled twice.
+ */
+export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane, smart?: (l: SmartObjectLayer) => Layer): Layer[] {
   return layers.map((l) => {
+    if (l.kind === 'smart' && smart) return smart(l);
     const mask = l.mask ? { ...l.mask, plane: new MipPlane(fn(l.mask.plane.base)) } : l.mask;
-    if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn) };
+    if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn, smart) };
     if (l.kind === 'adjustment' || l.kind === 'fill') return { ...l, mask };
+    if (l.kind === 'smart') {
+      const filterMask = l.filterMask ? { ...l.filterMask, plane: new MipPlane(fn(l.filterMask.plane.base)) } : l.filterMask;
+      return { ...l, mask, filterMask, plane: new MipPlane(fn(l.plane.base)) };
+    }
     return { ...l, mask, plane: new MipPlane(fn(l.plane.base)) };
   });
+}
+
+/** mapLayers for a geometric change: smart objects take `matrix` into their transform. */
+function mapGeometry(layers: readonly Layer[], fn: (p: Plane) => Plane, matrix: Mat, size: { width: number; height: number }): Layer[] {
+  return mapLayers(layers, fn, (l) => retransform(l, matrix, size, fn));
 }
 
 export function imageSize(doc: Doc, width: number, height: number, method: Resample = 'bicubic'): Doc {
@@ -196,7 +213,7 @@ export function imageSize(doc: Doc, width: number, height: number, method: Resam
     ...doc,
     width,
     height,
-    layers: mapLayers(doc.layers, (p) => resamplePlane(p, sx, sy, method, bounds)),
+    layers: mapGeometry(doc.layers, (p) => resamplePlane(p, sx, sy, method, bounds), scaleMat(sx, sy), { width, height }),
   };
 }
 
@@ -239,7 +256,7 @@ function translatePlane(plane: Plane, dx: number, dy: number): Plane {
 
 export function canvasSize(doc: Doc, width: number, height: number, anchor: Anchor = 'center'): Doc {
   const { dx, dy } = anchorOffset(anchor, width - doc.width, height - doc.height);
-  return { ...doc, width, height, layers: mapLayers(doc.layers, (p) => translatePlane(p, dx, dy)) };
+  return { ...doc, width, height, layers: mapGeometry(doc.layers, (p) => translatePlane(p, dx, dy), translateMat(dx, dy), { width, height }) };
 }
 
 /**
@@ -263,10 +280,15 @@ export function crop(doc: Doc, rect: Rect, deleteCropped: boolean): Doc {
     // The selection is defined on the old canvas; carrying it across a crop would need it
     // resampled, and Photoshop drops it too.
     selection: null,
-    layers: mapLayers(doc.layers, (p) => {
-      const moved = translatePlane(p, dx, dy);
-      return deleteCropped ? clipPlane(moved, clip) : moved;
-    }),
+    layers: mapGeometry(
+      doc.layers,
+      (p) => {
+        const moved = translatePlane(p, dx, dy);
+        return deleteCropped ? clipPlane(moved, clip) : moved;
+      },
+      translateMat(dx, dy),
+      { width, height },
+    ),
   };
 }
 
@@ -355,7 +377,17 @@ export function rotateImage(doc: Doc, angle: Rotation): Doc {
     ...doc,
     width: swap ? doc.height : doc.width,
     height: swap ? doc.width : doc.height,
-    layers: mapLayers(doc.layers, (p) => rotatePlane(p, angle, doc.width, doc.height)),
+    layers: mapGeometry(
+      doc.layers,
+      (p) => rotatePlane(p, angle, doc.width, doc.height),
+      // The same turn as rotatePlane, on continuous coordinates.
+      angle === 90
+        ? { a: 0, b: 1, c: -1, d: 0, e: doc.height, f: 0 }
+        : angle === 180
+          ? { a: -1, b: 0, c: 0, d: -1, e: doc.width, f: doc.height }
+          : { a: 0, b: -1, c: 1, d: 0, e: 0, f: doc.width },
+      { width: swap ? doc.height : doc.width, height: swap ? doc.width : doc.height },
+    ),
   };
 }
 
@@ -367,5 +399,6 @@ function flipPlane(plane: Plane, horizontal: boolean, w: number, h: number): Pla
 }
 
 export function flipImage(doc: Doc, horizontal: boolean): Doc {
-  return { ...doc, layers: mapLayers(doc.layers, (p) => flipPlane(p, horizontal, doc.width, doc.height)) };
+  const m: Mat = horizontal ? { a: -1, b: 0, c: 0, d: 1, e: doc.width, f: 0 } : { a: 1, b: 0, c: 0, d: -1, e: 0, f: doc.height };
+  return { ...doc, layers: mapGeometry(doc.layers, (p) => flipPlane(p, horizontal, doc.width, doc.height), m, doc) };
 }

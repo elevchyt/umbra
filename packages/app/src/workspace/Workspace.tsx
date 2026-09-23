@@ -4,15 +4,16 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
 import { SpatialDialog } from '../adjust/spatial';
 import { ApplyImageDialog, CalculationsDialog } from '../adjust/applyimage';
-import { FilterDialog, colours as filterColours } from '../filters/FilterDialog';
+import { FilterDialog, colours as filterColours, type FilterDialogPayload } from '../filters/FilterDialog';
 import { FadeDialog } from '../filters/FadeDialog';
-import { GalleryDialog } from '../filters/GalleryDialog';
+import { GalleryDialog, type GalleryPayload } from '../filters/GalleryDialog';
+import { SmartBlendDialog, type SmartBlendPayload } from '../filters/SmartBlendDialog';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -25,6 +26,17 @@ import { DocumentTabs, StatusBar } from './Chrome';
 import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, NameDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
+
+/** Commands that only make sense on a smart object, and when. */
+const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
+  'so.newViaCopy': () => true,
+  'so.convertToLayers': () => true,
+  'so.rasterize': () => true,
+  'rasterize.smartObject': () => true,
+  'smartFilter.disable': (s) => s.filters.length > 0,
+  'smartFilter.deleteMask': (s) => s.hasFilterMask,
+  'smartFilter.clear': (s) => s.filters.length > 0,
+};
 
 /**
  * Write a produced file wherever the platform can: a native Save dialog under Electron,
@@ -342,7 +354,8 @@ export function Workspace() {
     if (filter) {
       const doc = store.doc();
       const active = doc?.layers.find((l) => l.id === doc.activeLayerIds[0]);
-      if (!active || (active.kind !== 'pixel' && doc?.maskTarget !== active.id)) {
+      // Pixels, a targeted mask, or a smart object (where the filter becomes a smart filter).
+      if (!active || (active.kind !== 'pixel' && active.kind !== 'smart' && doc?.maskTarget !== active.id)) {
         flash(`Could not complete ${filter.label} because the target layer is not a pixel layer.`);
         return;
       }
@@ -359,6 +372,29 @@ export function Workspace() {
     }
 
     switch (cmd) {
+      case 'so.convert':
+      case 'filter.convertForSmart':
+        send({ t: 'smartCommand', cmd: 'convert' });
+        return;
+      case 'so.newViaCopy':
+        send({ t: 'smartCommand', cmd: 'viaCopy' });
+        return;
+      case 'so.convertToLayers':
+        send({ t: 'smartCommand', cmd: 'toLayers' });
+        return;
+      case 'so.rasterize':
+      case 'rasterize.smartObject':
+        send({ t: 'smartCommand', cmd: 'rasterize' });
+        return;
+      case 'smartFilter.disable':
+        send({ t: 'smartCommand', cmd: 'toggleFilters' });
+        return;
+      case 'smartFilter.deleteMask':
+        send({ t: 'smartCommand', cmd: 'deleteFilterMask' });
+        return;
+      case 'smartFilter.clear':
+        send({ t: 'smartCommand', cmd: 'clearFilters' });
+        return;
       case 'file.new':
         store.openDialog('newDocument');
         break;
@@ -1118,6 +1154,13 @@ export function Workspace() {
     // Built, but only meaningful in a state: there has to be a filter to repeat, a step to fade.
     if (cmd === 'filter.last') return !!store.doc()?.lastFilter;
     if (cmd === 'edit.fade') return !!store.doc()?.fadeName;
+    const smartOnly = SMART_ONLY[cmd];
+    if (smartOnly) {
+      const d = store.doc();
+      const layer = d?.layers.find((l) => l.id === d.activeLayerIds[0]);
+      return layer?.kind === 'smart' && smartOnly(layer.smart!);
+    }
+    if (cmd === 'so.convert' || cmd === 'filter.convertForSmart') return (store.doc()?.activeLayerIds.length ?? 0) > 0;
     return !!entry.done;
   };
 
@@ -1352,10 +1395,13 @@ export function Workspace() {
         />
       </Show>
       <Show when={store.dialog()?.id === 'filter'}>
-        <FilterDialog id={store.dialog()!.payload as string} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+        <FilterDialog payload={store.dialog()!.payload as FilterDialogPayload} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'gallery'}>
-        <GalleryDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+        <GalleryDialog payload={store.dialog()!.payload as GalleryPayload | undefined} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'smartBlend'}>
+        <SmartBlendDialog payload={store.dialog()!.payload as SmartBlendPayload} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'fade'}>
         <FadeDialog name={store.doc()?.fadeName ?? ''} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />

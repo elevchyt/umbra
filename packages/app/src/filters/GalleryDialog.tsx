@@ -81,15 +81,23 @@ function Thumb(props: { id: string; selected: boolean; onPick: () => void }) {
   );
 }
 
-export function GalleryDialog(props: { send: (m: unknown) => void; onClose: () => void }) {
-  const [layers, setLayers] = createSignal<GalleryLayer[]>(structuredClone(lastStack));
+/** A smart Filter Gallery being re-edited: its stack and its place in the smart-filter list. */
+export interface GalleryPayload {
+  stack: string;
+  smartIndex: number;
+}
+
+export function GalleryDialog(props: { payload?: GalleryPayload; send: (m: unknown) => void; onClose: () => void }) {
+  const smartIndex = props.payload?.smartIndex;
+  const initial = props.payload ? parseStack(props.payload.stack) : lastStack;
+  const [layers, setLayers] = createSignal<GalleryLayer[]>(structuredClone(initial.length ? initial : DEFAULT_STACK));
   // Index into `layers` (bottom = 0) of the layer being edited.
-  const [selected, setSelected] = createSignal(lastStack.length - 1);
+  const [selected, setSelected] = createSignal(Math.max(0, layers().length - 1));
   const [preview, setPreview] = createSignal(true);
-  const [open, setOpen] = createSignal<Set<GalleryCategory>>(new Set([GALLERY_BY_ID.get(lastStack[lastStack.length - 1]?.id ?? 'gallery.cutout')!.category]));
+  const [open, setOpen] = createSignal<Set<GalleryCategory>>(new Set([GALLERY_BY_ID.get(layers()[layers().length - 1]?.id ?? 'gallery.cutout')!.category]));
   const params = createMemo<FilterParams>(() => ({ stack: JSON.stringify(layers()) }));
   const current = () => layers()[selected()];
-  const canvasPreview = useCanvasPreview(props.send, () => 'filter.gallery', params, preview);
+  const canvasPreview = useCanvasPreview(props.send, () => 'filter.gallery', params, preview, smartIndex);
 
   onMount(renderThumbs);
   onCleanup(() => canvasPreview.cancel());
@@ -138,8 +146,8 @@ export function GalleryDialog(props: { send: (m: unknown) => void; onClose: () =
       width={1000}
       onOk={() => {
         canvasPreview.cancel();
-        lastStack = parseStack(params().stack as string);
-        props.send({ t: 'applyFilter', id: 'filter.gallery', params: params(), ...colours() });
+        if (smartIndex === undefined) lastStack = parseStack(params().stack as string);
+        props.send({ t: 'applyFilter', id: 'filter.gallery', params: params(), ...colours(), smartIndex });
         props.onClose();
       }}
       onCancel={() => {
@@ -153,7 +161,7 @@ export function GalleryDialog(props: { send: (m: unknown) => void; onClose: () =
       footer={<Checkbox checked={preview()} label="Preview" onChange={setPreview} />}
     >
       <div class="gallery">
-        <PreviewBox id="filter.gallery" params={params()} width={440} height={400} send={props.send} />
+        <PreviewBox id="filter.gallery" params={params()} width={440} height={400} send={props.send} smartIndex={smartIndex} />
         <div class="gallery-folders">
           <For each={GALLERY_CATEGORIES}>
             {(cat) => (

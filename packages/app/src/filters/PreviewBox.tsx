@@ -11,7 +11,7 @@ import { colours } from './FilterDialog';
 
 const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 4];
 
-export function PreviewBox(props: { id: string; params: FilterParams; width: number; height: number; send: (m: unknown) => void }) {
+export function PreviewBox(props: { id: string; params: FilterParams; width: number; height: number; send: (m: unknown) => void; smartIndex?: number }) {
   const [zoom, setZoom] = createSignal(1);
   const doc = () => store.doc();
   // Centre of the box, in document pixels.
@@ -34,7 +34,8 @@ export function PreviewBox(props: { id: string; params: FilterParams; width: num
     const id = props.id;
     const params = props.params;
     clearTimeout(timer);
-    timer = window.setTimeout(() => props.send({ t: 'filterBox', id, params, fg, bg, rect: rect(), seq: ++seq }), 16);
+    const smartIndex = props.smartIndex;
+    timer = window.setTimeout(() => props.send({ t: 'filterBox', id, params, fg, bg, rect: rect(), seq: ++seq, smartIndex }), 16);
   };
 
   const draw = () => {

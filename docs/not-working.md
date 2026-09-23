@@ -163,7 +163,7 @@ the feature is complete.
 | Layer | 41 / 137 | layer styles (M6), smart objects (M5), align & distribute (M9), type & shapes (M7) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
-| Filter | 60 / 74 | Convert for Smart Filters (M5), Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
+| Filter | 61 / 74 | Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
 | Window | 32 / 56 | multi-document window arrangement (M11) |
 | Help | 4 / 5 | — |
@@ -182,6 +182,20 @@ implementation.
       the selection's bounds; Displace and Lens Blur take their map from a layer of the same
       document (a separate file waits on M11). Clouds' Alt-click for high contrast
       is not wired: Clouds runs at once with a fresh seed.
+- [x] **Smart objects and smart filters** (Layer ▸ Smart Objects ▸ Convert, New via Copy,
+      Convert to Layers, Rasterize; Filter ▸ Convert for Smart Filters; Layer ▸ Smart Filter ▸
+      …). Transforms, Image Size, Canvas Size, Crop, Rotate and Flip compose into the object's
+      transform and re-render from its contents — scaling down and back up is lossless. Any
+      filter (Filter Gallery included) applied to a smart object becomes a smart filter; its
+      row in the Layers panel has an eye, double-click to edit, blending options, reorder and
+      delete; a selection active at the first filter becomes the filter mask. Duplicate Layer
+      makes instances that share contents.
+- [ ] **Painting on a smart filter's mask is not built.** The mask renders, disables and
+      deletes, and comes from the selection, but brushes do not target it yet.
+- [ ] **Smart objects render on the CPU**: each edit re-renders the object (≈2 s for a
+      canvas-sized object with a Gaussian Blur on a 2400×1600 document). Fine for editing,
+      too slow to drag a smart filter's slider with live canvas preview on a big document —
+      the dialog's preview box stays fast.
 - [x] **Filter ▸ Filter Gallery — all 47 effects** in six folders with thumbnails, a stack of
       effect layers (eye, new, delete, reorder), the shared preview box, and on-canvas
       preview. Every effect is `[fit]` — Photoshop publishes none of them — built from a

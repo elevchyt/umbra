@@ -264,6 +264,7 @@ export type DialogId =
   | 'applyImage'
   | 'filter'
   | 'gallery'
+  | 'smartBlend'
   | 'fade'
   | 'calculations'
   | 'definePattern';

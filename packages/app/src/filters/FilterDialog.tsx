@@ -24,22 +24,28 @@ export function colours(): { fg: [number, number, number]; bg: [number, number, 
   return { fg: [f.r, f.g, f.b], bg: [b.r, b.g, b.b] };
 }
 
-export function FilterDialog(props: { id: string; send: (m: unknown) => void; onClose: () => void }) {
-  const def = FILTER_BY_ID.get(props.id)!;
-  const [params, setParams] = createSignal<FilterParams>(structuredClone(lastParams.get(props.id) ?? defaultsOf(def)));
+/** What the filter dialog opens on: a filter to apply, or (with `smartIndex`) a smart filter to re-edit. */
+export type FilterDialogPayload = string | { id: string; params: FilterParams; smartIndex: number };
+
+export function FilterDialog(props: { payload: FilterDialogPayload; send: (m: unknown) => void; onClose: () => void }) {
+  const p = props.payload;
+  const id = typeof p === 'string' ? p : p.id;
+  const smartIndex = typeof p === 'string' ? undefined : p.smartIndex;
+  const def = FILTER_BY_ID.get(id)!;
+  const [params, setParams] = createSignal<FilterParams>(structuredClone(typeof p === 'string' ? (lastParams.get(id) ?? defaultsOf(def)) : { ...defaultsOf(def), ...p.params }));
   const [preview, setPreview] = createSignal(true);
-  const canvasPreview = useCanvasPreview(props.send, () => props.id, params, preview);
+  const canvasPreview = useCanvasPreview(props.send, () => id, params, preview, smartIndex);
 
   const set = (key: string, v: FilterParams[string]) => setParams({ ...params(), [key]: v });
 
   return (
     <Dialog
-      title={def.label}
+      title={smartIndex === undefined ? def.label : `${def.label} (Smart Filter)`}
       width={300}
       onOk={() => {
         canvasPreview.cancel();
-        lastParams.set(props.id, params());
-        props.send({ t: 'applyFilter', id: props.id, params: params(), ...colours() });
+        if (smartIndex === undefined) lastParams.set(id, params());
+        props.send({ t: 'applyFilter', id, params: params(), ...colours(), smartIndex });
         props.onClose();
       }}
       onCancel={() => {
@@ -50,7 +56,7 @@ export function FilterDialog(props: { id: string; send: (m: unknown) => void; on
       footer={<Checkbox checked={preview()} label="Preview" onChange={setPreview} />}
     >
       <div class="adjust-editor">
-        <PreviewBox id={props.id} params={params()} width={BOX} height={BOX} send={props.send} />
+        <PreviewBox id={id} params={params()} width={BOX} height={BOX} send={props.send} smartIndex={smartIndex} />
         <For each={def.params}>{(spec) => <ParamControl spec={spec} value={params()[spec.key]!} onChange={(v) => set(spec.key, v)} />}</For>
       </div>
     </Dialog>
@@ -61,14 +67,14 @@ export function FilterDialog(props: { id: string; send: (m: unknown) => void; on
  * The on-canvas preview of a filter dialog: the worker computes the filtered document
  * (latest request wins); a short delay coalesces slider drags.
  */
-export function useCanvasPreview(send: (m: unknown) => void, id: () => string, params: () => FilterParams, on: () => boolean) {
+export function useCanvasPreview(send: (m: unknown) => void, id: () => string, params: () => FilterParams, on: () => boolean, smartIndex?: number) {
   let timer = 0;
   createEffect(() => {
     const p = params();
     const show = on();
     const f = id();
     clearTimeout(timer);
-    timer = window.setTimeout(() => send({ t: 'previewFilter', id: show ? f : null, params: show ? p : null, ...colours() }), 60);
+    timer = window.setTimeout(() => send({ t: 'previewFilter', id: show ? f : null, params: show ? p : null, ...colours(), smartIndex }), 60);
   });
   const cancel = () => clearTimeout(timer);
   onCleanup(cancel);

@@ -253,18 +253,31 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         break;
       case 'applyFilter':
         pendingPreview = null;
-        if (engine?.applyFilter(msg.id, msg.params, msg.fg, msg.bg)) post({ t: 'doc', doc: engine.summary() });
+        if (engine?.applyFilter(msg.id, msg.params, msg.fg, msg.bg, msg.smartIndex)) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'previewFilter': {
         const m = msg;
-        latestPreview(() => engine?.previewFilter(m.id, m.params, m.fg, m.bg));
+        latestPreview(() => engine?.previewFilter(m.id, m.params, m.fg, m.bg, m.smartIndex));
+        break;
+      }
+      case 'smartCommand':
+        pendingPreview = null;
+        if (engine?.smartCommand(msg.cmd)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'smartFilterOp':
+        pendingPreview = null;
+        if (engine?.smartFilterOp(msg.layerId, msg.index, msg.op)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'previewSmartBlend': {
+        const m = msg;
+        latestPreview(() => engine?.previewSmartBlend(m.layerId, m.index, m.blend));
         break;
       }
       case 'filterBox': {
         // Latest wins, separately from the canvas preview: both run while a slider moves.
         const m = msg;
         pendingBox = () => {
-          const r = engine?.filterBox(m.id, m.params, m.fg, m.bg, m.rect);
+          const r = engine?.filterBox(m.id, m.params, m.fg, m.bg, m.rect, m.smartIndex);
           if (r) post({ t: 'filterBox', seq: m.seq, ...r }, [r.before.buffer, r.after.buffer]);
         };
         if (!boxScheduled) {

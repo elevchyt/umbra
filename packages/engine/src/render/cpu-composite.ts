@@ -45,7 +45,7 @@ function sampleMask(plane: Plane, x: number, y: number): number {
  */
 export function toCompositeLayer(layer: Layer, size: { width: number; height: number } = { width: 0, height: 0 }): CompositeLayer {
   const base: CompositeLayer = {
-    kind: layer.kind === 'fill' ? 'pixel' : layer.kind,
+    kind: layer.kind === 'fill' || layer.kind === 'smart' ? 'pixel' : layer.kind,
     name: layer.name,
     visible: layer.visible,
     opacity: layer.opacity,

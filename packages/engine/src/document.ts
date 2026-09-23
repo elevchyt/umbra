@@ -14,6 +14,8 @@ import type { AdvancedBlending } from '@umbra/kernels/composite';
 import type { Adjustment } from '@umbra/kernels/adjust';
 import type { FillContent } from '@umbra/kernels/fill';
 import type { Selection } from './selection.js';
+import type { Mat } from '@umbra/kernels/matrix';
+import type { FilterParams } from '@umbra/kernels/filters/types';
 
 export type LabelColor =
   | 'none'
@@ -109,7 +111,55 @@ export interface FillLayer extends LayerBase {
   readonly content: FillContent;
 }
 
-export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer;
+/**
+ * What a smart object shows: an embedded document, shared by every instance made with
+ * Duplicate Layer (spec 02 §3). Immutable like everything else — editing the contents makes
+ * a new source with the same id, and every layer pointing at that id is re-rendered.
+ */
+export interface SmartSource {
+  /** Shared by instances; New Smart Object via Copy makes a new one. */
+  readonly id: number;
+  /** File name Photoshop shows for the contents, e.g. "Layer 1.psb". */
+  readonly name: string;
+  readonly doc: Doc;
+  /** The embedded document flattened, in its own pixel space — what the transform places. */
+  readonly composite: Plane;
+}
+
+/** One smart filter: a registry filter with its settings, blended onto what is beneath it. */
+export interface SmartFilter {
+  readonly id: number;
+  readonly filterId: string;
+  readonly params: FilterParams;
+  readonly blendMode: BlendMode;
+  /** 0…1 */
+  readonly opacity: number;
+  readonly enabled: boolean;
+  /** Colours the filter saw when applied — Clouds and the Sketch effects draw with them. */
+  readonly foreground: [number, number, number];
+  readonly background: [number, number, number];
+}
+
+/**
+ * A smart object (spec 02 §3): content placed through a transform, then smart filters, masked
+ * by one filter mask. `plane` is the rendered result in document space, recomputed whenever
+ * the source, transform or filters change, so the compositor treats the layer exactly like a
+ * pixel layer — nothing downstream needs to know how it was made.
+ */
+export interface SmartObjectLayer extends LayerBase {
+  readonly kind: 'smart';
+  readonly source: SmartSource;
+  /** Source pixels → document pixels. */
+  readonly transform: Mat;
+  readonly filters: readonly SmartFilter[];
+  /** The Smart Filters row's eye. */
+  readonly filtersEnabled: boolean;
+  /** Where the filters apply; white (all) when a first filter is added. */
+  readonly filterMask?: RasterMask;
+  readonly plane: MipPlane;
+}
+
+export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer | SmartObjectLayer;
 
 /**
  * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
@@ -369,7 +419,7 @@ export function panelRows(layers: readonly Layer[], depth = 0): PanelRow[] {
 export function totalTiles(layers: readonly Layer[]): number {
   let n = 0;
   for (const { layer } of walkLayers(layers)) {
-    if (layer.kind === 'pixel') n += layer.plane.base.tileCount;
+    if (layer.kind === 'pixel' || layer.kind === 'smart') n += layer.plane.base.tileCount;
     if (layer.mask) n += layer.mask.plane.base.tileCount;
   }
   return n;

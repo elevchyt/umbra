@@ -4,7 +4,7 @@ import { AdjustmentEditor } from '../adjust/editors';
 import { ADJUSTMENT_ICON, initialAdjustment } from '../adjust/initial';
 import { FillEditor, PatternPicker, patternThumb } from '../adjust/fill';
 import { gradientCss } from '../adjust/editors';
-import { FILL_LABEL, type FillSummary, type ProbePoint } from '@umbra/engine';
+import { FILL_LABEL, FILTER_BY_ID, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
@@ -158,6 +158,7 @@ function LayersPanel() {
         >
           <For each={rows()}>
             {(l) => (
+              <>
               <div
                 class="layer-row"
                 classList={{ selected: active().includes(l.id) }}
@@ -196,12 +197,13 @@ function LayersPanel() {
                     group: l.kind === 'group',
                     adjustment: l.kind === 'adjustment',
                     fill: l.kind === 'fill',
-                    targeted: active().includes(l.id) && l.kind === 'pixel' && store.doc()?.maskTarget !== l.id,
+                    smart: l.kind === 'smart',
+                    targeted: active().includes(l.id) && (l.kind === 'pixel' || l.kind === 'smart') && store.doc()?.maskTarget !== l.id,
                   }}
                   aria-hidden="true"
                   onClick={() => {
                     // Clicking the layer thumbnail makes the pixels the edit target again.
-                    if (l.hasMask && l.kind === 'pixel') store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
+                    if (l.hasMask && (l.kind === 'pixel' || l.kind === 'smart')) store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
                   }}
                   onDblClick={() => {
                     // Photoshop opens an adjustment layer's settings from its thumbnail.
@@ -216,6 +218,9 @@ function LayersPanel() {
                   </Show>
                   <Show when={l.kind === 'fill' && l.fillContent}>
                     {(c) => <span class="layer-fill-swatch" style={{ background: fillCss(c()) }} />}
+                  </Show>
+                  <Show when={l.kind === 'smart'}>
+                    <span class="layer-smart-badge" title={`Smart object — ${l.smart?.sourceName ?? ''}`} />
                   </Show>
                 </div>
 
@@ -270,6 +275,10 @@ function LayersPanel() {
                   <span class="layer-badge" title="Opacity">{Math.round(l.opacity * 100)}%</span>
                 </Show>
               </div>
+              <Show when={l.kind === 'smart' && l.smart && l.smart.filters.length > 0 ? l.smart : null}>
+                {(sm) => <SmartFilterRows layerId={l.id} depth={l.depth} smart={sm()} />}
+              </Show>
+              </>
             )}
           </For>
         </Show>
@@ -1226,5 +1235,103 @@ function HistoryPanel() {
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The rows under a smart object with filters (spec 01 §5, Layers): "Smart Filters" with the
+ * filter mask and an eye for them all, then one row per filter, topmost first — eye, name
+ * (double-click to edit its settings), and buttons for its blending options, order and removal.
+ */
+function SmartFilterRows(props: { layerId: number; depth: number; smart: SmartSummary }) {
+  const send = (m: unknown) => store.engine?.(m as never);
+  const select = () => send({ t: 'selectLayer', id: props.layerId });
+  const op = (index: number, o: unknown) => send({ t: 'smartFilterOp', layerId: props.layerId, index, op: o });
+  const edit = (f: SmartFilterSummary, index: number) => {
+    select();
+    if (f.filterId === 'filter.gallery') store.openDialog('gallery', { stack: f.params.stack as string, smartIndex: index });
+    else if ((FILTER_BY_ID.get(f.filterId)?.params.length ?? 0) > 0) store.openDialog('filter', { id: f.filterId, params: f.params, smartIndex: index });
+  };
+  const rows = () => props.smart.filters.map((f, i) => ({ f, i })).reverse();
+  return (
+    <>
+      <div class="layer-row smart-filters-row" style={{ 'padding-left': `${22 + props.depth * 14}px` }} onClick={select}>
+        <button
+          type="button"
+          class="layer-eye"
+          title={props.smart.filtersEnabled ? 'Hide all smart filters' : 'Show smart filters'}
+          onClick={(e) => {
+            e.stopPropagation();
+            select();
+            send({ t: 'smartCommand', cmd: 'toggleFilters' });
+          }}
+        >
+          <Icon name={props.smart.filtersEnabled ? 'eye' : 'eyeOff'} size={14} />
+        </button>
+        <Show when={props.smart.hasFilterMask}>
+          <div
+            class="layer-mask-thumb"
+            classList={{ disabled: !props.smart.filterMaskEnabled }}
+            title={props.smart.filterMaskEnabled ? 'Filter mask — Shift-click to disable' : 'Filter mask — disabled (Shift-click to enable)'}
+            onClick={(e) => {
+              if (!e.shiftKey) return;
+              e.stopPropagation();
+              select();
+              send({ t: 'smartCommand', cmd: 'toggleFilterMask' });
+            }}
+          />
+        </Show>
+        <span class="layer-name">Smart Filters</span>
+      </div>
+      <For each={rows()}>
+        {({ f, i }) => (
+          <div
+            class="layer-row smart-filter-row"
+            classList={{ off: !f.enabled || !props.smart.filtersEnabled }}
+            style={{ 'padding-left': `${22 + props.depth * 14}px` }}
+            onClick={select}
+            onDblClick={() => edit(f, i)}
+            title="Double-click to edit the filter's settings"
+          >
+            <button
+              type="button"
+              class="layer-eye"
+              title={f.enabled ? 'Hide this filter' : 'Show this filter'}
+              onClick={(e) => {
+                e.stopPropagation();
+                op(i, { kind: 'toggle' });
+              }}
+            >
+              <Icon name={f.enabled ? 'eye' : 'eyeOff'} size={14} />
+            </button>
+            <span class="layer-name smart-filter-name">{f.label}</span>
+            <Show when={f.blendMode !== 'normal' || f.opacity < 1}>
+              <span class="layer-badge">{f.opacity < 1 ? `${Math.round(f.opacity * 100)}%` : f.blendMode.slice(0, 3)}</span>
+            </Show>
+            <button type="button" class="mini-icon smart-filter-btn" title="Move up" disabled={i === props.smart.filters.length - 1} onClick={(e) => { e.stopPropagation(); op(i, { kind: 'move', to: i + 1 }); }}>
+              <Icon name="chevronUp" size={11} />
+            </button>
+            <button type="button" class="mini-icon smart-filter-btn" title="Move down" disabled={i === 0} onClick={(e) => { e.stopPropagation(); op(i, { kind: 'move', to: i - 1 }); }}>
+              <Icon name="chevronDown" size={11} />
+            </button>
+            <button
+              type="button"
+              class="mini-icon smart-filter-btn"
+              title="Blending options"
+              onClick={(e) => {
+                e.stopPropagation();
+                select();
+                store.openDialog('smartBlend', { layerId: props.layerId, index: i, label: f.label, blendMode: f.blendMode, opacity: f.opacity });
+              }}
+            >
+              <Icon name="gear" size={12} />
+            </button>
+            <button type="button" class="mini-icon smart-filter-btn" title="Delete this filter" onClick={(e) => { e.stopPropagation(); op(i, { kind: 'delete' }); }}>
+              <Icon name="trash" size={12} />
+            </button>
+          </div>
+        )}
+      </For>
+    </>
   );
 }

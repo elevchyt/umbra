@@ -6,6 +6,8 @@ import type { FillContent } from '@umbra/kernels/fill';
 import type { SpatialAdjustment } from '@umbra/kernels/spatial';
 import type { ApplyImageOptions, CalculationsOptions } from '@umbra/kernels/applyimage';
 import type { FilterParams } from '@umbra/kernels/filters/types';
+import type { BlendMode } from '@umbra/core/blend';
+import type { SmartCommand, SmartFilterOp } from './engine.js';
 
 type Rgb3 = [number, number, number];
 
@@ -46,7 +48,9 @@ import type { GpuCaps } from './gpu/caps.js';
 export interface LayerSummary {
   id: number;
   name: string;
-  kind: 'pixel' | 'group' | 'adjustment' | 'fill';
+  kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart';
+  /** Smart objects: the contents and the smart filters, for the Layers panel's filter rows. */
+  smart?: SmartSummary;
   /** Adjustment layers: the parameters, for the Properties panel to edit. */
   adjustment?: Adjustment;
   /** Fill layers: the content, for the thumbnail and the Properties panel. */
@@ -63,6 +67,26 @@ export interface LayerSummary {
   locks: { transparency: boolean; pixels: boolean; position: boolean; all: boolean };
   expanded: boolean;
   tiles: number;
+}
+
+export interface SmartFilterSummary {
+  id: number;
+  filterId: string;
+  label: string;
+  enabled: boolean;
+  blendMode: string;
+  opacity: number;
+  params: FilterParams;
+}
+
+export interface SmartSummary {
+  sourceName: string;
+  width: number;
+  height: number;
+  filtersEnabled: boolean;
+  hasFilterMask: boolean;
+  filterMaskEnabled: boolean;
+  filters: SmartFilterSummary[];
 }
 
 export interface DocSummary {
@@ -189,11 +213,16 @@ export type ToEngine =
   | { t: 'previewApplyImage'; options: ApplyImageOptions | null }
   | { t: 'applyImage'; options: ApplyImageOptions }
   | { t: 'calculations'; options: CalculationsOptions }
-  | { t: 'applyFilter'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3 }
+  /** On a smart object the filter becomes a smart filter; `smartIndex` edits an existing one instead. */
+  | { t: 'applyFilter'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; smartIndex?: number }
   /** Latest wins. `id` null ends the on-canvas preview. */
-  | { t: 'previewFilter'; id: string | null; params: FilterParams | null; fg: Rgb3; bg: Rgb3 }
+  | { t: 'previewFilter'; id: string | null; params: FilterParams | null; fg: Rgb3; bg: Rgb3; smartIndex?: number }
   /** The dialog's preview box: a document rectangle, answered with before and after. */
-  | { t: 'filterBox'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; rect: { x0: number; y0: number; x1: number; y1: number }; seq: number }
+  | { t: 'filterBox'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; rect: { x0: number; y0: number; x1: number; y1: number }; seq: number; smartIndex?: number }
+  | { t: 'smartCommand'; cmd: SmartCommand }
+  | { t: 'smartFilterOp'; layerId: number; index: number; op: SmartFilterOp }
+  /** Latest wins; null ends the preview. */
+  | { t: 'previewSmartBlend'; layerId: number; index: number; blend: { blendMode: BlendMode; opacity: number } | null }
   | { t: 'lastFilter'; fg: Rgb3; bg: Rgb3 }
   | { t: 'fade'; opacity: number; mode: string }
   | { t: 'previewFade'; opacity: number | null; mode: string }

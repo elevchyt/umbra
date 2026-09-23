@@ -28,7 +28,8 @@ import {
   sampleCubic,
   type Resample,
 } from './image.js';
-import { findLayer, updateLayer, walkLayers, type Doc, type Layer } from '../document.js';
+import { findLayer, updateLayer, walkLayers, type Doc, type Layer, type SmartObjectLayer } from '../document.js';
+import { contentBounds, retransform } from '../smart.js';
 import type { Selection } from '../selection.js';
 
 /** Move a plane by whole pixels, re-keying its tiles and never touching a sample. */
@@ -145,15 +146,17 @@ function targetIds(doc: Doc): number[] {
   if (doc.activeLayerIds.length > 0) return [...doc.activeLayerIds];
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     const l = doc.layers[i]!;
-    if (l.kind === 'pixel') return [l.id];
+    if (l.kind === 'pixel' || l.kind === 'smart') return [l.id];
   }
   return [];
 }
 
-function mapLayerTree(layer: Layer, fn: (p: Plane) => Plane): Layer {
+function mapLayerTree(layer: Layer, fn: (p: Plane) => Plane, smart: (l: SmartObjectLayer) => Layer): Layer {
+  // A smart object takes the matrix into its transform and re-renders from its contents.
+  if (layer.kind === 'smart') return smart(layer);
   const mask = layer.mask ? { ...layer.mask, plane: new MipPlane(fn(layer.mask.plane.base)) } : layer.mask;
   if (layer.kind === 'group') {
-    return { ...layer, mask, children: layer.children.map((c) => mapLayerTree(c, fn)) };
+    return { ...layer, mask, children: layer.children.map((c) => mapLayerTree(c, fn, smart)) };
   }
   if (layer.kind === 'adjustment' || layer.kind === 'fill') return { ...layer, mask };
   return { ...layer, mask, plane: new MipPlane(fn(layer.plane.base)) };
@@ -184,7 +187,8 @@ export function transformLayers(
   for (const id of targets) {
     const layer = findLayer(layers, id);
     if (!layer || layer.locks.position || layer.locks.all) continue;
-    layers = updateLayer(layers, id, (l) => mapLayerTree(l, (p) => transformPlane(p, matrix, clip, method)));
+    const fn = (p: Plane) => transformPlane(p, matrix, clip, method);
+    layers = updateLayer(layers, id, (l) => mapLayerTree(l, fn, (s) => retransform(s, matrix, doc, fn)));
   }
   return layers === doc.layers ? doc : { ...doc, layers };
 }
@@ -261,8 +265,9 @@ export function transformBounds(doc: Doc, ids?: readonly number[]): Rect | null 
     const layer = findLayer(doc.layers, id);
     if (!layer) continue;
     for (const { layer: l } of walkLayers([layer])) {
-      if (l.kind !== 'pixel') continue;
-      const b = l.plane.base.bounds;
+      if (l.kind !== 'pixel' && l.kind !== 'smart') continue;
+      // A smart object's box is its whole placed content, even where the canvas clips it.
+      const b = l.kind === 'smart' ? contentBounds(l) : l.plane.base.bounds;
       if (rectIsEmpty(b)) continue;
       box = box
         ? {

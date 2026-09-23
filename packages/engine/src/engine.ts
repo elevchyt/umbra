@@ -38,6 +38,7 @@ import {
   type Doc,
   type Layer,
   type PixelLayer,
+  type SmartObjectLayer,
 } from './document.js';
 import { History } from './history.js';
 import {
@@ -71,6 +72,7 @@ import * as AdjustCmd from './commands/adjust.js';
 import * as SpatialCmd from './commands/spatial.js';
 import * as MaskPaint from './commands/mask-paint.js';
 import * as FilterCmd from './commands/filter.js';
+import * as Smart from './smart.js';
 import { FILTER_BY_ID, type FilterParams } from '@umbra/kernels/filters/index';
 import { compositePixel } from '@umbra/kernels/blend';
 import type { BlendMode as FadeMode } from '@umbra/core/blend';
@@ -85,7 +87,7 @@ import { bitmapFromPlane } from './psd-save.js';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
-import type { FillSummary, PatternSummary, ProbeReply } from './protocol.js';
+import type { FillSummary, PatternSummary, ProbeReply, SmartSummary } from './protocol.js';
 import {
   IDENTITY,
   about,
@@ -133,6 +135,9 @@ function transformReadout(box: Rect, m: Mat) {
 }
 
 const STROKE_SPACING = 0.25; // fraction of diameter, Photoshop's default
+
+export type SmartCommand = 'convert' | 'rasterize' | 'viaCopy' | 'toLayers' | 'clearFilters' | 'toggleFilters' | 'toggleFilterMask' | 'deleteFilterMask';
+export type SmartFilterOp = { kind: 'toggle' } | { kind: 'delete' } | { kind: 'move'; to: number } | { kind: 'blend'; blendMode: BlendMode; opacity: number };
 
 export class Engine {
   gl!: WebGL2RenderingContext;
@@ -1034,20 +1039,66 @@ export class Engine {
     return layer && layer.kind === 'pixel' ? SpatialCmd.layerRaster(this.doc, layer) : null;
   }
 
-  private filterDoc(run: FilterCmd.FilterRun): Doc | null {
+  private filterDoc(run: FilterCmd.FilterRun, smartIndex?: number): Doc | null {
+    if (this.activeSmart()) return this.smartFilterDoc(run, smartIndex);
     const target = this.paintTarget();
     if (!target) return null;
     const next = FilterCmd.applyFilter(this.doc, target.id, target.mask, run, this.filterMap(run));
     return next === this.doc ? null : next;
   }
 
-  applyFilter(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number]): boolean {
+  /** The active layer when it is a smart object and its pixels, not its mask, are the target. */
+  private activeSmart(): SmartObjectLayer | null {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    return layer && layer.kind === 'smart' && this.maskTarget !== layer.id ? layer : null;
+  }
+
+  /** A smart filter's 'layer' parameter, resolved in this document. */
+  private readonly smartMap: Smart.MapResolver = (f) => {
+    const def = FILTER_BY_ID.get(f.filterId);
+    return def ? this.filterMap({ def, params: f.params, foreground: f.foreground, background: f.background }) : null;
+  };
+
+  /**
+   * A filter on a smart object goes on its smart-filter stack instead of into pixels — or, with
+   * `smartIndex`, replaces that filter's settings (double-clicking a smart filter). A selection
+   * active when the first filter goes on becomes the filter mask, as in Photoshop.
+   */
+  private smartFilterDoc(run: FilterCmd.FilterRun, smartIndex?: number): Doc | null {
+    const layer = this.activeSmart();
+    if (!layer) return null;
+    const f = { filterId: run.def.id, params: run.params, foreground: run.foreground, background: run.background };
+    if (smartIndex !== undefined) {
+      const cur = layer.filters[smartIndex];
+      if (!cur) return null;
+      // OK without a change is not an edit.
+      const same = cur.filterId === f.filterId && JSON.stringify(cur.params) === JSON.stringify(f.params) && JSON.stringify([cur.foreground, cur.background]) === JSON.stringify([f.foreground, f.background]);
+      return same ? null : Smart.updateSmartFilter(this.doc, layer.id, smartIndex, f, this.smartMap);
+    }
+    let doc = this.doc;
+    if (!layer.filterMask && doc.selection) {
+      const plane = MaskCmd.selectionPlane(doc)!;
+      const filterMask = { plane: new MipPlane(plane), enabled: true, linked: true, density: 1, feather: 0, defaultColor: 0 as const };
+      doc = { ...doc, layers: updateLayer(doc.layers, layer.id, (l) => ({ ...(l as SmartObjectLayer), filterMask })) };
+    }
+    return Smart.addSmartFilter(doc, layer.id, { ...f, blendMode: 'normal', opacity: 1, enabled: true }, this.smartMap);
+  }
+
+  applyFilter(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number], smartIndex?: number): boolean {
     this.previewDoc = null;
     const run = this.filterRun(id, params, fg, bg);
     if (!run) return false;
     const before = this.doc;
-    const next = this.filterDoc(run);
+    const next = this.filterDoc(run, smartIndex);
     if (!next) return false;
+    if (this.activeSmart()) {
+      // Fade has nothing to fade on a smart filter — its blending options do that job.
+      this.commit(next, smartIndex === undefined ? run.def.label : `Edit ${run.def.label}`);
+      if (smartIndex === undefined) this.lastFilterRun = { id, params };
+      this.fadeState = null;
+      return true;
+    }
     const target = this.paintTarget()!;
     this.commit(next, run.def.label);
     this.lastFilterRun = { id, params };
@@ -1061,18 +1112,30 @@ export class Engine {
     return last ? this.applyFilter(last.id, last.params, fg, bg) : false;
   }
 
-  previewFilter(id: string | null, params: FilterParams | null, fg: [number, number, number], bg: [number, number, number]): void {
+  previewFilter(id: string | null, params: FilterParams | null, fg: [number, number, number], bg: [number, number, number], smartIndex?: number): void {
     const run = id && params ? this.filterRun(id, params, fg, bg) : null;
-    this.previewDoc = run ? this.filterDoc(run) : null;
+    this.previewDoc = run ? this.filterDoc(run, smartIndex) : null;
+  }
+
+  /** What a smart filter at `index` is applied to: the object rendered through the filters below it. */
+  private smartBoxBase: { layer: SmartObjectLayer; index: number; plane: Plane } | null = null;
+  private smartBase(layer: SmartObjectLayer, index: number | undefined): Plane {
+    if (index === undefined) return layer.plane.base;
+    const c = this.smartBoxBase;
+    if (c && c.layer === layer && c.index === index) return c.plane;
+    const plane = Smart.renderSmart({ ...layer, filters: layer.filters.slice(0, index) }, this.doc, this.smartMap).base;
+    this.smartBoxBase = { layer, index, plane };
+    return plane;
   }
 
   /**
    * The filter dialog's preview box: a document rectangle before and after, computed on that
    * rectangle alone (plus the filter's pad) — fast whatever the document size.
    */
-  filterBox(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number], rect: Rect): { before: Uint8Array; after: Uint8Array; width: number; height: number; rect: Rect } | null {
+  filterBox(id: string, params: FilterParams, fg: [number, number, number], bg: [number, number, number], rect: Rect, smartIndex?: number): { before: Uint8Array; after: Uint8Array; width: number; height: number; rect: Rect } | null {
     const run = this.filterRun(id, params, fg, bg);
-    const target = this.paintTarget();
+    const smart = this.activeSmart();
+    const target = smart ? { id: smart.id, mask: false } : this.paintTarget();
     if (!run || !target) return null;
     const layer = findLayer(this.doc.layers, target.id);
     if (!layer) return null;
@@ -1084,15 +1147,107 @@ export class Engine {
     };
     if (r.x1 <= r.x0 || r.y1 <= r.y0) return null;
     const canvasRect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
-    const plane = target.mask ? layer.mask?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
+    const plane = smart ? this.smartBase(smart, smartIndex) : target.mask ? layer.mask?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
     if (!plane) return null;
     const canvas = bitmapFromPlane(plane, canvasRect).data;
-    const after = FilterCmd.filterRegion(this.doc, canvas, r, { ...run, bounds: FilterCmd.affectedRegion(this.doc) }, this.doc.selection?.mask ?? null, this.filterMap(run));
+    // A smart filter sees no selection (it becomes the filter mask) and centres on the object.
+    const bounds = smart ? Smart.contentBounds(smart) : FilterCmd.affectedRegion(this.doc);
+    const after = FilterCmd.filterRegion(this.doc, canvas, r, { ...run, bounds }, smart ? null : (this.doc.selection?.mask ?? null), this.filterMap(run));
     const w = r.x1 - r.x0;
     const h = r.y1 - r.y0;
     const before = new Uint8Array(w * h * 4);
     for (let y = 0; y < h; y++) before.set(canvas.subarray(((r.y0 + y) * this.doc.width + r.x0) * 4, ((r.y0 + y) * this.doc.width + r.x1) * 4), y * w * 4);
     return { before, after: new Uint8Array(after.buffer), width: w, height: h, rect: r };
+  }
+
+  // ---- smart objects -----------------------------------------------------------------------
+
+  /** Layer ▸ Smart Objects ▸ …, Filter ▸ Convert for Smart Filters and Layer ▸ Smart Filter ▸ …, on the active layer. */
+  smartCommand(cmd: SmartCommand): boolean {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (!layer) return false;
+    const smart = layer.kind === 'smart' ? layer : null;
+    let next = this.doc;
+    let name = '';
+    switch (cmd) {
+      case 'convert':
+        // Convert for Smart Filters on a smart object has nothing to do.
+        if (smart && this.doc.activeLayerIds.length === 1) return false;
+        next = Smart.convertToSmart(this.doc);
+        name = 'Convert to Smart Object';
+        break;
+      case 'rasterize':
+        if (smart) next = Smart.rasterizeSmart(this.doc, smart.id);
+        name = 'Rasterize Smart Object';
+        break;
+      case 'viaCopy':
+        if (smart) next = Smart.newSmartViaCopy(this.doc, smart.id);
+        name = 'New Smart Object via Copy';
+        break;
+      case 'toLayers':
+        if (smart) next = Smart.convertToLayers(this.doc, smart.id);
+        name = 'Convert to Layers';
+        break;
+      case 'clearFilters':
+        if (smart) next = Smart.clearSmartFilters(this.doc, smart.id);
+        name = 'Clear Smart Filters';
+        break;
+      case 'toggleFilters':
+        if (smart) next = Smart.setSmartFiltersEnabled(this.doc, smart.id, !smart.filtersEnabled);
+        name = smart?.filtersEnabled ? 'Disable Smart Filters' : 'Enable Smart Filters';
+        break;
+      case 'toggleFilterMask':
+        if (smart?.filterMask) next = Smart.setFilterMaskEnabled(this.doc, smart.id, !smart.filterMask.enabled);
+        name = smart?.filterMask?.enabled ? 'Disable Filter Mask' : 'Enable Filter Mask';
+        break;
+      case 'deleteFilterMask':
+        if (smart) next = Smart.deleteFilterMask(this.doc, smart.id);
+        name = 'Delete Filter Mask';
+        break;
+    }
+    if (next === this.doc) return false;
+    this.previewDoc = null;
+    this.commit(next, name);
+    return true;
+  }
+
+  /** One smart filter's row in the Layers panel: its eye, delete, reorder, blending options. */
+  smartFilterOp(layerId: number, index: number, op: SmartFilterOp): boolean {
+    const layer = findLayer(this.doc.layers, layerId);
+    if (!layer || layer.kind !== 'smart' || !layer.filters[index]) return false;
+    const f = layer.filters[index]!;
+    const label = FILTER_BY_ID.get(f.filterId)?.label ?? 'Smart Filter';
+    let next: Doc;
+    let name: string;
+    switch (op.kind) {
+      case 'toggle':
+        next = Smart.updateSmartFilter(this.doc, layerId, index, { enabled: !f.enabled }, this.smartMap);
+        name = f.enabled ? `Hide ${label}` : `Show ${label}`;
+        break;
+      case 'delete':
+        next = Smart.removeSmartFilter(this.doc, layerId, index);
+        name = `Delete ${label}`;
+        break;
+      case 'move':
+        next = Smart.moveSmartFilter(this.doc, layerId, index, op.to);
+        name = `Move ${label}`;
+        break;
+      case 'blend':
+        next = Smart.updateSmartFilter(this.doc, layerId, index, { blendMode: op.blendMode, opacity: op.opacity }, this.smartMap);
+        name = `${label} Blending Options`;
+        break;
+    }
+    this.previewDoc = null;
+    if (next === this.doc) return false;
+    this.commit(next, name);
+    return true;
+  }
+
+  /** The smart filter Blending Options dialog's live preview. */
+  previewSmartBlend(layerId: number, index: number, blend: { blendMode: BlendMode; opacity: number } | null): void {
+    this.previewDoc = blend ? Smart.updateSmartFilter(this.doc, layerId, index, blend, this.smartMap) : null;
+    if (this.previewDoc === this.doc) this.previewDoc = null;
   }
 
   // ---- Edit ▸ Fade ------------------------------------------------------------------------
@@ -2432,6 +2587,7 @@ export class Engine {
         id: layer.id,
         name: layer.name,
         kind: layer.kind,
+        smart: layer.kind === 'smart' ? Engine.smartToSummary(layer) : undefined,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,
@@ -2444,7 +2600,27 @@ export class Engine {
         maskEnabled: layer.mask ? layer.mask.enabled : false,
         locks: layer.locks,
         expanded: layer.kind === 'group' ? layer.expanded : false,
-        tiles: layer.kind === 'pixel' ? layer.plane.base.tileCount : 0,
+        tiles: layer.kind === 'pixel' || layer.kind === 'smart' ? layer.plane.base.tileCount : 0,
+      })),
+    };
+  }
+
+  private static smartToSummary(layer: SmartObjectLayer): SmartSummary {
+    return {
+      sourceName: layer.source.name,
+      width: layer.source.doc.width,
+      height: layer.source.doc.height,
+      filtersEnabled: layer.filtersEnabled,
+      hasFilterMask: !!layer.filterMask,
+      filterMaskEnabled: !!layer.filterMask?.enabled,
+      filters: layer.filters.map((f) => ({
+        id: f.id,
+        filterId: f.filterId,
+        label: FILTER_BY_ID.get(f.filterId)?.label ?? f.filterId,
+        enabled: f.enabled,
+        blendMode: f.blendMode,
+        opacity: f.opacity,
+        params: f.params,
       })),
     };
   }

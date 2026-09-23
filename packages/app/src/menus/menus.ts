@@ -381,7 +381,7 @@ export const MENUS: MenuDef[] = [
           { label: 'Scale Effects…', cmd: 'style.scaleEffects' },
         ],
       },
-      { label: 'Smart Filter', items: [{ label: 'Disable Smart Filters', cmd: 'smartFilter.disable' }, { label: 'Delete Filter Mask', cmd: 'smartFilter.deleteMask' }, { label: 'Clear Smart Filters', cmd: 'smartFilter.clear' }] },
+      { label: 'Smart Filter', items: [{ label: 'Disable Smart Filters', cmd: 'smartFilter.disable', done: true }, { label: 'Delete Filter Mask', cmd: 'smartFilter.deleteMask', done: true }, { label: 'Clear Smart Filters', cmd: 'smartFilter.clear', done: true }] },
       sep,
       {
         label: 'New Fill Layer',
@@ -450,8 +450,8 @@ export const MENUS: MenuDef[] = [
       {
         label: 'Smart Objects',
         items: [
-          { label: 'Convert to Smart Object', cmd: 'so.convert' },
-          { label: 'New Smart Object via Copy', cmd: 'so.newViaCopy' },
+          { label: 'Convert to Smart Object', cmd: 'so.convert', done: true },
+          { label: 'New Smart Object via Copy', cmd: 'so.newViaCopy', done: true },
           sep,
           { label: 'Edit Contents', cmd: 'so.editContents' },
           { label: 'Update Modified Content', cmd: 'so.updateModified' },
@@ -465,8 +465,8 @@ export const MENUS: MenuDef[] = [
           { label: 'Convert to Linked…', cmd: 'so.convertToLinked' },
           sep,
           { label: 'Stack Mode', items: [{ label: 'Mean', cmd: 'so.stackMean' }, { label: 'Median', cmd: 'so.stackMedian' }, { label: 'Maximum', cmd: 'so.stackMax' }, { label: 'Minimum', cmd: 'so.stackMin' }] },
-          { label: 'Convert to Layers', cmd: 'so.convertToLayers' },
-          { label: 'Rasterize', cmd: 'so.rasterize' },
+          { label: 'Convert to Layers', cmd: 'so.convertToLayers', done: true },
+          { label: 'Rasterize', cmd: 'so.rasterize', done: true },
         ],
       },
       {
@@ -476,7 +476,7 @@ export const MENUS: MenuDef[] = [
           { label: 'Shape', cmd: 'rasterize.shape' },
           { label: 'Fill Content', cmd: 'rasterize.fillContent' },
           { label: 'Vector Mask', cmd: 'rasterize.vectorMask' },
-          { label: 'Smart Object', cmd: 'rasterize.smartObject' },
+          { label: 'Smart Object', cmd: 'rasterize.smartObject', done: true },
           { label: 'Layer Style', cmd: 'rasterize.layerStyle' },
           sep,
           { label: 'Layer', cmd: 'rasterize.layer' },
@@ -606,7 +606,7 @@ export const MENUS: MenuDef[] = [
     items: [
       { label: 'Last Filter', cmd: 'filter.last', shortcut: 'Ctrl+Alt+F', done: true },
       sep,
-      { label: 'Convert for Smart Filters', cmd: 'filter.convertForSmart' },
+      { label: 'Convert for Smart Filters', cmd: 'filter.convertForSmart', done: true },
       sep,
       filterItem('Filter Gallery…', 'filter.gallery'),
       { label: 'Adaptive Wide Angle…', cmd: 'filter.adaptiveWideAngle', shortcut: 'Ctrl+Alt+Shift+A' },
