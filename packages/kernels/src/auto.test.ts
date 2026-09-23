@@ -105,9 +105,10 @@ describe('Auto options and conversions', () => {
   it('a Levels setting and its Curves translation agree', () => {
     const l = autoLevelsWith(warm, { algorithm: 'perChannel', snapNeutral: true, shadowClip: 0.1, highlightClip: 0.1 });
     const c = levelsToCurves(l);
-    for (const px of [[120, 100, 60], [200, 150, 100], [110, 70, 30]] as const) {
-      const a = applyToRgb(l, ...px);
-      const b = applyToRgb(c, ...px);
+    const samples: [number, number, number][] = [[120, 100, 60], [200, 150, 100], [110, 70, 30]];
+    for (const [r, g, bl] of samples) {
+      const a = applyToRgb(l, r, g, bl);
+      const b = applyToRgb(c, r, g, bl);
       // A spline through three points is not a gamma curve; they agree at the ends and middle.
       a.forEach((v, i) => expect(Math.abs(v - b[i]!)).toBeLessThan(14));
     }
