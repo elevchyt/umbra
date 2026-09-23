@@ -9,6 +9,7 @@ import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
 import { SpatialDialog } from '../adjust/spatial';
+import { ApplyImageDialog, CalculationsDialog } from '../adjust/applyimage';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -682,6 +683,12 @@ export function Workspace() {
         store.openDialog('spatial', initial);
         break;
       }
+      case 'image.applyImage':
+        store.openDialog('applyImage');
+        break;
+      case 'image.calculations':
+        store.openDialog('calculations');
+        break;
       case 'fill.solid':
       case 'fill.gradient':
       case 'fill.pattern': {
@@ -1310,6 +1317,12 @@ export function Workspace() {
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
         />
+      </Show>
+      <Show when={store.dialog()?.id === 'applyImage'}>
+        <ApplyImageDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'calculations'}>
+        <CalculationsDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'fillLayer'}>
         <FillLayerDialog

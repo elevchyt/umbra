@@ -71,6 +71,13 @@ import * as AdjustCmd from './commands/adjust.js';
 import * as SpatialCmd from './commands/spatial.js';
 import * as MaskPaint from './commands/mask-paint.js';
 import { colorStats, replaceColorMask, SPATIAL_LABEL, type SpatialAdjustment } from '@umbra/kernels/spatial';
+import {
+  applyImage,
+  calculations as runCalculations,
+  type ApplyImageOptions,
+  type CalculationsOptions,
+} from '@umbra/kernels/applyimage';
+import { bitmapFromPlane } from './psd-save.js';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
@@ -995,6 +1002,66 @@ export class Engine {
       }
     }
     return { pixels, width: w, height: h };
+  }
+
+  // ---- Apply Image and Calculations -------------------------------------------------------
+
+  /** A source image for Apply Image/Calculations: the merged composite, or a pixel layer. */
+  private sourceRaster(layerId: number | null): ArrayLike<number> | null {
+    if (layerId === null) return this.documentPixels()?.pixels ?? null;
+    const layer = findLayer(this.doc.layers, layerId);
+    return layer && layer.kind === 'pixel' ? SpatialCmd.layerRaster(this.doc, layer) : null;
+  }
+
+  /** The document Apply Image would produce — into the target's pixels or, if targeted, its mask. */
+  private applyImageDoc(o: ApplyImageOptions): Doc | null {
+    const target = this.paintTarget();
+    const src = this.sourceRaster(o.sourceLayerId);
+    if (!target || !src) return null;
+    const layer = findLayer(this.doc.layers, target.id);
+    if (!layer) return null;
+    const coverage = this.doc.selection?.mask;
+    const rect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+    if (target.mask) {
+      if (!layer.mask) return null;
+      const raster = bitmapFromPlane(layer.mask.plane.base, rect).data;
+      applyImage(raster, src, o, coverage);
+      const grey = new Uint8Array(raster.length / 4);
+      for (let i = 0; i < grey.length; i++) grey[i] = Math.round(0.3 * raster[i * 4]! + 0.59 * raster[i * 4 + 1]! + 0.11 * raster[i * 4 + 2]!);
+      return MaskPaint.setMaskFromGrey(this.doc, target.id, grey);
+    }
+    if (layer.kind !== 'pixel' || layer.locks.pixels || layer.locks.all) return null;
+    const raster = SpatialCmd.layerRaster(this.doc, layer);
+    applyImage(raster, src, o, coverage);
+    const plane = new MipPlane(SpatialCmd.writeRaster(layer.plane.base, this.doc.width, this.doc.height, raster));
+    return { ...this.doc, layers: updateLayer(this.doc.layers, layer.id, (l) => ({ ...l, plane }) as typeof l) };
+  }
+
+  previewApplyImage(o: ApplyImageOptions | null): void {
+    this.previewDoc = o ? this.applyImageDoc(o) : null;
+  }
+
+  applyImage(o: ApplyImageOptions): boolean {
+    this.previewDoc = null;
+    const next = this.applyImageDoc(o);
+    if (!next) return false;
+    this.commit(next, 'Apply Image');
+    return true;
+  }
+
+  /** Image ▸ Calculations: two channels blended into a new alpha channel or a selection. */
+  calculations(o: CalculationsOptions): boolean {
+    const a = this.sourceRaster(o.source1.layerId);
+    const b = this.sourceRaster(o.source2.layerId);
+    if (!a || !b) return false;
+    const grey = runCalculations(a, b, o);
+    const sel = makeSelection(this.doc.width, this.doc.height, grey);
+    if (o.result === 'selection') {
+      this.commit({ ...this.doc, selection: sel }, 'Calculations');
+    } else {
+      this.commit(ChannelCmd.saveSelection(this.doc, sel, {}), 'Calculations');
+    }
+    return true;
   }
 
   // ---- Info panel probes ------------------------------------------------------------------

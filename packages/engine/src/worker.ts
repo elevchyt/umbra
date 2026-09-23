@@ -13,9 +13,21 @@ let ringSab: SharedArrayBuffer | null = null;
 /** Bytes found by `checkRecovery`, held until the user accepts or discards them. */
 let recovered: ArrayBuffer | null = null;
 
-/** The newest Spatial preview request not yet computed — see 'previewSpatial'. */
-let pendingSpatial: { adjustment: import('@umbra/kernels/spatial').SpatialAdjustment | null } | null = null;
-let spatialScheduled = false;
+/** The newest CPU preview not yet computed — see 'previewSpatial'. */
+let pendingPreview: (() => void) | null = null;
+let previewScheduled = false;
+
+function latestPreview(run: () => void): void {
+  pendingPreview = run;
+  if (previewScheduled) return;
+  previewScheduled = true;
+  setTimeout(() => {
+    previewScheduled = false;
+    const next = pendingPreview;
+    pendingPreview = null;
+    next?.();
+  }, 0);
+}
 
 function post(msg: FromEngine, transfer?: Transferable[]): void {
   (self as unknown as Worker).postMessage(msg, transfer ?? []);
@@ -219,23 +231,28 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setFillContent':
         if (engine?.setFillContent(msg.id, msg.content, msg.final, msg.amend)) post({ t: 'doc', doc: engine.summary() });
         break;
-      case 'previewSpatial':
+      case 'previewSpatial': {
         // Latest wins. A preview can take a few hundred milliseconds, and a slider sends one
         // per frame; queueing them would make the preview trail further and further behind.
         // Messages already queued run before this timeout, so it computes only the newest.
-        pendingSpatial = { adjustment: msg.adjustment };
-        if (!spatialScheduled) {
-          spatialScheduled = true;
-          setTimeout(() => {
-            spatialScheduled = false;
-            const next = pendingSpatial;
-            pendingSpatial = null;
-            if (next && engine) engine.previewSpatial(next.adjustment);
-          }, 0);
-        }
+        const adjustment = msg.adjustment;
+        latestPreview(() => engine?.previewSpatial(adjustment));
+        break;
+      }
+      case 'previewApplyImage': {
+        const options = msg.options;
+        latestPreview(() => engine?.previewApplyImage(options));
+        break;
+      }
+      case 'applyImage':
+        pendingPreview = null;
+        if (engine?.applyImage(msg.options)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'calculations':
+        if (engine?.calculations(msg.options)) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'applySpatial':
-        pendingSpatial = null;
+        pendingPreview = null;
         if (engine?.applySpatial(msg.adjustment)) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'requestReplaceColorPreview': {

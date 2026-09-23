@@ -93,3 +93,10 @@ export function compositeStrokeIntoMask(doc: Doc, layerId: number, stroke: Plane
   }
   return withMask(doc, layerId, writer.commit());
 }
+
+/** Replace the mask over the canvas with `grey` (canvas-sized, 0…255) — Apply Image into a mask. */
+export function setMaskFromGrey(doc: Doc, layerId: number, grey: Uint8Array): Doc {
+  // The caller has already applied the selection; paint through none.
+  const out = paintCanvas({ ...doc, selection: null }, layerId, (x, y) => [grey[y * doc.width + x]! / 255, 1]);
+  return { ...out, selection: doc.selection };
+}

@@ -55,3 +55,11 @@ export {
   type AutoOptions,
   type AutoAlgorithm,
 } from '@umbra/kernels/auto';
+export {
+  DEFAULT_APPLY_IMAGE,
+  DEFAULT_CALCULATIONS,
+  type ApplyImageOptions,
+  type CalculationsOptions,
+  type ChannelPick,
+  type ApplyBlend,
+} from '@umbra/kernels/applyimage';

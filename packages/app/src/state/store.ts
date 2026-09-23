@@ -261,6 +261,8 @@ export type DialogId =
   | 'adjustment'
   | 'fillLayer'
   | 'spatial'
+  | 'applyImage'
+  | 'calculations'
   | 'definePattern';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);

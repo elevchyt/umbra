@@ -4,6 +4,7 @@ import type { Gradient } from '@umbra/kernels/gradient';
 import type { Adjustment } from '@umbra/kernels/adjust';
 import type { FillContent } from '@umbra/kernels/fill';
 import type { SpatialAdjustment } from '@umbra/kernels/spatial';
+import type { ApplyImageOptions, CalculationsOptions } from '@umbra/kernels/applyimage';
 
 /**
  * A fill layer's content as the UI sees it: the same as the model, except a pattern is named
@@ -177,6 +178,10 @@ export type ToEngine =
   /** Latest wins: the worker drops superseded previews rather than queueing them. */
   | { t: 'previewSpatial'; adjustment: SpatialAdjustment | null }
   | { t: 'applySpatial'; adjustment: SpatialAdjustment }
+  /** Latest wins, like previewSpatial. */
+  | { t: 'previewApplyImage'; options: ApplyImageOptions | null }
+  | { t: 'applyImage'; options: ApplyImageOptions }
+  | { t: 'calculations'; options: CalculationsOptions }
   | { t: 'requestReplaceColorPreview'; color: [number, number, number]; fuzziness: number; size: number }
   /** A .cube or .3dl file the user picked; the reply is the updated `luts` list. */
   | { t: 'loadLut'; fileName: string; bytes: Uint8Array }
