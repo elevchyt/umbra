@@ -8,6 +8,7 @@ import type { ApplyImageOptions, CalculationsOptions } from '@umbra/kernels/appl
 import type { FilterParams } from '@umbra/kernels/filters/types';
 import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
+import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
 import type { LayerStyleProps, SmartCommand, SmartFilterOp, StyleCommand } from './engine.js';
 
@@ -238,6 +239,14 @@ export type ToEngine =
   /** Latest wins; effects and props both absent ends the preview. */
   | { t: 'previewLayerStyle'; id: number; effects: LayerEffects | null; props?: LayerStyleProps; globalLight?: GlobalLight }
   | { t: 'styleCommand'; cmd: StyleCommand; amount?: number }
+  /** The Styles panel's library; each answered with the updated `styles` list. */
+  | { t: 'requestStyles' }
+  | { t: 'applyStyle'; id: string }
+  | { t: 'newStyle'; name: string; effects?: LayerEffects | null }
+  | { t: 'deleteStyle'; id: string }
+  | { t: 'renameStyle'; id: string; name: string }
+  | { t: 'loadAsl'; name: string; bytes: Uint8Array }
+  | { t: 'exportAsl'; name: string; ids?: string[] }
   | { t: 'setGlobalLight'; light: GlobalLight }
   | { t: 'editContents' }
   /** Save the open contents into the smart object (every instance), and optionally close them. */
@@ -339,6 +348,7 @@ export type FromEngine =
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
+  | { t: 'styles'; list: StylePreset[] }
   | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }

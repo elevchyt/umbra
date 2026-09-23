@@ -4,15 +4,17 @@
  * selected page in the middle, and OK / Cancel / Preview with a preview tile on the right.
  * Every change previews on the canvas; OK commits the whole style as one step.
  */
-import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup } from 'solid-js';
+import { For, Match, Show, Switch, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
 import { Button, Checkbox } from '@umbra/ui/widgets/controls';
-import { EFFECT_DEFAULTS, EMPTY_EFFECTS, compositePixel, renderEffects, mapEffectPatterns, DEFAULT_GLOBAL_LIGHT, type LayerEffects, type GlobalLight, type LayerSummary } from '@umbra/engine';
+import { StyleTile } from './StyleTile';
+import { EFFECT_DEFAULTS, EMPTY_EFFECTS, DEFAULT_GLOBAL_LIGHT, type LayerEffects, type GlobalLight, type LayerSummary } from '@umbra/engine';
 import { Dialog } from '../dialogs/Dialogs';
 import { store } from '../state/store';
 import { BevelContourPage, BevelPage, BevelTexturePage, BlendingPage, ColorOverlayPage, GlowPage, GradientOverlayPage, PatternOverlayPage, SatinPage, ShadowPage, StrokePage, type BlendingValue } from './pages';
 import type { Rgb } from './controls';
 
 export type StyleKey =
+  | 'styles'
   | 'blending'
   | 'bevel'
   | 'bevelContour'
@@ -33,6 +35,7 @@ const MULTI = new Set<StyleKey>(['stroke', 'innerShadow', 'colorOverlay', 'gradi
 
 /** Photoshop's list, top to bottom (the top one draws in front). */
 export const STYLE_ITEMS: { key: StyleKey; label: string }[] = [
+  { key: 'styles', label: 'Styles' },
   { key: 'blending', label: 'Blending Options' },
   { key: 'bevel', label: 'Bevel & Emboss' },
   { key: 'bevelContour', label: 'Contour' },
@@ -66,50 +69,6 @@ function freshEffect(key: Multi | Single) {
   return EFFECT_DEFAULTS[key]();
 }
 
-const TILE = 100;
-
-/** The preview tile: the style on a rounded square, as Photoshop's dialog shows it. */
-function PreviewTile(props: { fx: LayerEffects; light: GlobalLight }) {
-  let canvas!: HTMLCanvasElement;
-  const shape = new Float32Array(TILE * TILE);
-  for (let y = 0; y < TILE; y++) {
-    for (let x = 0; x < TILE; x++) {
-      const dx = Math.max(0, Math.abs(x + 0.5 - 50) - 14);
-      const dy = Math.max(0, Math.abs(y + 0.5 - 50) - 14);
-      shape[y * TILE + x] = Math.min(1, Math.max(0, 14.5 - Math.hypot(dx, dy)));
-    }
-  }
-  let timer = 0;
-  createEffect(() => {
-    // Patterns travel by id here; the tile draws the rest without them.
-    const fx = mapEffectPatterns(props.fx, (p) => (p.data.length ? p : null));
-    const light = props.light;
-    clearTimeout(timer);
-    timer = window.setTimeout(() => {
-      const r = renderEffects(fx, { shape, width: TILE, height: TILE, originX: 0, originY: 0, docWidth: TILE, docHeight: TILE, bounds: { x0: 22, y0: 22, x1: 78, y1: 78 }, light });
-      const img = new ImageData(TILE, TILE);
-      for (let i = 0; i < TILE * TILE; i++) {
-        let c: [number, number, number] = [1, 1, 1];
-        let a = 1;
-        const put = (d: Uint8ClampedArray, mode: never, op: number) => {
-          const o = compositePixel(mode, c, a, [d[i * 4]! / 255, d[i * 4 + 1]! / 255, d[i * 4 + 2]! / 255], (d[i * 4 + 3]! / 255) * op);
-          c = o.color as [number, number, number];
-          a = o.alpha;
-        };
-        for (const e of r.below) put(e.data, e.blendMode as never, e.opacity);
-        const o = compositePixel('normal', c, a, [0.62, 0.7, 0.82], shape[i]!);
-        c = o.color as [number, number, number];
-        a = o.alpha;
-        for (const e of r.above) put(e.data, e.blendMode as never, e.opacity);
-        img.data.set([c[0] * 255, c[1] * 255, c[2] * 255, 255], i * 4);
-      }
-      canvas.getContext('2d')!.putImageData(img, 0, 0);
-    }, 30);
-  });
-  onCleanup(() => clearTimeout(timer));
-  return <canvas ref={canvas} class="fx-tile" width={TILE} height={TILE} />;
-}
-
 export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: unknown) => void; onClose: () => void }) {
   const id = props.payload.layerId;
   const layer = (): LayerSummary | undefined => store.doc()?.layers.find((l) => l.id === id);
@@ -125,6 +84,9 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
   const [light, setLight] = createSignal<GlobalLight>(light0);
   const [page, setPage] = createSignal<{ key: StyleKey; index: number }>({ key: props.payload.page ?? 'blending', index: 0 });
   const [preview, setPreview] = createSignal(true);
+  const [naming, setNaming] = createSignal(false);
+  const [styleName, setStyleName] = createSignal(`${initial?.name ?? 'Layer'} Style`);
+  onMount(() => props.send({ t: 'requestStyles' }));
 
   const list = (k: Multi) => fx()[k] as { enabled: boolean }[];
   const single = (k: Single) => fx()[k] as { enabled: boolean } | null;
@@ -132,7 +94,7 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
 
   /** Make sure the page's effect exists (a click on its name switches it on, as in Photoshop). */
   const ensure = (key: StyleKey, index = 0) => {
-    if (key === 'blending') return;
+    if (key === 'blending' || key === 'styles') return;
     if (key === 'bevelContour' || key === 'bevelTexture') {
       const b = fx().bevel ?? { ...EFFECT_DEFAULTS.bevel() };
       update({ bevel: { ...b, enabled: true, ...(key === 'bevelContour' ? { contourEnabled: true } : { textureEnabled: true }) } });
@@ -150,7 +112,7 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
   };
 
   const checked = (key: StyleKey, index: number): boolean => {
-    if (key === 'blending') return true;
+    if (key === 'blending' || key === 'styles') return true;
     if (key === 'bevelContour') return !!fx().bevel?.contourEnabled;
     if (key === 'bevelTexture') return !!fx().bevel?.textureEnabled;
     if (MULTI.has(key)) return !!list(key as Multi)[index]?.enabled;
@@ -188,7 +150,7 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
   const removeInstance = () => {
     const { key, index } = page();
     if (!MULTI.has(key)) {
-      if (key !== 'blending') update({ [key === 'bevelContour' || key === 'bevelTexture' ? 'bevel' : key]: null } as never);
+      if (key !== 'blending' && key !== 'styles') update({ [key === 'bevelContour' || key === 'bevelTexture' ? 'bevel' : key]: null } as never);
       setPage({ key: 'blending', index: 0 });
       return;
     }
@@ -209,7 +171,7 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
   };
 
   // Opened from an effect's menu item: that effect is switched on, as in Photoshop.
-  if (props.payload.page && props.payload.page !== 'blending') ensure(props.payload.page);
+  if (props.payload.page && props.payload.page !== 'blending' && props.payload.page !== 'styles') ensure(props.payload.page);
 
   /** Rows of the left list: multi-instance effects get a row per instance. */
   const rows = createMemo(() =>
@@ -269,13 +231,13 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
             {(r) => (
               <div
                 class="fx-item"
-                classList={{ selected: page().key === r.key && page().index === r.index, sub: r.key === 'bevelContour' || r.key === 'bevelTexture', header: r.key === 'blending' }}
+                classList={{ selected: page().key === r.key && page().index === r.index, sub: r.key === 'bevelContour' || r.key === 'bevelTexture', header: r.key === 'blending' || r.key === 'styles' }}
                 onClick={() => {
                   ensure(r.key, r.index);
                   setPage({ key: r.key, index: r.index });
                 }}
               >
-                <Show when={r.key !== 'blending'}>
+                <Show when={r.key !== 'blending' && r.key !== 'styles'}>
                   <input type="checkbox" checked={checked(r.key, r.index)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.key, r.index)} />
                 </Show>
                 <span>{r.label}</span>
@@ -310,6 +272,17 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
         <div class="fx-page">
           <h3 class="fx-title">{STYLE_ITEMS.find((i) => i.key === page().key)?.label}</h3>
           <Switch>
+            <Match when={page().key === 'styles'}>
+              <div class="styles-grid fx-styles">
+                <For each={store.styles()}>
+                  {(st) => (
+                    <button type="button" class="style-cell" title={`${st.name} — replaces the effects here`} onClick={() => setFx(structuredClone(st.effects))}>
+                      <StyleTile fx={st.effects} size={52} />
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Match>
             <Match when={page().key === 'blending'}>
               <BlendingPage value={blend()} set={(p) => setBlend({ ...blend(), ...p })} />
             </Match>
@@ -352,8 +325,27 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
           </Switch>
         </div>
         <div class="fx-side">
+          <Button width={100} onClick={() => setNaming(true)} title="Add these effects to the Styles panel">
+            New Style…
+          </Button>
+          <Show when={naming()}>
+            <input
+              class="styles-name"
+              placeholder="Style name"
+              value={styleName()}
+              onInput={(e) => setStyleName(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  props.send({ t: 'newStyle', name: styleName(), effects: fx() });
+                  setNaming(false);
+                }
+                if (e.key === 'Escape') setNaming(false);
+              }}
+            />
+          </Show>
           <Checkbox checked={preview()} label="Preview" onChange={setPreview} />
-          <PreviewTile fx={fx()} light={light()} />
+          <StyleTile fx={fx()} light={light()} size={100} />
         </div>
       </div>
     </Dialog>

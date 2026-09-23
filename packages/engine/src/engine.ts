@@ -4,6 +4,8 @@
  */
 import { DEFAULT_GLOBAL_LIGHT, mapEffectPatterns, scaleEffects, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
 import { EffectsCache, type EffectLayer } from './effects-layers.js';
+import { builtinStyles, type StylePreset } from '@umbra/kernels/effects/presets';
+import { readAsl, writeAsl } from './asl.js';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { EMPTY_RECT, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
@@ -1778,6 +1780,70 @@ export class Engine {
       this.doc = next;
     }
     return true;
+  }
+
+  // ---- the Styles panel's library -------------------------------------------------------
+
+  private styleLibrary: StylePreset[] = builtinStyles();
+  private styleSeq = 1;
+
+  /** The library for the UI: patterns by id only. */
+  styleSummaries(): StylePreset[] {
+    return this.styleLibrary.map((s) => ({ ...s, effects: Engine.effectsToSummary(s.effects) }));
+  }
+
+  /** Click a style: it replaces the style of every selected layer, as in Photoshop. */
+  applyStyle(id: string): boolean {
+    const style = this.styleLibrary.find((s) => s.id === id);
+    if (!style) return false;
+    let layers = this.doc.layers;
+    for (const lid of this.doc.activeLayerIds) {
+      layers = updateLayer(layers, lid, (l) => (l.kind === 'adjustment' ? l : { ...l, effects: style.effects }));
+    }
+    if (layers === this.doc.layers) return false;
+    this.previewDoc = null;
+    this.commit({ ...this.doc, layers }, 'Apply Style');
+    return true;
+  }
+
+  /** New Style…: from the given effects (the Layer Style dialog's) or the active layer's. */
+  newStyle(name: string, effects?: LayerEffects | null): boolean {
+    const id = this.doc.activeLayerIds[0];
+    const fx = effects ?? (id === undefined ? undefined : findLayer(this.doc.layers, id)?.effects);
+    if (!fx) return false;
+    this.styleLibrary.push({ id: `user-${Date.now().toString(36)}-${this.styleSeq++}`, name: name || `Style ${this.styleLibrary.length + 1}`, effects: this.resolveEffects(fx) });
+    return true;
+  }
+
+  deleteStyle(id: string): boolean {
+    const n = this.styleLibrary.length;
+    this.styleLibrary = this.styleLibrary.filter((s) => s.id !== id);
+    return this.styleLibrary.length !== n;
+  }
+
+  renameStyle(id: string, name: string): boolean {
+    const s = this.styleLibrary.find((x) => x.id === id);
+    if (!s || !name) return false;
+    s.name = name;
+    return true;
+  }
+
+  /** Load Styles…: an .asl's styles join the library, its patterns the pattern library. */
+  loadAsl(bytes: Uint8Array): { added: number; lost: { style: string; features: string[] }[] } {
+    const lib = readAsl(bytes);
+    for (const p of lib.patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
+    for (const s of lib.styles) {
+      const i = this.styleLibrary.findIndex((x) => x.id === s.id);
+      if (i >= 0) this.styleLibrary[i] = s;
+      else this.styleLibrary.push(s);
+    }
+    return { added: lib.styles.length, lost: lib.lost };
+  }
+
+  /** Save Styles…: the whole library (or the given styles) as an .asl. */
+  exportAsl(ids?: readonly string[]): Uint8Array {
+    const chosen = ids?.length ? this.styleLibrary.filter((s) => ids.includes(s.id)) : this.styleLibrary;
+    return writeAsl(chosen.map((s) => ({ ...s, effects: this.resolveEffects(s.effects) })));
   }
 
   patternSummaries(): PatternSummary[] {

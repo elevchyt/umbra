@@ -1,5 +1,5 @@
 /** Small controls the Layer Style dialog's pages share. */
-import { For, createMemo } from 'solid-js';
+import { For, Show, createMemo, createSignal } from 'solid-js';
 import { Checkbox, Select } from '@umbra/ui/widgets/controls';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
@@ -78,12 +78,17 @@ export function ContourRow(props: { label?: string; contour: Contour; onContour:
     return d;
   });
   const index = () => CONTOUR_PRESETS.findIndex((c) => c.name === props.contour.name);
+  const [editing, setEditing] = createSignal(false);
   return (
-    <div class="fx-row">
+    <div class="fx-row fx-contour-row">
       <span class="fx-label">{props.label ?? 'Contour'}</span>
-      <svg class="fx-contour" viewBox="0 0 30 30" width="30" height="30">
+      <svg class="fx-contour" viewBox="0 0 30 30" width="30" height="30" onClick={() => setEditing(!editing())} style={{ cursor: 'pointer' }}>
+        <title>Click to edit the contour</title>
         <path d={path()} />
       </svg>
+      <Show when={editing()}>
+        <ContourEditor contour={props.contour} onChange={props.onContour} onClose={() => setEditing(false)} />
+      </Show>
       <Select
         value={index()}
         width={150}
@@ -145,6 +150,96 @@ export function Radio<T extends string>(props: { value: T; options: { value: T; 
           </label>
         )}
       </For>
+    </div>
+  );
+}
+
+/**
+ * The contour editor: a curve like Curves' — drag a point, click the curve to add one,
+ * double-click a point to make it a corner (a sharp bend) or smooth again, drag a point off
+ * the square to remove it. The ends stay at the edges.
+ */
+function ContourEditor(props: { contour: Contour; onChange: (c: Contour) => void; onClose: () => void }) {
+  const S = 160;
+  let svg!: SVGSVGElement;
+  const pts = () => [...props.contour.points].sort((a, b) => a.x - b.x);
+  const path = createMemo(() => {
+    const lut = contourLut(props.contour);
+    let d = '';
+    for (let i = 0; i < 256; i += 2) d += `${i === 0 ? 'M' : 'L'}${(i / 255) * S},${S - lut[i]! * S}`;
+    return d;
+  });
+  const at = (e: PointerEvent) => {
+    const r = svg.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: 1 - (e.clientY - r.top) / r.height };
+  };
+  const set = (points: Contour['points']) => props.onChange({ name: 'Custom', points });
+  const drag = (index: number, e: PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const list = pts();
+    const end = index === 0 || index === list.length - 1;
+    const move = (ev: PointerEvent) => {
+      const p = at(ev);
+      const next = [...list];
+      const lo = index > 0 ? list[index - 1]!.x + 0.01 : 0;
+      const hi = index < list.length - 1 ? list[index + 1]!.x - 0.01 : 1;
+      const off = p.x < -0.1 || p.x > 1.1 || p.y < -0.1 || p.y > 1.1;
+      if (off && !end && list.length > 2) {
+        next.splice(index, 1);
+        set(next);
+        return;
+      }
+      next[index] = { ...list[index]!, x: end ? list[index]!.x : Math.min(hi, Math.max(lo, p.x)), y: Math.min(1, Math.max(0, p.y)) };
+      set(next);
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div class="fx-contour-editor" onPointerDown={(e) => e.stopPropagation()}>
+      <svg
+        ref={svg}
+        viewBox={`0 0 ${S} ${S}`}
+        width={S}
+        height={S}
+        onPointerDown={(e) => {
+          const p = at(e);
+          if (pts().length >= 16) return;
+          set([...pts(), { x: Math.min(0.99, Math.max(0.01, p.x)), y: Math.min(1, Math.max(0, p.y)) }].sort((a, b) => a.x - b.x));
+        }}
+      >
+        <path d={`M0,${S} L${S},0`} class="fx-contour-diag" />
+        <path d={path()} class="fx-contour-curve" />
+        <For each={pts()}>
+          {(p, i) => (
+            <rect
+              x={p.x * S - 4}
+              y={S - p.y * S - 4}
+              width="8"
+              height="8"
+              class="fx-contour-point"
+              classList={{ corner: !!p.corner }}
+              transform={p.corner ? `rotate(45 ${p.x * S} ${S - p.y * S})` : undefined}
+              onPointerDown={(e) => drag(i(), e)}
+              onDblClick={(e) => {
+                e.stopPropagation();
+                set(pts().map((q, k) => (k === i() ? { ...q, corner: !q.corner } : q)));
+              }}
+            />
+          )}
+        </For>
+      </svg>
+      <div class="fx-row">
+        <span class="dim">Double-click a point: corner / smooth</span>
+        <button type="button" class="fx-plus" onClick={props.onClose}>
+          ✓
+        </button>
+      </div>
     </div>
   );
 }

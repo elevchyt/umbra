@@ -71,3 +71,4 @@ export type { LayerStyleProps, StyleCommand } from './engine.js';
 export { renderEffects } from '@umbra/kernels/effects/render';
 export { compositePixel } from '@umbra/kernels/blend';
 export type { BlendIfRange, AdvancedBlending } from '@umbra/kernels/composite';
+export type { StylePreset } from '@umbra/kernels/effects/presets';

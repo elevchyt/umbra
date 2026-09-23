@@ -4,7 +4,7 @@ import { compositeDocument } from '@umbra/kernels/composite';
 import { DEFAULTS, EMPTY_EFFECTS, type LayerEffects } from '@umbra/kernels/effects/index';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
-import { emptyDoc, makePixelLayer, type Doc, type Layer } from './document.js';
+import { emptyDoc, makeGroup, makePixelLayer, type Doc, type Layer } from './document.js';
 import { EffectsCache, expandEffects } from './effects-layers.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
 import { mergeDown } from './commands/layers.js';
@@ -84,5 +84,17 @@ describe('layer effects in the render tree', () => {
     expect(l.effects).toBeUndefined();
     const px = bitmapFromPlane((l as { plane: { base: Plane } }).plane.base, { x0: 31, y0: 20, x1: 32, y1: 21 }).data;
     expect(Array.from(px)).toEqual([0, 0, 0, 255]);
+  });
+
+  it("a group's effects follow the shape of its children together", () => {
+    const a = makePixelLayer('A', square(10, 10, 20, 20));
+    const b = makePixelLayer('B', square(30, 10, 40, 20));
+    const group = makeGroup('G', [a, b], { effects: fx({ stroke: [{ ...DEFAULTS.stroke(), size: 2 }] }) });
+    const doc = docOf([group]);
+    // Outside each child: stroke; in the gap between them, beyond the stroke's reach: nothing.
+    expect(pixel(doc, 21, 15)).toEqual([0, 0, 0, 255]);
+    expect(pixel(doc, 29, 15)).toEqual([0, 0, 0, 255]);
+    expect(pixel(doc, 25, 15)[3]).toBe(0);
+    expect(pixel(doc, 15, 15)).toEqual([40, 90, 220, 255]);
   });
 });

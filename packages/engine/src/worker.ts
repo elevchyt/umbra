@@ -363,6 +363,40 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         }
         break;
       }
+      case 'requestStyles':
+        if (engine) post({ t: 'styles', list: engine.styleSummaries() });
+        break;
+      case 'applyStyle':
+        if (engine?.applyStyle(msg.id)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'newStyle':
+        if (engine?.newStyle(msg.name, msg.effects)) post({ t: 'styles', list: engine.styleSummaries() });
+        break;
+      case 'deleteStyle':
+        if (engine?.deleteStyle(msg.id)) post({ t: 'styles', list: engine.styleSummaries() });
+        break;
+      case 'renameStyle':
+        if (engine?.renameStyle(msg.id, msg.name)) post({ t: 'styles', list: engine.styleSummaries() });
+        break;
+      case 'loadAsl': {
+        if (!engine) break;
+        try {
+          const r = engine.loadAsl(msg.bytes);
+          post({ t: 'styles', list: engine.styleSummaries() });
+          post({ t: 'patterns', list: engine.patternSummaries() });
+          if (r.lost.length) post({ t: 'error', message: `${msg.name}: ${r.lost.map((l) => `${l.style} — ${l.features.join(', ')}`).join('; ')}` });
+        } catch (err) {
+          post({ t: 'error', message: `Could not load ${msg.name}: ${(err as Error).message}` });
+        }
+        break;
+      }
+      case 'exportAsl': {
+        if (!engine) break;
+        const bytes = engine.exportAsl(msg.ids);
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
+        break;
+      }
       case 'requestPatterns':
         if (engine) post({ t: 'patterns', list: engine.patternSummaries() });
         break;

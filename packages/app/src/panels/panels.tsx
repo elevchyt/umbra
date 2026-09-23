@@ -6,6 +6,7 @@ import { FillEditor, PatternPicker, patternThumb } from '../adjust/fill';
 import { gradientCss } from '../adjust/editors';
 import { STYLE_ITEMS, type StyleKey } from '../fx/LayerStyleDialog';
 import { MENUS } from '../menus/menus';
+import { StylesPanel } from '../fx/StylesPanel';
 import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
@@ -54,6 +55,8 @@ export function renderPanel(id: string): JSX.Element {
       return <Placeholder name="Brushes" milestone="M3" what="brush presets and .abr import" />;
     case 'histogram':
       return <HistogramPanel />;
+    case 'styles':
+      return <StylesPanel />;
     case 'patterns':
       return <PatternsPanel />;
     default:
@@ -336,7 +339,7 @@ function LayersPanel() {
           </button>
           <Show when={fxMenu()}>
             <div class="fx-menu" onMouseLeave={() => setFxMenu(false)}>
-              <For each={STYLE_ITEMS.filter((i) => i.key !== 'bevelContour' && i.key !== 'bevelTexture')}>
+              <For each={STYLE_ITEMS.filter((i) => i.key !== 'bevelContour' && i.key !== 'bevelTexture' && i.key !== 'styles')}>
                 {(item) => (
                   <div
                     class="fx-menu-item"

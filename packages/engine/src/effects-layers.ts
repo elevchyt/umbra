@@ -19,6 +19,7 @@ import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import { planeFromBitmap } from './psd-open.js';
 import { bitmapFromPlane, tightBounds } from './psd-save.js';
+import { rasterize } from './commands/layers.js';
 
 export interface EffectsContext {
   width: number;
@@ -46,15 +47,15 @@ export class EffectsCache {
   get(layer: Layer, ctx: EffectsContext): { below: EffectLayer[]; above: EffectLayer[] } | null {
     const fx = layer.effects;
     if (!hasVisibleEffects(fx)) return null;
-    if (layer.kind === 'adjustment' || layer.kind === 'group') return null;
-    const plane = layer.kind === 'fill' ? null : layer.plane.base;
+    if (layer.kind === 'adjustment') return null;
+    const plane = layer.kind === 'fill' ? null : layer.kind === 'group' ? this.groupPlane(layer, ctx) : layer.plane.base;
     const mask = layer.mask?.plane.base ?? null;
     const maskOn = !!layer.mask?.enabled;
     const light = JSON.stringify(ctx.globalLight ?? DEFAULT_GLOBAL_LIGHT);
     const size = `${ctx.width}x${ctx.height}`;
     const hit = this.entries.get(layer.id);
     if (hit && hit.plane === plane && hit.mask === mask && hit.maskOn === maskOn && hit.effects === fx && hit.light === light && hit.size === size) return hit;
-    const made = generate(layer, fx, ctx);
+    const made = generate(layer, fx, ctx, plane);
     const entry: Entry = { plane, mask, maskOn, effects: fx, light, size, ...made };
     this.entries.set(layer.id, entry);
     return entry;
@@ -62,16 +63,30 @@ export class EffectsCache {
   clear(): void {
     this.entries.clear();
   }
+
+  /**
+   * A group's shape is its children composited: rendered on the CPU, and only again when the
+   * children change (the tree is immutable, so their array's identity says so).
+   */
+  private groups = new Map<number, { children: readonly Layer[]; size: string; plane: Plane }>();
+  private groupPlane(g: Extract<Layer, { kind: 'group' }>, ctx: EffectsContext): Plane {
+    const size = `${ctx.width}x${ctx.height}`;
+    const hit = this.groups.get(g.id);
+    if (hit && hit.children === g.children && hit.size === size) return hit.plane;
+    const plane = rasterize(g.children.filter((c) => c.visible), { x0: 0, y0: 0, x1: ctx.width, y1: ctx.height }, ctx.globalLight);
+    this.groups.set(g.id, { children: g.children, size, plane });
+    return plane;
+  }
 }
 
 /** The layer's coverage over `rect`, after its mask: the shape effects are drawn from. */
-function shapeOf(layer: Layer, rect: Rect): Float32Array {
+function shapeOf(layer: Layer, rect: Rect, plane: Plane | null): Float32Array {
   const w = rect.x1 - rect.x0;
   const h = rect.y1 - rect.y0;
   const s = new Float32Array(w * h);
   if (layer.kind === 'fill') s.fill(1);
-  else if (layer.kind === 'pixel' || layer.kind === 'smart') {
-    const px = bitmapFromPlane(layer.plane.base, rect).data;
+  else if (plane) {
+    const px = bitmapFromPlane(plane, rect).data;
     for (let i = 0; i < s.length; i++) s[i] = px[i * 4 + 3]! / 255;
   }
   const m = layer.mask;
@@ -82,16 +97,16 @@ function shapeOf(layer: Layer, rect: Rect): Float32Array {
   return s;
 }
 
-function generate(layer: Layer, fx: LayerEffects, ctx: EffectsContext): { below: EffectLayer[]; above: EffectLayer[] } {
+function generate(layer: Layer, fx: LayerEffects, ctx: EffectsContext, plane: Plane | null): { below: EffectLayer[]; above: EffectLayer[] } {
   const canvas: Rect = { x0: 0, y0: 0, x1: ctx.width, y1: ctx.height };
-  const content = layer.kind === 'pixel' || layer.kind === 'smart' ? tightBounds(layer.plane.base) : canvas;
+  const content = plane ? tightBounds(plane) : canvas;
   if (rectIsEmpty(content)) return { below: [], above: [] };
   const reach = effectsReach(fx);
   const rect = rectIntersect({ x0: content.x0 - reach, y0: content.y0 - reach, x1: content.x1 + reach, y1: content.y1 + reach }, canvas);
   if (rectIsEmpty(rect)) return { below: [], above: [] };
   const w = rect.x1 - rect.x0;
   const h = rect.y1 - rect.y0;
-  const shape = shapeOf(layer, rect);
+  const shape = shapeOf(layer, rect, plane);
   const rendered = renderEffects(fx, {
     shape,
     width: w,

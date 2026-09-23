@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -147,6 +147,8 @@ export interface Histogram {
 }
 /** The pattern library as the engine last reported it (thumbnails only; pixels stay there). */
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
+/** The Styles panel's library, as the engine last sent it. */
+const [styles, setStyles] = createSignal<StylePreset[]>([]);
 /**
  * An armed dialog eyedropper: the next canvas click samples and calls `onPick` instead of
  * reaching the tool. `id` lets the dialog show which of its droppers is armed.
@@ -342,6 +344,8 @@ export const store = {
   setHistogram,
   patterns,
   setPatterns,
+  styles,
+  setStyles,
   luts,
   setLuts,
   pickRequest,

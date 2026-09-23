@@ -6,7 +6,8 @@
  * What the codec does not carry, and so does not round-trip: Outer/Inner Glow gradients and
  * the Precise technique on Outer Glow, Bevel's Contour and Texture sub-effects (their switches
  * survive, not their settings), shape-burst stroke gradients, noise gradients, and the shallow
- * vs deep distinction of knockout (ag-psd has one flag). Opening reports each.
+ * vs deep distinction of knockout (ag-psd has one flag), and contour corner points (they come
+ * back smooth). Opening reports what it can see.
  */
 import type { LayerEffectsInfo, Layer as AgLayer } from 'ag-psd';
 import { PSD_BLEND_MODE } from '@umbra/psd';

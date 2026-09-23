@@ -1116,3 +1116,18 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .fx-row-effect.off .smart-filter-name { color: var(--text-disabled); text-decoration: line-through; }
 .fx-menu-tall { max-height: 420px; overflow-y: auto; }
 .fx-menu-sep { height: 1px; margin: 4px 0; background: var(--border-dark); }
+.styles-panel { display: flex; flex-direction: column; gap: 6px; padding: 6px; height: 100%; }
+.styles-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 4px; overflow-y: auto; }
+.style-cell { padding: 1px; border: 2px solid transparent; background: none; cursor: pointer; }
+.style-cell.selected { border-color: var(--accent); }
+.style-cell .fx-tile { border: none; display: block; }
+.styles-name { flex: 1; min-width: 0; background: var(--panel-sunken); border: 1px solid var(--border-dark); color: var(--text); padding: 2px 4px; }
+.styles-panel .panel-footer { gap: 4px; margin-top: auto; }
+.fx-styles { grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); }
+.fx-contour-row { position: relative; }
+.fx-contour-editor { position: absolute; z-index: 30; left: 80px; top: 32px; background: var(--panel-raised); border: 1px solid var(--border-dark); box-shadow: 0 4px 14px rgb(0 0 0 / 0.4); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.fx-contour-editor svg { background: var(--panel-sunken); border: 1px solid var(--border-dark); cursor: crosshair; }
+.fx-contour-diag { stroke: var(--border-light); stroke-dasharray: 3 3; fill: none; }
+.fx-contour-curve { stroke: var(--text); stroke-width: 1.5; fill: none; }
+.fx-contour-point { fill: var(--panel); stroke: var(--text); cursor: move; }
+.fx-contour-point.corner { fill: var(--accent); }

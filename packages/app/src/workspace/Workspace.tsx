@@ -142,6 +142,7 @@ export function Workspace() {
         },
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
+        onStyles: store.setStyles,
         onFilterBox: (m) => window.dispatchEvent(new CustomEvent('umbra:filter-box', { detail: m })),
         onProbe: (m) => {
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraProbe = m;
