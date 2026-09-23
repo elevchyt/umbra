@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -149,6 +149,9 @@ export interface Histogram {
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
 /** The vector tools' options bar: Auto Add/Delete, Curve Fit, the path operation. */
 const [vectorOptions, setVectorOptions] = createSignal<{ autoAddDelete: boolean; curveFit: number; op: 'add' | 'subtract' | 'intersect' | 'exclude' }>({ autoAddDelete: true, curveFit: 2, op: 'add' });
+/** The brush library as the engine last sent it, and the preset last chosen. */
+const [brushLibrary, setBrushLibrary] = createSignal<{ groups: BrushGroup[]; tips: Record<string, TipBitmap> } | null>(null);
+const [brushPresetId, setBrushPresetId] = createSignal<string | null>(null);
 /** The type tools' options bar: the font, size and anti-aliasing new type starts with. */
 const [typeOptions, setTypeOptions] = createSignal<{ font: string; family: string; fontStyle: string; size: number; antiAlias: AntiAlias; align: 'left' | 'center' | 'right' }>({
   font: 'NotoSans-Regular',
@@ -292,7 +295,8 @@ export type DialogId =
   | 'definePattern'
   | 'defineShape'
   | 'warpText'
-  | 'resolveFonts';
+  | 'resolveFonts'
+  | 'defineBrush';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {
@@ -372,6 +376,10 @@ export const store = {
   setShapeOptions,
   typeOptions,
   setTypeOptions,
+  brushLibrary,
+  setBrushLibrary,
+  brushPresetId,
+  setBrushPresetId,
   fonts,
   setFonts,
   customShapes,

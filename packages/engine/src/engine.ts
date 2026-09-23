@@ -146,7 +146,12 @@ import {
   type Dab,
   type StrokeState,
   type TipBitmap,
+  builtinBrushes,
+  builtinTips,
+  type BrushGroup,
+  type BrushPreset,
 } from '@umbra/kernels/brush';
+import { readAbrFile, writeAbrFile } from './abr.js';
 import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
@@ -185,6 +190,13 @@ export interface PathCommand {
   brush?: BrushParams;
   simulatePressure?: boolean;
 }
+export type BrushLibraryOp =
+  | { op: 'newPreset'; name: string; params: BrushPreset['params']; group?: string }
+  | { op: 'rename'; id: string; name: string }
+  | { op: 'delete'; id: string }
+  | { op: 'newGroup'; name: string }
+  | { op: 'deleteGroup'; name: string }
+  | { op: 'renameGroup'; name: string; to: string };
 export type TypeCommand = 'rasterize' | 'toShape' | 'workPath' | 'horizontal' | 'vertical' | 'toParagraph' | 'toPoint' | `aa:${'none' | 'sharp' | 'crisp' | 'strong' | 'smooth'}`;
 export type VectorMaskCommand = 'revealAll' | 'hideAll' | 'currentPath' | 'delete' | 'toggle' | 'rasterize' | 'rasterizeShape';
 export type StyleCommand = 'copy' | 'paste' | 'clear' | 'hideAll' | 'scale' | 'createLayers' | 'rasterize';
@@ -233,8 +245,8 @@ export class Engine {
   brush: BrushParams = { ...DEFAULT_BRUSH };
   paintMode: PaintMode = 'normal';
   private strokeColor: [number, number, number] = [0, 0, 0];
-  /** Sampled brush tips (from ABR files and Define Brush Preset), by id. */
-  readonly brushTips = new Map<string, TipBitmap>();
+  /** Sampled brush tips (built in, from ABR files, from Define Brush Preset), by id. */
+  readonly brushTips = builtinTips();
   /** The stroke's shader settings and the same for the CPU reference (Quick Mask, retouch). */
   private dabStyle: DabStyle = {};
   private coverageCtx: CoverageContext = {};
@@ -3023,6 +3035,154 @@ export class Engine {
     return true;
   }
 
+  // ---- the brush library (Brushes panel, .abr) -------------------------------------------
+
+  /** Brush preset groups, as the Brushes panel shows them: the built-ins, then imports. */
+  brushGroups: BrushGroup[] = builtinBrushes();
+  private tipThumbs = new Map<string, TipBitmap>();
+
+  /** Tips shrunk to fit 48 px, for the panel's previews (sent once, cached). */
+  private tipThumb(id: string): TipBitmap | null {
+    const hit = this.tipThumbs.get(id);
+    if (hit) return hit;
+    const t = this.brushTips.get(id);
+    if (!t) return null;
+    const k = Math.min(1, 48 / Math.max(t.width, t.height));
+    const w = Math.max(1, Math.round(t.width * k));
+    const h = Math.max(1, Math.round(t.height * k));
+    const data = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        // Area average over the source cells.
+        const x0 = Math.floor((x * t.width) / w);
+        const x1 = Math.max(x0 + 1, Math.floor(((x + 1) * t.width) / w));
+        const y0 = Math.floor((y * t.height) / h);
+        const y1 = Math.max(y0 + 1, Math.floor(((y + 1) * t.height) / h));
+        let sum = 0;
+        for (let j = y0; j < y1; j++) for (let i = x0; i < x1; i++) sum += t.data[j * t.width + i]!;
+        data[y * w + x] = Math.round(sum / ((x1 - x0) * (y1 - y0)));
+      }
+    }
+    const thumb = { width: w, height: h, data };
+    this.tipThumbs.set(id, thumb);
+    return thumb;
+  }
+
+  /** The library for the panel: groups, and a small bitmap of every sampled tip they use. */
+  brushLibrary(): { groups: BrushGroup[]; tips: Record<string, TipBitmap> } {
+    const tips: Record<string, TipBitmap> = {};
+    for (const g of this.brushGroups) {
+      for (const p of g.presets) {
+        for (const tip of [p.params.tip, p.params.dual?.tip]) {
+          if (tip?.kind === 'sampled' && !tips[tip.id]) {
+            const t = this.tipThumb(tip.id);
+            if (t) tips[tip.id] = t;
+          }
+        }
+      }
+    }
+    return { groups: this.brushGroups, tips };
+  }
+
+  /** Load Brushes…: an .abr file becomes a group named after it. Returns what could not be read. */
+  importAbr(bytes: Uint8Array, fileName: string): { added: number; lost: string[] } {
+    const name = fileName.replace(/\.abr$/i, '');
+    const abr = readAbrFile(bytes, name);
+    for (const [id, t] of abr.tips) this.brushTips.set(id, t);
+    for (const p of abr.patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
+    let group = name;
+    for (let n = 2; this.brushGroups.some((g) => g.name === group); n++) group = `${name} ${n}`;
+    this.brushGroups = [...this.brushGroups, { name: group, presets: abr.presets }];
+    return { added: abr.presets.length, lost: abr.lost };
+  }
+
+  /** Export Selected Brushes…: presets (by id, or a whole group) with their tips and textures. */
+  exportAbr(opts: { group?: string; ids?: readonly string[] }): Uint8Array {
+    const all = this.brushGroups.flatMap((g) => g.presets.map((p) => ({ p, g: g.name })));
+    const chosen = all.filter(({ p, g }) => (opts.ids?.length ? opts.ids.includes(p.id) : opts.group ? g === opts.group : true)).map(({ p }) => p);
+    return writeAbrFile(chosen, this.brushTips, this.patternLibrary);
+  }
+
+  /** New Brush Preset, rename, delete, new group: the panel's edits. */
+  editBrushLibrary(op: BrushLibraryOp): boolean {
+    const groups = this.brushGroups;
+    switch (op.op) {
+      case 'newPreset': {
+        const group = op.group ?? groups[groups.length - 1]?.name ?? 'Brushes';
+        const preset: BrushPreset = { id: `user:${Date.now().toString(36)}:${Math.floor(Math.random() * 1e6).toString(36)}`, name: op.name, params: op.params };
+        const has = groups.some((g) => g.name === group);
+        this.brushGroups = has ? groups.map((g) => (g.name === group ? { ...g, presets: [...g.presets, preset] } : g)) : [...groups, { name: group, presets: [preset] }];
+        return true;
+      }
+      case 'rename':
+        this.brushGroups = groups.map((g) => ({ ...g, presets: g.presets.map((p) => (p.id === op.id ? { ...p, name: op.name } : p)) }));
+        return true;
+      case 'delete':
+        this.brushGroups = groups.map((g) => ({ ...g, presets: g.presets.filter((p) => p.id !== op.id) }));
+        return true;
+      case 'newGroup': {
+        let name = op.name;
+        for (let n = 2; groups.some((g) => g.name === name); n++) name = `${op.name} ${n}`;
+        this.brushGroups = [...groups, { name, presets: [] }];
+        return true;
+      }
+      case 'deleteGroup':
+        this.brushGroups = groups.filter((g) => g.name !== op.name);
+        return true;
+      case 'renameGroup':
+        this.brushGroups = groups.map((g) => (g.name === op.name ? { ...g, name: op.to } : g));
+        return true;
+    }
+  }
+
+  /**
+   * Edit ▸ Define Brush Preset: the selection's area of the image (or the whole image) as a
+   * sampled tip — darker is more paint, white is none — cropped to its ink.
+   */
+  defineBrush(name: string): BrushPreset | null {
+    const bounds = selectionBoundsOf(this.doc.selection) ?? { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+    const { pixels, width } = this.renderer.renderToBuffer(this.doc, this.caps.maxTextureSize);
+    const w0 = Math.min(5000, bounds.x1 - bounds.x0);
+    const h0 = Math.min(5000, bounds.y1 - bounds.y0);
+    if (w0 < 1 || h0 < 1) return null;
+    const sel = this.doc.selection;
+    const ink = new Uint8Array(w0 * h0);
+    let x0 = w0;
+    let y0 = h0;
+    let x1 = -1;
+    let y1 = -1;
+    for (let y = 0; y < h0; y++) {
+      for (let x = 0; x < w0; x++) {
+        const dx = bounds.x0 + x;
+        const dy = bounds.y0 + y;
+        const o = (dy * width + dx) * 4;
+        const a = pixels[o + 3]! / 255;
+        // Over white, then luminance; the selection's coverage fades it too.
+        const lum = (0.299 * pixels[o]! + 0.587 * pixels[o + 1]! + 0.114 * pixels[o + 2]!) * a + 255 * (1 - a);
+        const cover = sel ? sel.mask[dy * sel.width + dx]! / 255 : 1;
+        const v = Math.round((255 - lum) * cover);
+        ink[y * w0 + x] = v;
+        if (v > 0) {
+          x0 = Math.min(x0, x);
+          y0 = Math.min(y0, y);
+          x1 = Math.max(x1, x);
+          y1 = Math.max(y1, y);
+        }
+      }
+    }
+    if (x1 < 0) return null;
+    const w = x1 - x0 + 1;
+    const h = y1 - y0 + 1;
+    const data = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) data.set(ink.subarray((y + y0) * w0 + x0, (y + y0) * w0 + x0 + w), y * w);
+    const id = `defined:${Date.now().toString(36)}:${Math.floor(Math.random() * 1e6).toString(36)}`;
+    this.brushTips.set(id, { width: w, height: h, data });
+    const preset: BrushPreset = { id, name: name || `Sampled Brush ${w}`, params: { size: Math.max(w, h), spacing: 0.25, hardness: 1, tip: { kind: 'sampled', id } } };
+    this.editBrushLibrary({ op: 'newPreset', name: preset.name, params: preset.params });
+    const last = this.brushGroups[this.brushGroups.length - 1]!;
+    return last.presets[last.presets.length - 1] ?? preset;
+  }
+
   /** Layer ▸ New Adjustment Layer ▸ …, and the Adjustments panel. */
   addAdjustmentLayer(adjustment: Adjustment): boolean {
     const next = AdjustCmd.addAdjustmentLayer(this.doc, adjustment);
@@ -3892,12 +4052,32 @@ export class Engine {
     this.lastDab = null;
   }
 
+  /** A stroke asked for while the last one's samples are still in the ring. */
+  private pendingStroke: [BrushParams, [number, number, number], PaintMode, [number, number, number] | undefined] | null = null;
+
+  /**
+   * Start a stroke from the pointer. The request arrives by message, at once, but the last
+   * stroke's samples (its pointer-up included) are only drained on the frame clock; if that
+   * stroke is still open, the new one waits for its own pointer-down in the ring — otherwise a
+   * quick second stroke during a slow frame would inherit the first one's tail.
+   */
+  requestStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg?: [number, number, number]): void {
+    if (this.painting && !this.quickMask) this.pendingStroke = [params, color, mode, bg];
+    else this.beginStroke(params, color, mode, bg);
+  }
+
   private processInput(): void {
     const samples = this.ring.drain(this.samples);
     if (samples.length === 0) return;
     let oldest: number | null = null;
 
     for (const s of samples) {
+      if (s.flags & FLAG_DOWN && this.pendingStroke) {
+        if (this.painting) this.endStroke();
+        const [p, c, m, bg] = this.pendingStroke;
+        this.pendingStroke = null;
+        this.beginStroke(p, c, m, bg);
+      }
       if (!this.painting || !this.strokeState) continue;
       if (oldest === null) oldest = s.timeAbs;
 

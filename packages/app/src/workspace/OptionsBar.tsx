@@ -8,6 +8,8 @@ import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DE
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
 import { TypeToolOptions } from '../type/TypePanels';
+import { BrushPicker } from '../brush/BrushesPanel';
+import { ToolPresetPicker } from '../brush/ToolPresets';
 
 /**
  * Options bar — spec 01 §1. Contents are contextual on the active tool, and the leftmost slot
@@ -117,10 +119,7 @@ export function OptionsBar(props: OptionsBarProps) {
 
   return (
     <div class="options-bar">
-      <button type="button" class="tool-preset-picker" title={`${tool()?.name ?? ''} — tool presets`}>
-        <Icon name={tool()?.icon ?? 'brush'} size={18} />
-        <Icon name="chevronDown" size={10} />
-      </button>
+      <ToolPresetPicker icon={tool()?.icon ?? 'brush'} title={`${tool()?.name ?? ''} — tool presets`} />
       <Separator />
 
       <Switch fallback={<UnimplementedNote name={tool()?.name ?? 'Tool'} />}>
@@ -161,16 +160,7 @@ export function OptionsBar(props: OptionsBarProps) {
         </Match>
 
         <Match when={PAINT_OPTION_TOOLS.has(store.activeTool())}>
-          <button type="button" class="brush-preview" title="Brush preset picker">
-            <span
-              class="brush-dot"
-              style={{
-                width: `${Math.min(22, Math.max(3, brush.size / 12))}px`,
-                height: `${Math.min(22, Math.max(3, brush.size / 12))}px`,
-              }}
-            />
-            <Icon name="chevronDown" size={10} />
-          </button>
+          <BrushPicker />
           <NumberField label="Size" value={brush.size} onChange={(v) => store.setBrush('size', v)} min={1} max={5000} suffix="px" width={44} />
           <NumberField label="Hardness" value={Math.round(brush.hardness * 100)} onChange={(v) => store.setBrush('hardness', v / 100)} min={0} max={100} suffix="%" width={38} />
           <Separator />

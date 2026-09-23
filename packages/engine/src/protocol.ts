@@ -10,7 +10,8 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand } from './engine.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp } from './engine.js';
+import type { BrushGroup, BrushPreset, TipBitmap } from '@umbra/kernels/brush';
 import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
 import type { ShapeOptions, ShapeToolId } from './shape-tool.js';
 import type { Path } from '@umbra/kernels/vector/path';
@@ -288,6 +289,12 @@ export type ToEngine =
   | { t: 'typeCommand'; cmd: TypeCommand }
   | { t: 'setTypeWarp'; warp: WarpSpec | null; final: boolean }
   | { t: 'requestFonts' }
+  /** The brush library (answered with `brushes`), .abr import/export and edits. */
+  | { t: 'requestBrushes' }
+  | { t: 'importAbr'; bytes: Uint8Array; name: string }
+  | { t: 'exportAbr'; group?: string; ids?: string[]; name: string }
+  | { t: 'editBrushLibrary'; op: BrushLibraryOp }
+  | { t: 'defineBrush'; name: string }
   /** The Glyphs panel's page of a face's characters (answered with `glyphs`). */
   | { t: 'requestGlyphs'; font: string; from: number; count: number }
   | { t: 'replaceFonts'; map: Record<string, string> }
@@ -419,6 +426,7 @@ export type FromEngine =
   | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }
   | { t: 'fonts'; list: { family: string; styles: { style: string; postscript: string }[] }[]; added?: number }
   | { t: 'typeSelection'; text: string }
+  | { t: 'brushes'; groups: BrushGroup[]; tips: Record<string, TipBitmap>; defined?: BrushPreset; note?: string }
   | { t: 'glyphs'; font: string; from: number; upem: number; total: number; glyphs: { cp: number; d: string; adv: number }[] }
   | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)

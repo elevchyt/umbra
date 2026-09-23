@@ -192,7 +192,7 @@ export const MENUS: MenuDef[] = [
       { label: 'Auto-Blend Layers…', cmd: 'edit.autoBlend' },
       { label: 'Sky Replacement…', cmd: 'edit.skyReplacement' },
       sep,
-      { label: 'Define Brush Preset…', cmd: 'edit.defineBrush' },
+      { label: 'Define Brush Preset…', cmd: 'edit.defineBrush', done: true },
       { label: 'Define Pattern…', cmd: 'edit.definePattern', done: true },
       { label: 'Define Custom Shape…', cmd: 'edit.defineShape', done: true },
       sep,

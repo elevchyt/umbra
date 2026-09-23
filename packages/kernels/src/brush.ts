@@ -620,3 +620,4 @@ export function dabCoverage(dab: Dab, x: number, y: number): number {
   return dab.flow * (1 - t * t * (3 - 2 * t));
 }
 export * from './brush/coverage.js';
+export * from './brush/library.js';

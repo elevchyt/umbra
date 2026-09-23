@@ -27,6 +27,7 @@ import { OptionsBar } from './OptionsBar';
 import { TypeInput } from './TypeInput';
 import { applyChar, currentChar } from '../type/TypePanels';
 import { WarpDialog } from '../type/WarpDialog';
+import { applyBrushPreset } from '../brush/BrushesPanel';
 import { ResolveFontsDialog } from '../type/GlyphsPanel';
 import { Button } from '@umbra/ui/widgets/controls';
 import { DocumentTabs, StatusBar } from './Chrome';
@@ -158,6 +159,14 @@ export function Workspace() {
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
+        onBrushes: (m) => {
+          store.setBrushLibrary({ groups: m.groups, tips: m.tips });
+          if (m.note) store.setStatusMessage(m.note);
+          if (m.defined) {
+            applyBrushPreset(m.defined);
+            store.setActiveTool('brush');
+          }
+        },
         onFonts: (list, added) => {
           store.setFonts(list);
           if (added !== undefined) store.setStatusMessage(added ? `Added ${added} font${added === 1 ? '' : 's'}` : 'No fonts could be read from that file');
@@ -1023,6 +1032,9 @@ export function Workspace() {
       case 'edit.defineShape':
         store.openDialog('defineShape');
         break;
+      case 'edit.defineBrush':
+        store.openDialog('defineBrush');
+        break;
       case 'vmask.revealAll':
         send({ t: 'vectorMaskCommand', cmd: 'revealAll' });
         break;
@@ -1795,6 +1807,19 @@ export function Workspace() {
       </Show>
       <Show when={store.dialog()?.id === 'warpText'}>
         <WarpDialog onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'defineBrush'}>
+        <NameDialog
+          title="Brush Name"
+          label="Name"
+          initial="Sampled Brush"
+          onCancel={store.closeDialog}
+          onApply={(name) => {
+            store.closeDialog();
+            send({ t: 'defineBrush', name });
+            store.openPanel('brushes');
+          }}
+        />
       </Show>
       <Show when={store.dialog()?.id === 'defineShape'}>
         <NameDialog

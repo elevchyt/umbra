@@ -1207,3 +1207,25 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .bs-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bs-dynamic { display: flex; flex-direction: column; gap: 4px; padding-bottom: 4px; border-bottom: 1px solid var(--border-dark); }
 .bs-preview { display: block; margin: 6px auto; border: 1px solid var(--border-dark); background: #ebebeb; }
+
+/* ---- Brushes ----------------------------------------------------------------------------- */
+.brushes-panel { display: flex; flex-direction: column; height: 100%; }
+.brush-list { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.brush-list-top { display: flex; flex-direction: column; gap: 4px; padding: 6px; }
+.brush-list-top .font-menu-search { margin: 0; }
+.brush-groups { overflow-y: auto; flex: 1; }
+.brush-group-head { display: flex; align-items: center; gap: 4px; padding: 3px 6px; cursor: default; font-weight: 600; }
+.brush-group-head:hover { background: var(--row-hover); }
+.brush-row { display: flex; align-items: center; gap: 6px; padding: 2px 6px 2px 20px; cursor: default; }
+.brush-row:hover { background: var(--row-hover); }
+.brush-row.selected { background: var(--row-selected); }
+.brush-size-badge { width: 28px; text-align: right; font-size: 10px; color: var(--text-dim); flex: 0 0 auto; }
+.brush-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brush-thumb { flex: 0 0 auto; }
+.brush-list.compact .brush-name { display: none; }
+.brush-picker-pop { position: fixed; z-index: 500; width: 300px; height: 380px; background: var(--panel); border: 1px solid var(--border-dark); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); display: flex; }
+.tool-presets { display: flex; flex-direction: column; height: 100%; width: 100%; }
+.tool-presets .paths-list { flex: 1; overflow-y: auto; }
+.tool-preset-del { margin-left: auto; opacity: 0.5; }
+.tool-preset-del:hover { opacity: 1; }
+.tool-preset-pop { height: 260px; }

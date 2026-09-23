@@ -330,6 +330,35 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'replaceFonts':
         if (engine?.replaceFonts(msg.map)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'requestBrushes':
+        if (engine) post({ t: 'brushes', ...engine.brushLibrary() });
+        break;
+      case 'importAbr':
+        if (engine) {
+          try {
+            const r = engine.importAbr(msg.bytes, msg.name);
+            post({ t: 'brushes', ...engine.brushLibrary(), note: `Loaded ${r.added} brush${r.added === 1 ? '' : 'es'}${r.lost.length ? ` — ${r.lost.length} partly: ${r.lost.slice(0, 3).join('; ')}` : ''}` });
+          } catch (e) {
+            post({ t: 'brushes', ...engine.brushLibrary(), note: `Could not read ${msg.name}: ${e instanceof Error ? e.message : String(e)}` });
+          }
+        }
+        break;
+      case 'exportAbr': {
+        if (!engine) break;
+        const bytes = engine.exportAbr(msg);
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
+        break;
+      }
+      case 'editBrushLibrary':
+        if (engine?.editBrushLibrary(msg.op)) post({ t: 'brushes', ...engine.brushLibrary() });
+        break;
+      case 'defineBrush':
+        if (engine) {
+          const defined = engine.defineBrush(msg.name);
+          post({ t: 'brushes', ...engine.brushLibrary(), ...(defined ? { defined } : { note: 'Define Brush Preset: nothing to make a brush of (the area is white).' }) });
+        }
+        break;
       case 'requestFonts': {
         const eng = engine;
         void ensureText().then(() => eng && post({ t: 'fonts', list: eng.fontList() }));
@@ -739,7 +768,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'strokeBegin':
-        engine?.beginStroke(msg.brush, msg.color, msg.mode as never, msg.bg);
+        engine?.requestStroke(msg.brush, msg.color, msg.mode as never, msg.bg);
         break;
       case 'strokeEnd':
         engine?.endStroke();

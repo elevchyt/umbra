@@ -9,6 +9,8 @@ import { MENUS } from '../menus/menus';
 import { StylesPanel } from '../fx/StylesPanel';
 import { PathsPanel } from '../paths/PathsPanel';
 import { BrushSettingsPanel } from '../brush/BrushSettings';
+import { BrushesPanel } from '../brush/BrushesPanel';
+import { ToolPresetsPanel } from '../brush/ToolPresets';
 import { pathSvg } from '../workspace/ShapeOptions';
 import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
 import { CharacterStylesPanel, GlyphsPanel, ParagraphStylesPanel } from '../type/GlyphsPanel';
@@ -67,7 +69,9 @@ export function renderPanel(id: string): JSX.Element {
     case 'brushSettings':
       return <BrushSettingsPanel />;
     case 'brushes':
-      return <Placeholder name="Brushes" milestone="M3" what="brush presets and .abr import" />;
+      return <BrushesPanel />;
+    case 'toolPresets':
+      return <ToolPresetsPanel />;
     case 'histogram':
       return <HistogramPanel />;
     case 'styles':
