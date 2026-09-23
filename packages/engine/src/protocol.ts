@@ -13,6 +13,21 @@ export type FillSummary =
   | Exclude<FillContent, { type: 'pattern' }>
   | { type: 'pattern'; patternId: string; patternName: string; scale: number; phase: { x: number; y: number } };
 
+export interface ProbePoint {
+  /** Document pixel. */
+  x: number;
+  y: number;
+  /** RGBA 0…255 of the composite, or null off the canvas. */
+  before: [number, number, number, number] | null;
+  /** The same with the open dialog's preview applied; null when nothing is previewing. */
+  after: [number, number, number, number] | null;
+}
+
+export interface ProbeReply {
+  cursor: ProbePoint | null;
+  samplers: ProbePoint[];
+}
+
 export interface PatternSummary {
   id: string;
   name: string;
@@ -154,6 +169,8 @@ export type ToEngine =
   | { t: 'setFillContent'; id: number; content: FillSummary; final: boolean; amend?: boolean }
   | { t: 'requestPatterns' }
   | { t: 'requestLuts' }
+  /** Info panel readouts: the pointer (screen coordinates) and the colour samplers (document). */
+  | { t: 'probe'; cursor: { x: number; y: number } | null; samplers: { x: number; y: number }[]; tag?: string }
   /** Latest wins: the worker drops superseded previews rather than queueing them. */
   | { t: 'previewSpatial'; adjustment: SpatialAdjustment | null }
   | { t: 'applySpatial'; adjustment: SpatialAdjustment }
@@ -245,6 +262,7 @@ export type FromEngine =
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
+  | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }
   | { t: 'luts'; list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }
   | { t: 'histogram'; source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }

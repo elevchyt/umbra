@@ -243,6 +243,9 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (p) post({ t: 'replaceColorPreview', ...p }, [p.pixels.buffer]);
         break;
       }
+      case 'probe':
+        if (engine) post({ t: 'probe', tag: msg.tag, ...engine.probe(msg.cursor, msg.samplers) });
+        break;
       case 'requestLuts':
         post({ t: 'luts', list: listLuts() });
         break;

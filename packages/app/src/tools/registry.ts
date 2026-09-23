@@ -79,7 +79,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     key: 'i',
     tools: [
       { id: 'eyedropper', name: 'Eyedropper Tool', icon: 'eyedropper', key: 'i', implemented: true, hint: 'Click to sample a foreground colour. Alt-click for background.' },
-      { id: 'colorSampler', name: 'Color Sampler Tool', icon: 'colorSampler', key: 'i' },
+      { id: 'colorSampler', name: 'Color Sampler Tool', icon: 'colorSampler', key: 'i', implemented: true, hint: 'Click to place a colour sampler (up to 10); Alt-click removes one. Readouts are in the Info panel.' },
       { id: 'ruler', name: 'Ruler Tool', icon: 'ruler', key: 'i' },
       { id: 'note', name: 'Note Tool', icon: 'note', key: 'i' },
       { id: 'count', name: 'Count Tool', icon: 'count', key: 'i' },

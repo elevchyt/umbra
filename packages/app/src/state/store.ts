@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary } from '@umbra/engine';
+import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -159,6 +159,11 @@ const [pickRequest, setPickRequest] = createSignal<{ id: string; onPick: (rgb: [
 const [lastAdjustments, setLastAdjustments] = createSignal<Partial<Record<string, Adjustment>>>({});
 /** Auto Color Correction Options, shared by Levels, Curves and Image ▸ Auto *. */
 const [autoOptions, setAutoOptions] = createSignal<AutoOptions>(DEFAULT_AUTO_OPTIONS);
+
+/** Colour samplers placed with the Color Sampler tool, in document pixels (Photoshop allows 10). */
+const [samplers, setSamplers] = createSignal<{ x: number; y: number }[]>([]);
+/** The latest Info panel readouts. */
+const [probe, setProbe] = createSignal<ProbeReply | null>(null);
 
 /** 3-D LUTs registered in the worker, for Color Lookup. */
 const [luts, setLuts] = createSignal<{ id: string; name: string; size: number }[]>([]);
@@ -332,6 +337,10 @@ export const store = {
   setLuts,
   pickRequest,
   setPickRequest,
+  samplers,
+  setSamplers,
+  probe,
+  setProbe,
   lastAdjustments,
   setLastAdjustment: (a: Adjustment) => setLastAdjustments((prev) => ({ ...prev, [a.kind]: a })),
   autoOptions,

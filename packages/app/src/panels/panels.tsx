@@ -4,12 +4,12 @@ import { AdjustmentEditor } from '../adjust/editors';
 import { ADJUSTMENT_ICON, initialAdjustment } from '../adjust/initial';
 import { FillEditor, PatternPicker, patternThumb } from '../adjust/fill';
 import { gradientCss } from '../adjust/editors';
-import { FILL_LABEL, type FillSummary } from '@umbra/engine';
+import { FILL_LABEL, type FillSummary, type ProbePoint } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
-import { hsbToRgb, rgbToCss, rgbToHsb, rgbToHex, hexToRgb, type RGB } from '@umbra/core/color';
+import { hsbToRgb, rgbToCss, rgbToHsb, rgbToHex, hexToRgb, rgbToCmyk, type RGB } from '@umbra/core/color';
 import { store } from '../state/store';
 import { PANEL_META } from './registry';
 
@@ -697,24 +697,69 @@ function NavigatorPanel() {
 
 // ---- Info -----------------------------------------------------------------------------
 
+/**
+ * Info panel — spec 01 §4. RGB and CMYK under the pointer, the colour samplers, and — while a
+ * dialog previews — Photoshop's before/after pairs ("120/135"). Values are the composite's.
+ */
 function InfoPanel() {
   const s = () => store.stats();
   const d = () => store.doc();
+  const p = () => store.probe();
+  const pair = (b: number | undefined, a: number | undefined) => (b === undefined ? '—' : a === undefined || a === b ? `${b}` : `${b}/${a}`);
+  const rgbRows = (pt: ProbePoint | null | undefined) => {
+    const b = pt?.before;
+    const a = pt?.after ?? undefined;
+    return (
+      <>
+        <span class="dim">R</span>
+        <span>{pair(b?.[0], a?.[0])}</span>
+        <span class="dim">G</span>
+        <span>{pair(b?.[1], a?.[1])}</span>
+        <span class="dim">B</span>
+        <span>{pair(b?.[2], a?.[2])}</span>
+      </>
+    );
+  };
+  const cmyk = () => {
+    const b = p()?.cursor?.before;
+    if (!b) return null;
+    const c = rgbToCmyk({ r: b[0] / 255, g: b[1] / 255, b: b[2] / 255 });
+    return `${Math.round(c.c)}  ${Math.round(c.m)}  ${Math.round(c.y)}  ${Math.round(c.k)}`;
+  };
   return (
     <div class="info-panel">
       <div class="info-grid">
-        <span class="dim">W</span>
-        <span>{d()?.width ?? '—'} px</span>
-        <span class="dim">H</span>
-        <span>{d()?.height ?? '—'} px</span>
+        {rgbRows(p()?.cursor)}
+        <span class="dim">CMYK</span>
+        <span class="mono">{cmyk() ?? '—'}</span>
+        <span class="dim">X</span>
+        <span>{p()?.cursor ? `${p()!.cursor!.x} px` : '—'}</span>
+        <span class="dim">Y</span>
+        <span>{p()?.cursor ? `${p()!.cursor!.y} px` : '—'}</span>
+        <span class="dim">Doc</span>
+        <span>{d() ? `${d()!.width} × ${d()!.height} px` : '—'}</span>
         <span class="dim">Zoom</span>
         <span>{s() ? `${(s()!.zoom * 100).toFixed(1)}%` : '—'}</span>
-        <span class="dim">Layers</span>
-        <span>{d()?.layers.length ?? 0}</span>
       </div>
-      <div class="info-note dim">
-        Colour readouts, samplers and before/after values arrive with the adjustment work in M4.
-      </div>
+      <For each={store.samplers()}>
+        {(sm, i) => (
+          <div class="info-sampler">
+            <span class="info-sampler-label">#{i() + 1}</span>
+            <div class="info-grid">{rgbRows(p()?.samplers[i()])}</div>
+            <span class="dim">
+              {sm.x}, {sm.y}
+            </span>
+          </div>
+        )}
+      </For>
+      <Show when={store.samplers().length}>
+        <button type="button" class="link-button" onClick={() => store.setSamplers([])}>
+          Clear samplers
+        </button>
+      </Show>
+      <Show when={p()?.cursor?.after || p()?.samplers.some((x) => x.after)}>
+        <div class="info-note dim">Before / after the adjustment being previewed.</div>
+      </Show>
     </div>
   );
 }
@@ -963,7 +1008,7 @@ function AdjustmentsPanel() {
  */
 function HistogramPanel() {
   const send = (msg: unknown) => store.engine?.(msg);
-  const [channel, setChannel] = createSignal<'colors' | 'lum' | 'r' | 'g' | 'b'>('colors');
+  const [channel, setChannel] = createSignal<'colors' | 'lum' | 'r' | 'g' | 'b' | 'all'>('colors');
   createEffect(
     on(
       () => [store.doc()?.historyIndex, store.doc()?.history.length, store.doc()?.name] as const,
@@ -992,7 +1037,7 @@ function HistogramPanel() {
   const stats = createMemo(() => {
     const hist = h();
     if (!hist) return null;
-    const c = channel() === 'colors' || channel() === 'lum' ? hist.lum : hist[channel() as 'r' | 'g' | 'b'];
+    const c = channel() === 'colors' || channel() === 'lum' || channel() === 'all' ? hist.lum : hist[channel() as 'r' | 'g' | 'b'];
     let n = 0;
     let sum = 0;
     for (let i = 0; i < 256; i++) {
@@ -1028,19 +1073,36 @@ function HistogramPanel() {
           { value: 'r', label: 'Red' },
           { value: 'g', label: 'Green' },
           { value: 'b', label: 'Blue' },
+          { value: 'all', label: 'All Channels View', separatorBefore: true },
         ]}
         onChange={setChannel}
       />
       <Show when={h()} fallback={<div class="dim pad">No document</div>}>
         {(hist) => (
           <>
+            <Show when={channel() === 'all'}>
+              <For each={[['r', 'Red'], ['g', 'Green'], ['b', 'Blue']] as const}>
+                {([k, label]) => (
+                  <>
+                    <div class="dim">{label}</div>
+                    <svg class="histogram-graph small" viewBox="0 0 256 100" preserveAspectRatio="none">
+                      <path class={`histogram-fill ch-${k}`} d={path(hist()[k], scale([hist()[k]]))} />
+                    </svg>
+                  </>
+                )}
+              </For>
+              <div class="dim">Luminosity</div>
+            </Show>
             <svg class="histogram-graph" viewBox="0 0 256 100" preserveAspectRatio="none">
               <Show
                 when={channel() === 'colors'}
                 fallback={
                   <path
-                    class={`histogram-fill ch-${channel()}`}
-                    d={path(channel() === 'lum' ? hist().lum : hist()[channel() as 'r' | 'g' | 'b'], scale([channel() === 'lum' ? hist().lum : hist()[channel() as 'r' | 'g' | 'b']]))}
+                    class={`histogram-fill ch-${channel() === 'all' ? 'lum' : channel()}`}
+                    d={(() => {
+                      const c = channel() === 'lum' || channel() === 'all' ? hist().lum : hist()[channel() as 'r' | 'g' | 'b'];
+                      return path(c, scale([c]));
+                    })()}
                   />
                 }
               >

@@ -14,7 +14,7 @@ import { AdjustmentEditor } from './editors';
  *
  * The preview is not a pixel pass: the engine draws the adjustment as a temporary clipped
  * adjustment layer over the target, so a slider drag costs one GPU pass per frame whatever
- * the document size. Updates are coalesced to one per animation frame. OK runs the kernel
+ * the document size. Updates are coalesced to one per 16 ms. OK runs the kernel
  * over the pixels once.
  */
 export function AdjustmentDialog(props: {
@@ -28,10 +28,10 @@ export function AdjustmentDialog(props: {
   let pending = 0;
   const push = () => {
     if (pending) return;
-    pending = requestAnimationFrame(() => {
+    pending = window.setTimeout(() => {
       pending = 0;
       props.send({ t: 'previewAdjustment', adjustment: preview() ? value() : null });
-    });
+    }, 16);
   };
 
   onMount(() => {
@@ -39,7 +39,7 @@ export function AdjustmentDialog(props: {
     push();
   });
   onCleanup(() => {
-    if (pending) cancelAnimationFrame(pending);
+    if (pending) clearTimeout(pending);
   });
 
   const change = (next: Adjustment) => {
@@ -48,7 +48,7 @@ export function AdjustmentDialog(props: {
   };
 
   const close = () => {
-    if (pending) cancelAnimationFrame(pending);
+    if (pending) clearTimeout(pending);
     pending = 0;
     props.send({ t: 'previewAdjustment', adjustment: null });
     props.onClose();
@@ -59,7 +59,7 @@ export function AdjustmentDialog(props: {
       title={ADJUSTMENT_LABEL[props.initial.kind]}
       width={props.initial.kind === 'curves' ? 330 : 320}
       onOk={() => {
-        if (pending) cancelAnimationFrame(pending);
+        if (pending) clearTimeout(pending);
         pending = 0;
         props.send({ t: 'applyAdjustment', adjustment: value() });
         store.setLastAdjustment(value());

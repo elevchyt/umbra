@@ -22,6 +22,7 @@ export interface EngineClientEvents {
   onDoc?: (doc: DocSummary) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
+  onProbe?: (msg: { tag?: string } & import('@umbra/engine').ProbeReply) => void;
   onLuts?: (msg: { list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }) => void;
   onReplaceColorPreview?: (p: { pixels: Uint8Array; width: number; height: number }) => void;
   onPatterns?: (list: import('@umbra/engine').PatternSummary[]) => void;
@@ -121,6 +122,9 @@ export class EngineClient {
       case 'thumbnail':
         this.events.onThumbnail?.(msg);
         break;
+      case 'probe':
+        this.events.onProbe?.(msg);
+        break;
       case 'luts':
         this.events.onLuts?.(msg);
         break;
@@ -158,6 +162,16 @@ export class EngineClient {
     this.worker.postMessage(msg, transfer ?? []);
   }
 
+  /** Readouts are not frame work: they run on their own timer, which a hidden page does not stall. */
+  private probeTimer = setInterval(() => {
+    const now = performance.now();
+    if (this.probing && (this.probeDirty ? now - this.probeAt > 30 : now - this.probeAt > 250)) {
+      this.probeDirty = false;
+      this.probeAt = now;
+      this.send({ t: 'probe', cursor: this.probeCursor, samplers: this.samplers });
+    }
+  }, 40);
+
   private loop = (): void => {
     this.send({ t: 'tick' });
     this.rafHandle = requestAnimationFrame(this.loop);
@@ -179,6 +193,18 @@ export class EngineClient {
   pickHandler: ((rgb: [number, number, number]) => void) | null = null;
   /** A dialog is open: the canvas only answers an armed eyedropper, never the active tool. */
   modal = false;
+  /**
+   * The Info panel is showing, or there are colour samplers: keep the readouts fresh. The
+   * pointer's position is sent as it moves, and everything is re-sent a few times a second
+   * so edits and dialog previews show up without the pointer moving.
+   */
+  probing = false;
+  samplers: { x: number; y: number }[] = [];
+  /** The Color Sampler tool: a click places a sampler, Alt-click removes the nearest. */
+  samplerTool = false;
+  private probeCursor: { x: number; y: number } | null = null;
+  private probeDirty = false;
+  private probeAt = 0;
   /** True while the Crop tool is selected. */
   cropTool = false;
   private cropFrom: { x: number; y: number } | null = null;
@@ -262,6 +288,10 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      if (this.samplerTool && !this.pickHandler && !this.modal && e.button === 0) {
+        this.send({ t: 'probe', cursor: toLocal(e), samplers: this.samplers, tag: e.altKey ? 'removeSampler' : 'placeSampler' });
+        return;
+      }
       if (this.modal && !this.pickHandler) return;
       if (this.pickHandler && e.button === 0) {
         const p = toLocal(e);
@@ -340,6 +370,14 @@ export class EngineClient {
 
     // pointerrawupdate delivers samples at full tablet rate, ahead of pointermove.
     const moveEvent = 'onpointerrawupdate' in canvas ? 'pointerrawupdate' : 'pointermove';
+    canvas.addEventListener('pointermove', (e) => {
+      this.probeCursor = toLocal(e);
+      this.probeDirty = true;
+    });
+    canvas.addEventListener('pointerleave', () => {
+      this.probeCursor = null;
+      this.probeDirty = true;
+    });
     canvas.addEventListener(moveEvent, ((e: PointerEvent) => {
       if (this.cropFrom) {
         const p = toLocal(e);
@@ -440,6 +478,7 @@ export class EngineClient {
 
   dispose(): void {
     cancelAnimationFrame(this.rafHandle);
+    clearInterval(this.probeTimer);
     this.worker.terminate();
   }
 }

@@ -1030,3 +1030,11 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .replace-mask { display: block; max-width: 100%; border: 1px solid var(--border-dark); image-rendering: pixelated; }
 .auto-options { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border-dark); background: var(--panel-sunken); }
 .curves-graph.pencil { cursor: crosshair; }
+.info-sampler { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; border-top: 1px solid var(--border-dark); }
+.info-sampler-label { color: var(--text); font-weight: 600; }
+.link-button { background: none; border: none; color: var(--accent); cursor: pointer; padding: 4px 8px; text-align: left; }
+.doc-area { position: relative; }
+.sampler-marker { position: absolute; width: 0; height: 0; pointer-events: none; }
+.sampler-marker::before { content: ''; position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; }
+.sampler-marker span { position: absolute; left: 8px; top: 2px; font-size: 10px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.histogram-graph.small { height: 48px; }

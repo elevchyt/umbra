@@ -27,6 +27,8 @@ import {
   docRect,
   emptyDoc,
   makePixelLayer,
+  makeAdjustmentLayer,
+  insertLayer,
   panelRows,
   totalTiles,
   updateLayer,
@@ -71,7 +73,7 @@ import { colorStats, replaceColorMask, SPATIAL_LABEL, type SpatialAdjustment } f
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
-import type { FillSummary, PatternSummary } from './protocol.js';
+import type { FillSummary, PatternSummary, ProbeReply } from './protocol.js';
 import {
   IDENTITY,
   about,
@@ -992,6 +994,54 @@ export class Engine {
       }
     }
     return { pixels, width: w, height: h };
+  }
+
+  // ---- Info panel probes ------------------------------------------------------------------
+
+  /** The composite WITH the open dialog's preview, for the Info panel's "after" numbers. */
+  private afterPixels: { key: unknown; px: { pixels: Uint8Array; width: number; height: number } } | null = null;
+
+  private previewPixels(): { pixels: Uint8Array; width: number; height: number } | null {
+    const key = this.previewDoc ?? this.adjustPreview;
+    if (!key) return null;
+    if (this.afterPixels?.key === key) return this.afterPixels.px;
+    let doc: Doc;
+    if (this.previewDoc) doc = this.previewDoc;
+    else {
+      // The GPU preview as a real (clipped, masked) adjustment layer, so the offscreen render
+      // takes the same path the frame does.
+      const p = this.adjustPreview!;
+      const layer = makeAdjustmentLayer('<preview>', p.adjustment, {
+        clipped: true,
+        mask: p.mask ? { plane: p.mask, enabled: true, linked: true, density: 1, feather: 0, defaultColor: 0 } : undefined,
+      });
+      doc = { ...this.doc, layers: insertLayer(this.doc.layers, layer, p.layerId) };
+    }
+    const px = this.renderer.renderToBuffer(doc, this.caps.maxTextureSize);
+    this.afterPixels = { key, px };
+    return px;
+  }
+
+  /**
+   * Colour readouts for the Info panel: under the pointer (screen coordinates, if given) and
+   * at each colour sampler (document coordinates). "after" is present only while a dialog is
+   * previewing, which is when Photoshop shows before/after pairs.
+   */
+  probe(cursor: { x: number; y: number } | null, samplers: readonly { x: number; y: number }[]): ProbeReply {
+    const before = this.documentPixels();
+    const after = this.previewPixels();
+    const read = (px: { pixels: Uint8Array; width: number; height: number } | null, x: number, y: number): [number, number, number, number] | null => {
+      if (!px || x < 0 || y < 0 || x >= px.width || y >= px.height) return null;
+      const o = (y * px.width + x) * 4;
+      return [px.pixels[o]!, px.pixels[o + 1]!, px.pixels[o + 2]!, px.pixels[o + 3]!];
+    };
+    const at = (x: number, y: number) => ({ x, y, before: read(before, x, y), after: after ? read(after, x, y) : null });
+    let c = null;
+    if (cursor) {
+      const p = docPointAtScreen(this.view, cursor.x, cursor.y);
+      c = at(Math.floor(p.x), Math.floor(p.y));
+    }
+    return { cursor: c, samplers: samplers.map((s) => at(Math.floor(s.x), Math.floor(s.y))) };
   }
 
   // ---- fill layers and patterns ---------------------------------------------------------

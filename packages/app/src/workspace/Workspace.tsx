@@ -1,10 +1,10 @@
-import { Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { produce } from 'solid-js/store';
 import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -116,6 +116,24 @@ export function Workspace() {
         onThumbnail: store.setThumbnail,
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
+        onProbe: (m) => {
+          if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraProbe = m;
+          store.setProbe({ cursor: m.cursor, samplers: m.tag ? store.probe()?.samplers ?? [] : m.samplers });
+          const at = m.cursor;
+          if (!at || !m.tag) return;
+          const list = store.samplers();
+          if (m.tag === 'placeSampler') {
+            if (list.length >= 10) flash('Photoshop allows 10 colour samplers; this one was not placed.');
+            else if (at.before) store.setSamplers([...list, { x: at.x, y: at.y }]);
+          } else if (list.length) {
+            // Alt-click removes the nearest sampler.
+            let best = 0;
+            list.forEach((s, i) => {
+              if (Math.hypot(s.x - at.x, s.y - at.y) < Math.hypot(list[best]!.x - at.x, list[best]!.y - at.y)) best = i;
+            });
+            store.setSamplers(list.filter((_, i) => i !== best));
+          }
+        },
         onReplaceColorPreview: (p) => window.dispatchEvent(new CustomEvent('umbra:replace-color-preview', { detail: p })),
         onLuts: (m) => {
           store.setLuts(m.list);
@@ -192,9 +210,15 @@ export function Workspace() {
     const req = store.pickRequest();
     const ready = store.engineReady();
     const modal = !!store.dialog();
+    const samplers = store.samplers();
+    const probing = store.isPanelOpen('info') || samplers.length > 0;
+    const samplerTool = store.activeTool() === 'colorSampler';
     if (!client || !ready) return;
     client.pickHandler = req ? (rgb) => req.onPick(rgb) : null;
     client.modal = modal;
+    client.samplers = samplers;
+    client.probing = probing;
+    client.samplerTool = samplerTool;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -1111,6 +1135,7 @@ export function Workspace() {
           />
           <div class="doc-area" ref={docAreaRef} classList={{ 'with-rulers': store.extras.rulers }}>
             <canvas ref={canvasRef} class={cursorClass(store.activeTool())} />
+            <SamplerMarkers />
             <Show when={store.extras.rulers}>
               <div class="ruler ruler-h" />
               <div class="ruler ruler-v" />
@@ -1375,4 +1400,42 @@ function cursorClass(toolId: string): string {
   if (toolId === 'move') return 'cursor-move';
   if (TOOL_BY_ID.get(toolId)?.icon.startsWith('marquee')) return 'cursor-cross';
   return 'cursor-default';
+}
+
+/**
+ * Colour sampler markers over the canvas: numbered targets at their document positions, kept
+ * in place through pan, zoom and rotation by mapping through the view the engine reports.
+ */
+function SamplerMarkers() {
+  const view = (): ViewState | null => {
+    const s = store.stats();
+    if (!s) return null;
+    return {
+      zoom: s.zoom,
+      rotation: s.viewRotation,
+      centre: { x: s.centreX, y: s.centreY },
+      width: s.viewWidth,
+      height: s.viewHeight,
+      devicePixelRatio: 1,
+    };
+  };
+  return (
+    <For each={store.samplers()}>
+      {(sm, i) => {
+        const at = () => {
+          const v = view();
+          return v ? screenPointAtDoc(v, sm.x + 0.5, sm.y + 0.5) : null;
+        };
+        return (
+          <Show when={at()}>
+            {(p) => (
+              <div class="sampler-marker" style={{ left: `${p().x}px`, top: `${p().y}px` }}>
+                <span>{i() + 1}</span>
+              </div>
+            )}
+          </Show>
+        );
+      }}
+    </For>
+  );
 }

@@ -185,25 +185,25 @@ export function FillLayerDialog(props: { initial: FillSummary; send: (msg: unkno
   let pending = 0;
   const push = () => {
     if (pending || id() === null) return;
-    pending = requestAnimationFrame(() => {
+    pending = window.setTimeout(() => {
       pending = 0;
       props.send({ t: 'setFillContent', id: id(), content: value(), final: false });
-    });
+    }, 16);
   };
-  onCleanup(() => pending && cancelAnimationFrame(pending));
+  onCleanup(() => pending && clearTimeout(pending));
 
   return (
     <Dialog
       title={FILL_LABEL[props.initial.type]}
       width={330}
       onOk={() => {
-        if (pending) cancelAnimationFrame(pending);
+        if (pending) clearTimeout(pending);
         pending = 0;
         if (id() !== null) props.send({ t: 'setFillContent', id: id(), content: value(), final: true, amend: true });
         props.onClose();
       }}
       onCancel={() => {
-        if (pending) cancelAnimationFrame(pending);
+        if (pending) clearTimeout(pending);
         pending = 0;
         if (id() !== null) props.send({ t: 'undo' });
         props.onClose();
