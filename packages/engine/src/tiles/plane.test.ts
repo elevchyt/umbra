@@ -248,3 +248,28 @@ describe('copy-on-write aliasing', () => {
     expect(base.tileAt(1, 1).data[4]).toBe(100);
   });
 });
+
+describe('mip pyramid of a white-default mask', () => {
+  it('keeps the default at every level, so unstored areas stay revealed when zoomed out', () => {
+    // A reveal-all mask with one painted tile far from the origin — what painting a stroke
+    // into an adjustment layer's mask produces.
+    const MASK = { layout: 'A', sample: 'u8' } as const;
+    const w = Plane.empty(MASK, [255]).writer();
+    const t = w.mutable(5, 3);
+    t.fill(0);
+    const mip = new MipPlane(w.commit());
+    for (let level = 1; level <= 4; level++) {
+      const p = mip.level(level);
+      expect(p.defaultTile.data[0], `level ${level} default`).toBe(255);
+      // Every stored tile at this level is white except where the painted tile landed.
+      for (const { tx, ty } of p.tileCells()) {
+        if (!p.hasTile(tx, ty)) continue;
+        const tile = p.tileAt(tx, ty);
+        const min = tile.uniform ? tile.data[0]! : Math.min(...tile.data);
+        const max = tile.uniform ? tile.data[0]! : Math.max(...tile.data);
+        expect(max, `level ${level} tile ${tx},${ty}`).toBe(255);
+        if (!(tx === 5 >> level && ty === 3 >> level)) expect(min, `level ${level} tile ${tx},${ty}`).toBe(255);
+      }
+    }
+  });
+});

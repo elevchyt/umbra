@@ -73,7 +73,12 @@ const MIP_CACHE_LIMIT = 4096;
 export function downsample(src: Plane): Plane {
   const fmt = src.format;
   const n = channelCount(fmt.layout);
-  const out = Plane.empty(fmt, fmt.layout === 'A' ? undefined : undefined).writer();
+  // Each level keeps its source's DEFAULT. A mask stored against white ("reveal the rest")
+  // has to downsample to white where nothing is stored; defaulting every level to the
+  // format's zero made the next level down read those areas as black, hiding everything
+  // near a painted tile once the view zoomed out.
+  const def = src.defaultTile;
+  const out = (def.isTransparent() ? Plane.empty(fmt) : Plane.empty(fmt, Array.from(def.data.subarray(0, n)))).writer();
   const half = TILE_SIZE >> 1;
 
   // Each destination tile gathers the 2×2 source tiles beneath it.

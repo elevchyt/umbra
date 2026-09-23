@@ -1038,3 +1038,5 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .sampler-marker::before { content: ''; position: absolute; left: -6px; top: -6px; width: 12px; height: 12px; border: 1px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1px #000; }
 .sampler-marker span { position: absolute; left: 8px; top: 2px; font-size: 10px; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
 .histogram-graph.small { height: 48px; }
+/* The edit target — pixels or mask — is framed, as Photoshop frames the targeted thumbnail. */
+.layer-thumb.targeted, .layer-mask-thumb.targeted { outline: 1px solid var(--text); outline-offset: 1px; }

@@ -68,6 +68,8 @@ export interface DocSummary {
   /** Flattened for display: top-most first, groups above their children. */
   layers: LayerSummary[];
   activeLayerIds: number[];
+  /** The active layer when its MASK is the edit target (always so for adjustment/fill layers). */
+  maskTarget: number | null;
   hasSelection: boolean;
   channels: { id: number; name: string; visible: boolean; indicates: 'masked' | 'selected' }[];
   /** The History panel's rows, oldest first; `historyIndex` is the one in effect. */
@@ -161,6 +163,7 @@ export type ToEngine =
   | { t: 'setCentre'; x: number; y: number }
   | { t: 'setLayerLocks'; id: number; locks: Partial<{ transparency: boolean; pixels: boolean; position: boolean; all: boolean }> }
   | { t: 'maskCommand'; command: string; id?: number }
+  | { t: 'setMaskTarget'; id: number; mask: boolean }
   | { t: 'previewAdjustment'; adjustment: Adjustment | null }
   | { t: 'applyAdjustment'; adjustment: Adjustment }
   | { t: 'autoAdjust'; mode: 'tone' | 'contrast' | 'color' | 'equalize' }

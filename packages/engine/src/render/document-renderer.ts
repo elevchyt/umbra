@@ -187,6 +187,17 @@ export class DocumentRenderer {
   }
 
   /**
+   * A live stroke into a layer MASK. The stroke buffer holds the paint's grey with its
+   * coverage as alpha, so drawing it premultiplied with "over" blending into the mask target
+   * computes m + (grey − m)·α in the red channel — the committed result, previewed.
+   */
+  private maskStrokeOverlay: { plane: MipPlane; layerId: number; opacity: number } | null = null;
+
+  setMaskStrokeOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number } | null): void {
+    this.maskStrokeOverlay = overlay;
+  }
+
+  /**
    * An Image ▸ Adjustments dialog's live preview: the adjustment as a CLIPPED adjustment layer
    * directly above its target, masked by the selection. Clipped, it sees only the target's
    * pixels and is shaped by the target's alpha, which is exactly what applying it to those
@@ -276,6 +287,7 @@ export class DocumentRenderer {
 
     const erase = this.eraseOverlay?.layerId === layer.id ? this.eraseOverlay : null;
     const maskPlane = layer.mask && layer.mask.enabled ? layer.mask.plane : null;
+    const maskStroke = maskPlane && this.maskStrokeOverlay?.layerId === layer.id ? this.maskStrokeOverlay : null;
 
     if (maskPlane || erase) {
       // A mask's unstored area takes its DEFAULT, and Photoshop writes masks cropped to their
@@ -285,6 +297,13 @@ export class DocumentRenderer {
       out.maskStartsOpaque = maskPlane ? layer.mask!.defaultColor === 1 : !!erase;
       out.drawMask = (_t: RenderTarget) => {
         if (maskPlane) this.tiles.draw(maskPlane, view, clip, true, 1, false, live);
+        if (maskStroke) {
+          const gl = this.gl;
+          gl.enable(gl.BLEND);
+          gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          this.tiles.draw(maskStroke.plane, view, clip, false, maskStroke.opacity, true, live);
+          gl.disable(gl.BLEND);
+        }
         if (erase) {
           const gl = this.gl;
           gl.enable(gl.BLEND);

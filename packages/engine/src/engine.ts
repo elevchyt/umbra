@@ -69,6 +69,7 @@ import * as ChannelCmd from './commands/channels.js';
 import * as MaskCmd from './commands/masks.js';
 import * as AdjustCmd from './commands/adjust.js';
 import * as SpatialCmd from './commands/spatial.js';
+import * as MaskPaint from './commands/mask-paint.js';
 import { colorStats, replaceColorMask, SPATIAL_LABEL, type SpatialAdjustment } from '@umbra/kernels/spatial';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
@@ -1505,6 +1506,25 @@ export class Engine {
   }): void {
     const a = docPointAtScreen(this.view, opts.from.x, opts.from.y);
     const b = docPointAtScreen(this.view, opts.to.x, opts.to.y);
+    const target = this.paintTarget();
+    if (target?.mask) {
+      const next = MaskPaint.gradientMask(this.doc, target.id, {
+        gradient: opts.gradient,
+        style: opts.style,
+        x0: a.x,
+        y0: a.y,
+        x1: b.x,
+        y1: b.y,
+        reverse: opts.reverse,
+        dither: opts.dither,
+        mode: 'normal',
+        opacity: opts.opacity,
+        preserveTransparency: false,
+      });
+      if (next !== this.doc) this.commit(next, 'Gradient');
+      return;
+    }
+    if (target === null && this.maskOnlyActive()) return;
     this.commit(
       FillCmd.drawGradient(this.doc, {
         gradient: opts.gradient,
@@ -1756,6 +1776,14 @@ export class Engine {
    * document.
    */
   fill(opts: FillCmd.FillOptions): void {
+    const target = this.paintTarget();
+    if (target?.mask) {
+      // Fill with Transparent (and Delete) on a mask reveals, as the background colour would.
+      const next = MaskPaint.fillMask(this.doc, target.id, opts.clear ? [1, 1, 1] : opts.color, opts.opacity);
+      if (next !== this.doc) this.commit(next, opts.clear ? 'Clear' : 'Fill');
+      return;
+    }
+    if (target === null && this.maskOnlyActive()) return;
     let doc = this.doc;
     if (!doc.layers.some((l) => l.kind === 'pixel')) {
       const layer = makePixelLayer('Layer 1', Plane.empty(RGBA8));
@@ -1793,6 +1821,21 @@ export class Engine {
       return;
     }
 
+    const paint = this.paintTarget();
+    if (paint?.mask) {
+      // Masks hold grey: the brush paints its colour's luminance, the eraser white (revealing,
+      // as Photoshop's eraser paints the default white background colour into a mask).
+      const g = mode === 'clear' ? 1 : MaskPaint.lumOf(color);
+      this.strokeParams = { size: params.size, hardness: params.hardness, color: [g, g, g, 1] };
+      this.strokeIntoMask = true;
+      this.strokeLayerId = paint.id;
+      this.strokeWriter = Plane.empty(RGBA8).writer();
+      this.painting = true;
+      return;
+    }
+    this.strokeIntoMask = false;
+    if (paint === null && this.maskOnlyActive()) return;
+
     let target = this.activePixelLayer();
     if (!target) {
       const layer = makePixelLayer('Layer 1', Plane.empty(RGBA8));
@@ -1805,12 +1848,45 @@ export class Engine {
     this.painting = true;
   }
 
+  // ---- mask targeting ---------------------------------------------------------------------
+
+  /**
+   * The layer whose MASK is the edit target — Photoshop's "clicked the mask thumbnail". An
+   * adjustment or fill layer's mask is always the target: they have nothing else to paint.
+   */
+  private maskTarget: number | null = null;
+  private strokeIntoMask = false;
+
+  setMaskTarget(id: number, mask: boolean): boolean {
+    const layer = findLayer(this.doc.layers, id);
+    const next = mask && layer?.mask ? id : null;
+    if (next === this.maskTarget) return false;
+    this.maskTarget = next;
+    return true;
+  }
+
+  /** What painting acts on: the active layer's pixels or its mask; null when neither. */
+  private paintTarget(): { id: number; mask: boolean } | null {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (!layer) return null;
+    if (layer.kind === 'adjustment' || layer.kind === 'fill') return layer.mask ? { id: layer.id, mask: true } : null;
+    if (this.maskTarget === layer.id && layer.mask) return { id: layer.id, mask: true };
+    return layer.kind === 'pixel' ? { id: layer.id, mask: false } : null;
+  }
+
+  /** The active layer exists and has no paintable pixels — a group, or a maskless adjustment. */
+  private maskOnlyActive(): boolean {
+    const id = this.doc.activeLayerIds[0];
+    return id !== undefined && !!findLayer(this.doc.layers, id);
+  }
+
   private activePixelLayer(): PixelLayer | null {
     const id = this.doc.activeLayerIds[0];
     const found = id === undefined ? undefined : findLayer(this.doc.layers, id);
     if (found && found.kind === 'pixel') return found;
-    // A group or adjustment layer is active: Photoshop refuses rather than painting somewhere
-    // else. (Painting an adjustment layer's MASK needs mask targeting, which is not built.)
+    // A group, adjustment or fill layer is active: Photoshop refuses rather than painting
+    // somewhere else. (Their masks are painted through `paintTarget`.)
     if (found) return null;
     // Fall back to the topmost pixel layer at the root.
     for (let i = this.doc.layers.length - 1; i >= 0; i--) {
@@ -1845,9 +1921,12 @@ export class Engine {
     const strokePlane = this.strokeWriter.commit();
     const id = this.strokeLayerId;
     this.commit(
-      FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
+      this.strokeIntoMask
+        ? MaskPaint.compositeStrokeIntoMask(this.doc, id, strokePlane, this.brush.opacity)
+        : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
       this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
+    this.strokeIntoMask = false;
     this.strokeWriter = null;
     this.strokeState = null;
     this.strokeLayerId = null;
@@ -2005,8 +2084,14 @@ export class Engine {
     this.atlas.beginFrame();
     // The live stroke is drawn from the base level only: it is small, and a mip built from the
     // stroke buffer would be a frame behind the dabs the GPU is still laying down.
+    const live = this.strokeWriter && this.strokeLayerId !== null;
+    this.renderer.setMaskStrokeOverlay(
+      live && this.strokeIntoMask
+        ? { plane: new MipPlane(this.strokeWriter!.preview(), 0), layerId: this.strokeLayerId!, opacity: this.brush.opacity }
+        : null,
+    );
     this.renderer.setEraseOverlay(
-      this.strokeWriter && this.strokeLayerId !== null && this.paintMode === 'clear'
+      this.strokeWriter && this.strokeLayerId !== null && !this.strokeIntoMask && this.paintMode === 'clear'
         ? {
             plane: new MipPlane(this.strokeWriter.preview(), 0),
             layerId: this.strokeLayerId,
@@ -2015,7 +2100,7 @@ export class Engine {
         : null,
     );
     this.renderer.setStrokeOverlay(
-      this.strokeWriter && this.strokeLayerId !== null && this.paintMode !== 'clear'
+      this.strokeWriter && this.strokeLayerId !== null && !this.strokeIntoMask && this.paintMode !== 'clear'
         ? {
             plane: new MipPlane(this.strokeWriter.preview(), 0),
             layerId: this.strokeLayerId,
@@ -2101,6 +2186,7 @@ export class Engine {
       width: this.doc.width,
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
+      maskTarget: this.paintTarget()?.mask ? this.doc.activeLayerIds[0] ?? null : null,
       hasSelection: !!this.doc.selection,
       history: this.history.list().map((h) => ({
         name: h.name,

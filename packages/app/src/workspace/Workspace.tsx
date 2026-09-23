@@ -113,7 +113,11 @@ export function Workspace() {
         onParity: (pass, text) => reportToShell(pass, text),
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
         onTransform: setTransforming,
-        onThumbnail: store.setThumbnail,
+        onThumbnail: (t) => {
+          // Dev aid: the rendered thumbnail itself, independent of the Navigator's drawing.
+          if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraThumb = t;
+          store.setThumbnail(t);
+        },
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onProbe: (m) => {
@@ -157,6 +161,8 @@ export function Workspace() {
       });
       client.paintMode = PAINT_TOOLS.has(store.activeTool());
       store.setEngine(() => (m: unknown) => client!.send(m as never));
+      // Dev aid: drive the engine from the console or an automation script.
+      if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraSend = (m: unknown) => client!.send(m as never);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       return;

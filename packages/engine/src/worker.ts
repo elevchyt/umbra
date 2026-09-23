@@ -276,6 +276,9 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         post({ t: 'histogram', source: msg.source, ...h }, [h.r.buffer, h.g.buffer, h.b.buffer, h.lum.buffer]);
         break;
       }
+      case 'setMaskTarget':
+        if (engine?.setMaskTarget(msg.id, msg.mask)) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'maskCommand':
         if (engine?.maskCommand(msg.command, msg.id)) post({ t: 'doc', doc: engine.summary() });
         break;

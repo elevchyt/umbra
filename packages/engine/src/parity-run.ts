@@ -1,5 +1,6 @@
 /** Runs the parity matrix and formats a report, mirroring the M0 spike runner's output. */
 import { ParityRunner, parityCases, type ParityResult } from './parity.js';
+import { runDocumentParity } from './parity-docs.js';
 import type { GpuCaps } from './gpu/caps.js';
 
 export function runParity(gl: WebGL2RenderingContext, caps: GpuCaps): {
@@ -14,6 +15,17 @@ export function runParity(gl: WebGL2RenderingContext, caps: GpuCaps): {
   } finally {
     runner.dispose();
   }
+  results.push(...runDocumentParity(gl, caps));
+  // A rejected GL call only warns in the console, and the mask-upload bug of M4 hid behind
+  // exactly that for two milestones. Any error left pending fails the run.
+  const glError = gl.getError();
+  results.push({
+    name: glError === gl.NO_ERROR ? 'no WebGL errors raised' : `WebGL error 0x${glError.toString(16)} raised during the run`,
+    pass: glError === gl.NO_ERROR,
+    maxDelta: 0,
+    meanDelta: 0,
+    worstAt: null,
+  });
 
   const failed = results.filter((r) => !r.pass);
   const worst = results.reduce((a, b) => (b.maxDelta > a.maxDelta ? b : a), results[0]!);

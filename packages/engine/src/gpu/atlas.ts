@@ -209,12 +209,30 @@ export class TileAtlas {
     };
   }
 
+  /** Scratch for widening single-channel (mask) tiles to RGBA on upload. */
+  private widened: Uint8Array | null = null;
+
   private upload(slot: number, tile: Tile): void {
     const gl = this.gl;
     const { page, x, y } = TileAtlas.locate(slot);
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.texture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    const data = tile.uniform ? tile.expand() : tile.data;
+    let data = tile.uniform ? tile.expand() : tile.data;
+    // The atlas is RGBA8. A mask tile holds one byte per pixel, and uploading it as RGBA
+    // made WebGL reject the call (the buffer is a quarter of the size) and left the slot
+    // holding whatever was there before — every stored mask tile drew as garbage. Widen it:
+    // coverage in all three colour channels, which is what the mask draw reads (`.r`).
+    if (data.length === TILE_SIZE * TILE_SIZE) {
+      const wide = (this.widened ??= new Uint8Array(TILE_SIZE * TILE_SIZE * 4));
+      for (let i = 0, o = 0; i < data.length; i++, o += 4) {
+        const v = data[i]!;
+        wide[o] = v;
+        wide[o + 1] = v;
+        wide[o + 2] = v;
+        wide[o + 3] = 255;
+      }
+      data = wide;
+    }
     gl.texSubImage3D(
       gl.TEXTURE_2D_ARRAY,
       0,

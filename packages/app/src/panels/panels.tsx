@@ -192,8 +192,17 @@ function LayersPanel() {
 
                 <div
                   class="layer-thumb"
-                  classList={{ group: l.kind === 'group', adjustment: l.kind === 'adjustment', fill: l.kind === 'fill' }}
+                  classList={{
+                    group: l.kind === 'group',
+                    adjustment: l.kind === 'adjustment',
+                    fill: l.kind === 'fill',
+                    targeted: active().includes(l.id) && l.kind === 'pixel' && store.doc()?.maskTarget !== l.id,
+                  }}
                   aria-hidden="true"
+                  onClick={() => {
+                    // Clicking the layer thumbnail makes the pixels the edit target again.
+                    if (l.hasMask && l.kind === 'pixel') store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
+                  }}
                   onDblClick={() => {
                     // Photoshop opens an adjustment layer's settings from its thumbnail.
                     if (l.kind === 'adjustment' || l.kind === 'fill') store.openPanel('properties');
@@ -213,12 +222,20 @@ function LayersPanel() {
                 <Show when={l.hasMask}>
                   <div
                     class="layer-mask-thumb"
-                    classList={{ disabled: !l.maskEnabled }}
-                    title={l.maskEnabled ? 'Layer mask (Shift-click to disable)' : 'Layer mask — disabled (Shift-click to enable)'}
+                    classList={{ disabled: !l.maskEnabled, targeted: store.doc()?.maskTarget === l.id }}
+                    title={
+                      l.maskEnabled
+                        ? 'Layer mask — click to paint into it, Shift-click to disable'
+                        : 'Layer mask — disabled (Shift-click to enable)'
+                    }
                     onClick={(e) => {
-                      if (!e.shiftKey) return;
-                      e.stopPropagation();
-                      store.engine?.({ t: 'maskCommand', command: 'toggle', id: l.id });
+                      if (e.shiftKey) {
+                        e.stopPropagation();
+                        store.engine?.({ t: 'maskCommand', command: 'toggle', id: l.id });
+                        return;
+                      }
+                      // Select the layer (the row's own handler) and make its mask the target.
+                      store.engine?.({ t: 'setMaskTarget', id: l.id, mask: true });
                     }}
                   />
                 </Show>
