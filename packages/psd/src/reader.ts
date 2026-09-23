@@ -61,6 +61,10 @@ export interface PsdLayerInfo {
   vectorFill?: unknown;
   /** Smart objects: ag-psd's `placedLayer` (transform, contents id, smart filters). */
   placed?: unknown;
+  /** ag-psd's `effects` (the layer style), for the engine to map. */
+  effects?: unknown;
+  /** The Blending Options fields of the layer record (Fill aside), as ag-psd reads them. */
+  blending?: Record<string, unknown>;
 }
 
 export interface PsdDocInfo {
@@ -94,7 +98,6 @@ function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   // A vector fill WITHOUT a vector mask is a fill layer, which the engine models; with one it
   // is a shape layer, which it does not yet.
   if (layer.vectorMask) out.push(layer.vectorFill ? 'shape layer' : 'vector mask');
-  if (layer.effects) out.push('layer effects');
   // Smart objects are modelled; only what they cannot carry is reported, by the engine.
   return out.length ? out : undefined;
 }
@@ -160,6 +163,14 @@ export function readPsdDocument(
       if (layer.adjustment) info.adjustment = layer.adjustment;
       if (layer.vectorFill && !layer.vectorMask) info.vectorFill = layer.vectorFill;
       if (layer.placedLayer) info.placed = layer.placedLayer;
+      if (layer.effects) info.effects = layer.effects;
+      info.blending = {
+        channelBlendingRestrictions: layer.channelBlendingRestrictions,
+        blendingRanges: layer.blendingRanges,
+        knockout: layer.knockout,
+        blendClippendElements: layer.blendClippendElements,
+        transparencyShapesLayer: layer.transparencyShapesLayer,
+      };
 
       if (layer.children) {
         info.children = convert(layer.children);

@@ -185,23 +185,28 @@ function compositeOne(layer: CompositeLayer, backdrop: Composited, ctx: Ctx): Co
 
   // Fill scales coverage for ordinary modes, but is folded into the colour for the special 8.
   const fillAsCoverage = special ? 1 : layer.fill;
-  let alpha = shapeAlpha(layer, ctx.x, ctx.y, s.alpha) * fillAsCoverage * layer.opacity;
-  if (alpha <= 0) return backdrop;
+  const shape = shapeAlpha(layer, ctx.x, ctx.y, s.alpha);
+  // Knockout (spec 06 §7): inside the layer's shape at Fill 100 % (scaled by opacity, not by
+  // fill), the backdrop is replaced by the group's entry or the document's bottom; then the
+  // content blends onto that at its fill. Fill 0 % therefore punches a clean hole.
+  const knocked = layer.blending.knockout === 'none' ? backdrop : lerpComposited(backdrop, knockoutBackdrop(layer, backdrop, ctx), shape * layer.opacity);
+  let alpha = shape * fillAsCoverage * layer.opacity;
+  if (alpha <= 0) return knocked === backdrop ? backdrop : applyChannelMask(knocked, backdrop, layer.blending.channels);
 
   let color: Rgb = special ? applySpecialFill(layer.blendMode, s.color, layer.fill) : s.color;
 
   if (layer.blending.blendIf.length > 0) {
     alpha *= blendIfWeight(layer.blending.blendIf, s.color, backdrop.color);
-    if (alpha <= 0) return backdrop;
+    if (alpha <= 0) return knocked === backdrop ? backdrop : applyChannelMask(knocked, backdrop, layer.blending.channels);
   }
 
   if (layer.blendMode === 'dissolve') {
     // Coverage becomes binary rather than partial.
     alpha = alpha > dissolveNoise(ctx.x, ctx.y, layer.seed ?? 0) ? 1 : 0;
-    if (alpha <= 0) return backdrop;
+    if (alpha <= 0) return knocked === backdrop ? backdrop : applyChannelMask(knocked, backdrop, layer.blending.channels);
   }
 
-  const base = knockoutBackdrop(layer, backdrop, ctx);
+  const base = knocked;
 
   let result: Composited;
   if (layer.blendMode === 'hardMix' && layer.fill < 1) {

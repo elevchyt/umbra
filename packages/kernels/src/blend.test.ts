@@ -323,6 +323,23 @@ describe('layer tree compositing', () => {
     };
   }
 
+  it('knockout at Fill 0 punches through to the group entry; deep to the bottom; opacity scales it', () => {
+    const middle = solidLayer(grey(0.8), 1);
+    const punch = (knockout: 'shallow' | 'deep', opacity = 1) => solidLayer(grey(0.5), 1, { fill: 0, opacity, blending: { ...DEFAULT_BLENDING, knockout } });
+    // In an isolated group the hole reaches the group's own transparency, so the background
+    // beneath the group shows; in a pass-through group the entry IS that background.
+    const shallow = compositeDocument([opaqueBase, group([middle, punch('shallow')], { blendMode: 'normal' })], 0, 0);
+    expect(shallow.color[0]).toBeCloseTo(0.25, 6);
+    const passThrough = compositeDocument([opaqueBase, group([middle, punch('shallow')])], 0, 0);
+    expect(passThrough.color[0]).toBeCloseTo(0.25, 6);
+    // Deep goes to the document's bottom: transparency.
+    const deep = compositeDocument([opaqueBase, middle, punch('deep')], 0, 0);
+    expect(deep.alpha).toBeCloseTo(0, 6);
+    // Half opacity knocks out half way.
+    const half = compositeDocument([opaqueBase, group([middle, punch('shallow', 0.5)])], 0, 0);
+    expect(half.color[0]).toBeCloseTo((0.8 + 0.25) / 2, 6);
+  });
+
   it('stacks layers bottom-first', () => {
     const r = compositeDocument([opaqueBase, solidLayer(grey(0.8), 1)], 0, 0);
     expect(r.color[0]).toBeCloseTo(0.8, 9);

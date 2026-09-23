@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  ag-psd@31.0.2: 12f40e107f828dbe0933acd338ebb219e97caea328ac2c11d5366fa149cc2d01
+
 importers:
 
   .:
@@ -64,7 +67,7 @@ importers:
     devDependencies:
       ag-psd:
         specifier: ^31.0.2
-        version: 31.0.2
+        version: 31.0.2(patch_hash=12f40e107f828dbe0933acd338ebb219e97caea328ac2c11d5366fa149cc2d01)
 
   packages/kernels:
     dependencies:
@@ -79,7 +82,7 @@ importers:
         version: link:../core
       ag-psd:
         specifier: ^31.0.2
-        version: 31.0.2
+        version: 31.0.2(patch_hash=12f40e107f828dbe0933acd338ebb219e97caea328ac2c11d5366fa149cc2d01)
 
   packages/shell-electron:
     devDependencies:
@@ -2556,7 +2559,7 @@ snapshots:
 
   abbrev@4.0.0: {}
 
-  ag-psd@31.0.2:
+  ag-psd@31.0.2(patch_hash=12f40e107f828dbe0933acd338ebb219e97caea328ac2c11d5366fa149cc2d01):
     dependencies:
       base64-js: 1.5.1
       pako: 2.1.0

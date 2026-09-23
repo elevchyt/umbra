@@ -1,0 +1,39 @@
+diff --git a/dist/additionalInfo.js b/dist/additionalInfo.js
+index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc64393d31feb0 100644
+--- a/dist/additionalInfo.js
++++ b/dist/additionalInfo.js
+@@ -3461,7 +3461,7 @@ addHandler('iOpa', hasKey('fillOpacity'), (reader, target) => {
+ });
+ addHandler('brst', hasKey('channelBlendingRestrictions'), (reader, target, left) => {
+     target.channelBlendingRestrictions = [];
+-    while (left() > 4) {
++    while (left() >= 4) {
+         target.channelBlendingRestrictions.push((0, psdReader_1.readInt32)(reader));
+     }
+ }, (writer, target) => {
+diff --git a/dist-es/additionalInfo.js b/dist-es/additionalInfo.js
+index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc64393d31feb0 100644
+--- a/dist-es/additionalInfo.js
++++ b/dist-es/additionalInfo.js
+@@ -3461,7 +3461,7 @@ addHandler('iOpa', hasKey('fillOpacity'), (reader, target) => {
+ });
+ addHandler('brst', hasKey('channelBlendingRestrictions'), (reader, target, left) => {
+     target.channelBlendingRestrictions = [];
+-    while (left() > 4) {
++    while (left() >= 4) {
+         target.channelBlendingRestrictions.push((0, psdReader_1.readInt32)(reader));
+     }
+ }, (writer, target) => {
+diff --git a/src/additionalInfo.ts b/src/additionalInfo.ts
+index 67599d0b2af3ca2b81c2519fe1c341661b2efc53..20bc1f257a7bc3bc1a010fd6091be343ec6e1566 100644
+--- a/src/additionalInfo.ts
++++ b/src/additionalInfo.ts
+@@ -5420,7 +5420,7 @@ addHandler(
+ 	(reader, target, left) => {
+ 		target.channelBlendingRestrictions = [];
+ 
+-		while (left() > 4) {
++		while (left() >= 4) {
+ 			target.channelBlendingRestrictions.push(readInt32(reader));
+ 		}
+ 	},

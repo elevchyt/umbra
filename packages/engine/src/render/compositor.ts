@@ -80,9 +80,10 @@ uniform float u_seed;
 uniform vec2  u_origin;        // document-space origin of this region, for Dissolve
 uniform vec3  u_channels;      // 1 = this channel may be written
 uniform float u_blendIfCount;
-uniform vec4  u_blendIfThis;
-uniform vec4  u_blendIfUnder;
-uniform float u_blendIfChannel; // 0 = gray, 1 = r, 2 = g, 3 = b
+// Up to four ranges (Gray and each channel), all of which must pass.
+uniform vec4  u_blendIfThis[4];
+uniform vec4  u_blendIfUnder[4];
+uniform float u_blendIfChannel[4]; // 0 = gray, 1 = r, 2 = g, 3 = b
 /** 1.0 when u_source holds premultiplied alpha (the batched fast path). */
 uniform float u_srcPremul;
 
@@ -115,9 +116,10 @@ void main() {
   float alpha = shape * (special ? 1.0 : u_fill) * u_opacity;
   vec3 color = special ? mix(vec3(neutral), src.rgb, u_fill) : src.rgb;
 
-  if (u_blendIfCount > 0.5) {
-    alpha *= rampWeight(channelValue(src.rgb, u_blendIfChannel), u_blendIfThis);
-    alpha *= rampWeight(channelValue(backdrop.rgb, u_blendIfChannel), u_blendIfUnder);
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= u_blendIfCount) break;
+    alpha *= rampWeight(channelValue(src.rgb, u_blendIfChannel[k]), u_blendIfThis[k]);
+    alpha *= rampWeight(channelValue(backdrop.rgb, u_blendIfChannel[k]), u_blendIfUnder[k]);
   }
 
   if (u_mode == M_DISSOLVE) {
@@ -159,9 +161,9 @@ uniform float u_hasMask;
 uniform float u_maskDensity;
 uniform vec3  u_channels;
 uniform float u_blendIfCount;
-uniform vec4  u_blendIfThis;
-uniform vec4  u_blendIfUnder;
-uniform float u_blendIfChannel;
+uniform vec4  u_blendIfThis[4];
+uniform vec4  u_blendIfUnder[4];
+uniform float u_blendIfChannel[4];
 
 ${BLEND_GLSL}
 ${ADJUST_GLSL}
@@ -185,9 +187,10 @@ void main() {
     float coverage = texture(u_mask, v_uv).r;
     alpha *= 1.0 - u_maskDensity * (1.0 - coverage);
   }
-  if (u_blendIfCount > 0.5) {
-    alpha *= rampWeight(channelValue(adjusted, u_blendIfChannel), u_blendIfThis);
-    alpha *= rampWeight(channelValue(backdrop.rgb, u_blendIfChannel), u_blendIfUnder);
+  for (int k = 0; k < 4; k++) {
+    if (float(k) >= u_blendIfCount) break;
+    alpha *= rampWeight(channelValue(adjusted, u_blendIfChannel[k]), u_blendIfThis[k]);
+    alpha *= rampWeight(channelValue(backdrop.rgb, u_blendIfChannel[k]), u_blendIfUnder[k]);
   }
   if (alpha <= 0.0) { fragColor = backdrop; return; }
 
@@ -224,6 +227,31 @@ void main() {
   fragColor = vec4(mix(pa, pb, u_t) / alpha, alpha);
 }`;
 
+/**
+ * Knockout (spec 06 §7): the backdrop cross-faded toward the group-entry (or document-bottom)
+ * backdrop by the layer's shape at Fill 100 % × its mask × its opacity.
+ */
+const KNOCK_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_a;
+uniform sampler2D u_b;
+uniform sampler2D u_src;
+uniform sampler2D u_mask;
+uniform float u_hasMask;
+uniform float u_maskDensity;
+uniform float u_opacity;
+out vec4 fragColor;
+void main() {
+  vec4 a = texture(u_a, v_uv);
+  vec4 b = texture(u_b, v_uv);
+  float t = texture(u_src, v_uv).a * u_opacity;
+  if (u_hasMask > 0.5) t *= 1.0 - u_maskDensity * (1.0 - texture(u_mask, v_uv).r);
+  float alpha = mix(a.a, b.a, t);
+  if (alpha <= 0.0) { fragColor = vec4(0.0); return; }
+  fragColor = vec4(mix(a.rgb * a.a, b.rgb * b.a, t) / alpha, alpha);
+}`;
+
 export interface RenderTarget {
   tex: WebGLTexture;
   fbo: WebGLFramebuffer;
@@ -250,6 +278,8 @@ export interface GpuLayer {
   seed?: number;
   channels?: { r: boolean; g: boolean; b: boolean };
   blendIf?: BlendIfSpec[];
+  /** Knockout: the backdrop inside the layer's shape is the group's entry ('shallow') or the document's bottom ('deep'). */
+  knockout?: 'none' | 'shallow' | 'deep';
   /** Paints this layer's straight-alpha content into the bound target. */
   drawSource?: (target: RenderTarget) => void;
   /** Paints the mask's coverage into the red channel of the bound target. */
@@ -277,6 +307,11 @@ export class LayerCompositor {
   private blendProgram: Program;
   private copyProgram: Program;
   private lerpProgram: Program;
+  private knockProgram: Program;
+  /** Backdrops at the entry of each enclosing layer list, innermost last: shallow knockout's source. */
+  private entries: RenderTarget[] = [];
+  /** The document's bottom (transparency), deep knockout's source. */
+  private bottom: RenderTarget | null = null;
   private quad: WebGLBuffer;
   private vao: WebGLVertexArrayObject;
   private pool: RenderTarget[] = [];
@@ -296,6 +331,7 @@ export class LayerCompositor {
     this.blendProgram = new Program(gl, QUAD_VERT, BLEND_FRAG, 'composite.blend');
     this.copyProgram = new Program(gl, QUAD_VERT, COPY_FRAG, 'composite.copy');
     this.lerpProgram = new Program(gl, QUAD_VERT, LERP_FRAG, 'composite.lerp');
+    this.knockProgram = new Program(gl, QUAD_VERT, KNOCK_FRAG, 'composite.knockout');
 
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
@@ -414,13 +450,7 @@ export class LayerCompositor {
     const ch = layer.channels ?? { r: true, g: true, b: true };
     gl.uniform3f(p.loc('u_channels'), ch.r ? 1 : 0, ch.g ? 1 : 0, ch.b ? 1 : 0);
 
-    const bi = layer.blendIf?.[0];
-    p.u1f('u_blendIfCount', bi ? 1 : 0);
-    if (bi) {
-      p.u4f('u_blendIfThis', ...bi.thisLayer);
-      p.u4f('u_blendIfUnder', ...bi.underlying);
-      p.u1f('u_blendIfChannel', CHANNEL_INDEX[bi.channel]);
-    }
+    this.setBlendIf(p, layer.blendIf);
 
     this.drawQuad();
   }
@@ -553,13 +583,7 @@ export class LayerCompositor {
     p.u1f('u_maskDensity', layer.maskDensity ?? 1);
     const ch = layer.channels ?? { r: true, g: true, b: true };
     gl.uniform3f(p.loc('u_channels'), ch.r ? 1 : 0, ch.g ? 1 : 0, ch.b ? 1 : 0);
-    const bi = layer.blendIf?.[0];
-    p.u1f('u_blendIfCount', bi ? 1 : 0);
-    if (bi) {
-      p.u4f('u_blendIfThis', ...bi.thisLayer);
-      p.u4f('u_blendIfUnder', ...bi.underlying);
-      p.u1f('u_blendIfChannel', CHANNEL_INDEX[bi.channel]);
-    }
+    this.setBlendIf(p, layer.blendIf);
 
     p.u1i('u_adjKind', adj?.kind ?? -1);
     const v = adj?.params ?? new Float32Array(16);
@@ -604,6 +628,15 @@ export class LayerCompositor {
    * `backdrop` is left untouched.
    */
   compositeLayers(layers: readonly GpuLayer[], backdrop: RenderTarget): RenderTarget {
+    this.entries.push(backdrop);
+    try {
+      return this.compositeList(layers, backdrop);
+    } finally {
+      this.entries.pop();
+    }
+  }
+
+  private compositeList(layers: readonly GpuLayer[], backdrop: RenderTarget): RenderTarget {
     let acc = this.acquire();
     this.copyPass(acc, backdrop);
 
@@ -739,10 +772,59 @@ export class LayerCompositor {
     const src = this.renderSource(layer);
     const mask = this.renderMask(layer);
     const dst = this.acquire();
-    this.blendPass(dst, backdrop, src, mask, layer);
+    const ko = layer.knockout && layer.knockout !== 'none' ? (layer.knockout === 'deep' ? this.bottom : this.entries[this.entries.length - 1]) : null;
+    if (ko) {
+      const knocked = this.acquire();
+      this.knockPass(knocked, backdrop, ko, src, mask, layer);
+      this.blendPass(dst, knocked, src, mask, layer);
+      this.release(knocked);
+    } else {
+      this.blendPass(dst, backdrop, src, mask, layer);
+    }
     this.release(src);
     if (mask) this.release(mask);
     return dst;
+  }
+
+  /** Blend If: up to four ranges as uniform arrays. */
+  private setBlendIf(p: Program, ranges: readonly BlendIfSpec[] | undefined): void {
+    const gl = this.gl;
+    const list = (ranges ?? []).slice(0, 4);
+    p.u1f('u_blendIfCount', list.length);
+    if (list.length === 0) return;
+    const thisL = new Float32Array(16);
+    const under = new Float32Array(16);
+    const ch = new Float32Array(4);
+    list.forEach((r, k) => {
+      thisL.set(r.thisLayer, k * 4);
+      under.set(r.underlying, k * 4);
+      ch[k] = CHANNEL_INDEX[r.channel];
+    });
+    gl.uniform4fv(p.loc('u_blendIfThis'), thisL);
+    gl.uniform4fv(p.loc('u_blendIfUnder'), under);
+    gl.uniform1fv(p.loc('u_blendIfChannel'), ch);
+  }
+
+  private knockPass(dst: RenderTarget, backdrop: RenderTarget, entry: RenderTarget, src: RenderTarget, mask: RenderTarget | null, layer: GpuLayer): void {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dst.width, dst.height);
+    gl.disable(gl.BLEND);
+    const p = this.knockProgram;
+    p.use();
+    const bind = (unit: number, t: RenderTarget, name: string) => {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t.tex);
+      p.u1i(name, unit);
+    };
+    bind(0, backdrop, 'u_a');
+    bind(1, entry, 'u_b');
+    bind(2, src, 'u_src');
+    bind(3, mask ?? src, 'u_mask');
+    p.u1f('u_hasMask', mask ? 1 : 0);
+    p.u1f('u_maskDensity', layer.maskDensity ?? 1);
+    p.u1f('u_opacity', layer.opacity);
+    this.drawQuad();
   }
 
   private compositeGroup(group: GpuLayer, backdrop: RenderTarget): RenderTarget {
@@ -886,9 +968,13 @@ void main() { fragColor = vec4(texture(u_color, v_uv).rgb, texture(u_alpha, v_uv
   compositeOnTransparent(layers: readonly GpuLayer[]): RenderTarget {
     const empty = this.acquire();
     this.clear(empty);
-    const result = this.compositeLayers(layers, empty);
-    this.release(empty);
-    return result;
+    this.bottom = empty;
+    try {
+      return this.compositeLayers(layers, empty);
+    } finally {
+      this.bottom = null;
+      this.release(empty);
+    }
   }
 
   /** Composite a document and read the result back as straight-alpha RGBA8. */

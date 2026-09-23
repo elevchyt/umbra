@@ -42,6 +42,8 @@ import {
 import type { Filter as AgFilter } from 'ag-psd';
 import { makeSmartLayer, makeSource, whiteMask } from './smart.js';
 import { fromPsdFilter, isAffineQuad, isIdentityWarp, quadToMatrix } from './psd-smart.js';
+import { blendingFromPsd, effectsFromPsd } from './psd-effects.js';
+import type { LayerEffects } from '@umbra/kernels/effects/types';
 
 const MASK_FORMAT: PlaneFormat = { layout: 'A', sample: 'u8' };
 
@@ -252,7 +254,15 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
       if (filled) features.push(...filled.lost);
       if (features.length) warnings.push({ layer: it.name, features });
 
+      let effects: LayerEffects | undefined;
+      if (it.effects) {
+        const fx = effectsFromPsd(it.effects, patterns);
+        effects = fx.effects;
+        features.push(...fx.lost);
+        if (fx.lost.length && !warnings.some((w) => w.layer === it.name)) warnings.push({ layer: it.name, features });
+      }
       const common = {
+        effects,
         id: nextLayerId(),
         name: it.name,
         visible: it.visible,
@@ -262,7 +272,7 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         clipped: it.clipping,
         locks: NO_LOCKS,
         color: 'none' as const,
-        blending: DEFAULT_BLENDING_STATE,
+        blending: it.blending ? blendingFromPsd(it.blending) : DEFAULT_BLENDING_STATE,
         seed: it.index,
         mask: masks.get(it.index),
       };

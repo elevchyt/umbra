@@ -282,6 +282,7 @@ export class DocumentRenderer {
       seed: layer.seed,
       channels: layer.blending?.channels,
       blendIf: layer.blending?.blendIf as GpuLayer['blendIf'],
+      knockout: layer.blending?.knockout,
       maskDensity: layer.mask?.density ?? 1,
     };
 
@@ -342,6 +343,7 @@ export class DocumentRenderer {
         !out.drawMask &&
         layer.fill >= 1 &&
         (layer.blending?.blendIf?.length ?? 0) === 0 &&
+        (layer.blending?.knockout ?? 'none') === 'none' &&
         (!ch || (ch.r && ch.g && ch.b));
       out.drawBatched = (opacity: number) => {
         this.stats.batchedLayers++;

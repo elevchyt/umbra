@@ -4,3 +4,5 @@ allowBuilds:
   electron-winstaller: false
   esbuild: true
   electron: true
+patchedDependencies:
+  ag-psd@31.0.2: patches/ag-psd@31.0.2.patch

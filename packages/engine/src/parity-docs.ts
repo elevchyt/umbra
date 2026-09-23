@@ -17,7 +17,7 @@ import { TileAtlas } from './gpu/atlas.js';
 import type { GpuCaps } from './gpu/caps.js';
 import { DocumentRenderer } from './render/document-renderer.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
-import { emptyDoc, makePixelLayer, type Doc, type RasterMask } from './document.js';
+import { DEFAULT_BLENDING_STATE, emptyDoc, makeGroup, makePixelLayer, type Doc, type RasterMask } from './document.js';
 import { Plane } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
 import { RGBA8 } from './tiles/import.js';
@@ -133,6 +133,33 @@ function documents(): { name: string; doc: Doc }[] {
             outerGlow: { ...DEFAULTS.outerGlow(), opacity: 0.9, size: 14 },
             colorOverlay: [{ ...DEFAULTS.colorOverlay(), blendMode: 'screen', opacity: 0.7 }],
             innerShadow: [{ ...DEFAULTS.innerShadow(), opacity: 0.9, size: 12, distance: 8 }],
+          },
+        }),
+      ]),
+    },
+    {
+      name: 'doc: shallow knockout at fill 0 inside a group punches to the group entry',
+      doc: one([
+        base(),
+        makeGroup('Group', [makePixelLayer('Middle', colourful(), { blendMode: 'difference' }), makePixelLayer('Punch', shape(), { fill: 0, blending: { ...DEFAULT_BLENDING_STATE, knockout: 'shallow' } })], { blendMode: 'normal' }),
+      ]),
+    },
+    {
+      name: 'doc: deep knockout at 70% opacity reaches the document bottom',
+      doc: one([base(), makePixelLayer('Middle', colourful(), { blendMode: 'multiply' }), makePixelLayer('Punch', shape(), { opacity: 0.7, fill: 0.4, blending: { ...DEFAULT_BLENDING_STATE, knockout: 'deep' } })]),
+    },
+    {
+      name: 'doc: Blend If with gray and green ranges together',
+      doc: one([
+        base(),
+        makePixelLayer('Top', colourful(), {
+          blendMode: 'screen',
+          blending: {
+            ...DEFAULT_BLENDING_STATE,
+            blendIf: [
+              { channel: 'gray', thisLayer: [0.1, 0.3, 0.8, 0.95], underlying: [0, 0, 1, 1] },
+              { channel: 'g', thisLayer: [0, 0, 1, 1], underlying: [0.2, 0.5, 1, 1] },
+            ],
           },
         }),
       ]),

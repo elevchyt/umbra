@@ -22,6 +22,9 @@ import { compositeDocument } from '@umbra/kernels/composite';
 import { rectIsEmpty, type Rect } from '@umbra/core/geom';
 import type { Doc, Layer, SmartSource } from './document.js';
 import { matrixToQuad, toPsdFilter } from './psd-smart.js';
+import { blendingToPsd, effectsToPsd } from './psd-effects.js';
+import { mapEffectPatterns } from '@umbra/kernels/effects/types';
+import { DEFAULT_BLENDING_STATE } from './document.js';
 import type { Plane } from './tiles/plane.js';
 import { tilesInRect } from './tiles/plane.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
@@ -178,6 +181,8 @@ function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
   };
   // ag-psd only writes fillOpacity when it differs from full.
   if (layer.fill < 1) (common as { fillOpacity?: number }).fillOpacity = layer.fill;
+  Object.assign(common, blendingToPsd(layer.blending ?? DEFAULT_BLENDING_STATE));
+  if (layer.effects && layer.kind !== 'adjustment') common.effects = effectsToPsd(layer.effects);
 
   if (layer.mask) {
     const mrect = tightBounds(layer.mask.plane.base);
@@ -284,6 +289,8 @@ export function savePsd(doc: Doc, opts: SavePsdOptions = {}): ArrayBuffer {
   const patterns = new Map<string, PatternDef>();
   for (const { layer } of walkLayers(doc.layers)) {
     if (layer.kind === 'fill' && layer.content.type === 'pattern') patterns.set(layer.content.pattern.id, layer.content.pattern);
+    // Effects name their patterns by id too.
+    if (layer.effects) mapEffectPatterns(layer.effects, (p) => (patterns.set(p.id, p), p));
   }
   if (patterns.size) {
     (psd as { patterns?: unknown[] }).patterns = [...patterns.values()].map((p) => ({
