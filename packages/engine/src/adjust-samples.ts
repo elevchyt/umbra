@@ -64,4 +64,6 @@ export const ADJUSTMENT_SAMPLES: Adjustment[] = [
     colorizeSaturation: 25,
     colorizeLightness: 0,
   },
+  { kind: 'colorLookup', lutId: 'umbra:teal-orange', name: 'Teal & Orange' },
+  { kind: 'colorLookup', lutId: 'umbra:bleach', name: 'Bleach Bypass' },
 ];

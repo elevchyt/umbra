@@ -44,4 +44,5 @@ export const ADJUSTMENT_ICON: Record<Adjustment['kind'], string> = {
   gradientMap: 'adjGradientMap',
   desaturate: 'adjDesaturate',
   selectiveColor: 'adjSelectiveColor',
+  colorLookup: 'adjColorLookup',
 };

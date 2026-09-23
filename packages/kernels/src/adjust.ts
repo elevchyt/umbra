@@ -18,6 +18,7 @@
  */
 import { curveToLut, identityLut, isIdentityLut, levelsLut, type CurvePoint } from './curve.js';
 import { sampleGradient, type Gradient } from './gradient.js';
+import { getLut, sampleLut } from './lut.js';
 
 /**
  * Photoshop's classic luminance weights, used by Grayscale mode, Threshold and Gradient Map.
@@ -171,7 +172,9 @@ export type Adjustment =
   | { kind: 'blackWhite'; reds: number; yellows: number; greens: number; cyans: number; blues: number; magentas: number; tint: [number, number, number] | null }
   | { kind: 'photoFilter'; color: [number, number, number]; density: number; preserveLuminosity: boolean }
   | { kind: 'gradientMap'; gradient: Gradient; reverse: boolean }
-  | { kind: 'selectiveColor'; relative: boolean; ranges: Record<SelectiveRange, CmykShift> };
+  | { kind: 'selectiveColor'; relative: boolean; ranges: Record<SelectiveRange, CmykShift> }
+  /** A 3-D LUT by registry id (`lut.ts`); an id with no table behind it is a no-op. */
+  | { kind: 'colorLookup'; lutId: string; name: string };
 
 /** Photoshop's names, as they appear in menus, layer names and history. */
 export const ADJUSTMENT_LABEL: Record<Adjustment['kind'], string> = {
@@ -191,6 +194,7 @@ export const ADJUSTMENT_LABEL: Record<Adjustment['kind'], string> = {
   photoFilter: 'Photo Filter',
   gradientMap: 'Gradient Map',
   selectiveColor: 'Selective Color',
+  colorLookup: 'Color Lookup',
 };
 
 /** Parameters that leave the image alone, for "is this adjustment doing anything?" checks. */
@@ -250,6 +254,8 @@ export function defaultAdjustment(kind: Adjustment['kind']): Adjustment {
     case 'photoFilter':
       // Warming Filter (85), Photoshop's default, at its default density.
       return { kind, color: [236 / 255, 138 / 255, 0], density: 25, preserveLuminosity: true };
+    case 'colorLookup':
+      return { kind, lutId: 'umbra:identity', name: 'Identity' };
     case 'selectiveColor':
       return {
         kind,
@@ -371,6 +377,11 @@ export function compile(adj: Adjustment): Applier {
       return gradientMap(adj.gradient, adj.reverse);
     case 'selectiveColor':
       return selectiveColor(adj);
+    case 'colorLookup': {
+      const lut = getLut(adj.lutId);
+      if (!lut) return sameLut(identityLut());
+      return { shape: 'pixel', apply: (rgb) => sampleLut(lut, rgb) };
+    }
   }
 }
 

@@ -19,10 +19,18 @@ import {
   type Adjustment,
 } from '@umbra/kernels/adjust';
 import { sampleGradient } from '@umbra/kernels/gradient';
+import { getLut } from '@umbra/kernels/lut';
+
+function identityTable(): Float32Array {
+  const t = new Float32Array(256 * 4);
+  for (let i = 0; i < 256; i++) t.set([i / 255, i / 255, i / 255, 1], i * 4);
+  return t;
+}
 
 export const ADJUST_GLSL = /* glsl */ `
 uniform int u_adjKind;
 uniform sampler2D u_adjTable;   // 256×1 RGBA32F, values 0…1
+uniform highp sampler3D u_adjCube; // Color Lookup: N³ RGB32F, red along x
 uniform vec4 u_adj0;
 uniform vec4 u_adj1;
 uniform vec4 u_adj2;
@@ -39,6 +47,33 @@ const int ADJ_BLACKWHITE = 7;
 const int ADJ_PHOTOFILTER = 8;
 const int ADJ_GRADIENTMAP = 9;
 const int ADJ_SELECTIVE = 10;
+const int ADJ_LUT3D = 11;
+
+vec3 cubeAt(ivec3 p) { return texelFetch(u_adjCube, p, 0).rgb; }
+
+/** Tetrahedral interpolation — the same six cases, in the same order, as kernels/lut.ts. */
+vec3 lookup3d(vec3 c, float size) {
+  vec3 f = clamp(c, 0.0, 1.0) * (size - 1.0);
+  ivec3 o = ivec3(min(vec3(size - 2.0), floor(f)));
+  vec3 d = f - vec3(o);
+  float x = d.x, y = d.y, z = d.z;
+  vec3 c000 = cubeAt(o);
+  vec3 c111 = cubeAt(o + ivec3(1, 1, 1));
+  vec3 c100 = cubeAt(o + ivec3(1, 0, 0));
+  vec3 c010 = cubeAt(o + ivec3(0, 1, 0));
+  vec3 c001 = cubeAt(o + ivec3(0, 0, 1));
+  vec3 c110 = cubeAt(o + ivec3(1, 1, 0));
+  vec3 c101 = cubeAt(o + ivec3(1, 0, 1));
+  vec3 c011 = cubeAt(o + ivec3(0, 1, 1));
+  if (x >= y) {
+    if (y >= z) return c000 + x * (c100 - c000) + y * (c110 - c100) + z * (c111 - c110);
+    if (x >= z) return c000 + x * (c100 - c000) + z * (c101 - c100) + y * (c111 - c101);
+    return c000 + z * (c001 - c000) + x * (c101 - c001) + y * (c111 - c101);
+  }
+  if (z >= y) return c000 + z * (c001 - c000) + y * (c011 - c001) + x * (c111 - c011);
+  if (z >= x) return c000 + y * (c010 - c000) + z * (c011 - c010) + x * (c111 - c011);
+  return c000 + y * (c010 - c000) + x * (c110 - c010) + z * (c111 - c110);
+}
 
 vec3 quantise8(vec3 c) { return floor(clamp(c, 0.0, 1.0) * 255.0 + 0.5) / 255.0; }
 
@@ -204,6 +239,8 @@ vec3 adjustColor(vec3 c) {
     return clamp(o, 0.0, 1.0);
   }
 
+  if (u_adjKind == ADJ_LUT3D) return lookup3d(c, u_adj0.x);
+
   if (u_adjKind == ADJ_SELECTIVE) {
     // Rows 0…8 of the table hold each range's C, M, Y, K as fractions; u_adj0.x = Relative.
     vec3 c8 = floor(c * 255.0 + 0.5);
@@ -257,12 +294,15 @@ export const ADJ_KIND = {
   photoFilter: 8,
   gradientMap: 9,
   selective: 10,
+  lut3d: 11,
 } as const;
 
 /** Uniform payload for one adjustment. `table` is 256 RGBA texels, or null. */
 export interface GpuAdjustment {
   kind: number;
   table: Float32Array | null;
+  /** Color Lookup's N³ RGB grid, uploaded as a 3-D texture. */
+  cube?: { size: number; data: Float32Array };
   /** Four vec4s: u_adj0…u_adj3. */
   params: Float32Array;
 }
@@ -322,6 +362,12 @@ export function toGpuAdjustment(adj: Adjustment): GpuAdjustment {
       set(0, adj.color[0], adj.color[1], adj.color[2], Math.min(1, Math.max(0, adj.density / 100)));
       set(1, adj.preserveLuminosity ? 1 : 0);
       return { kind: ADJ_KIND.photoFilter, table: null, params };
+    case 'colorLookup': {
+      const lut = getLut(adj.lutId);
+      if (!lut) return { kind: ADJ_KIND.table, table: identityTable(), params };
+      set(0, lut.size);
+      return { kind: ADJ_KIND.lut3d, table: null, params, cube: { size: lut.size, data: lut.data } };
+    }
     case 'selectiveColor': {
       const table = new Float32Array(256 * 4);
       SELECTIVE_RANGES.forEach((r, i) => {

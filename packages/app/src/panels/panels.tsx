@@ -915,7 +915,7 @@ function PatternsPanel() {
 /** Photoshop's panel order: tonal row, colour row, then the special-purpose ones. */
 const ADJUSTMENT_GRID: (Adjustment['kind'] | null)[][] = [
   ['brightnessContrast', 'levels', 'curves', 'exposure'],
-  ['vibrance', 'hueSaturation', 'colorBalance', 'blackWhite', 'photoFilter', 'channelMixer'],
+  ['vibrance', 'hueSaturation', 'colorBalance', 'blackWhite', 'photoFilter', 'channelMixer', 'colorLookup'],
   ['invert', 'posterize', 'threshold', 'gradientMap', 'selectiveColor'],
 ];
 
@@ -950,7 +950,6 @@ function AdjustmentsPanel() {
           </div>
         )}
       </For>
-      <div class="dim adjustments-note">Color Lookup is not implemented yet.</div>
     </div>
   );
 }

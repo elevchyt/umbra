@@ -3,6 +3,7 @@
  * Engine worker entry point. Owns the document and the GL context; the UI thread only sends
  * commands and rAF ticks, and receives stats (spec 03 §2).
  */
+import { listLuts, parseLutFile, registerLut } from '@umbra/kernels/lut';
 import { Engine } from './engine.js';
 import { runSpikes } from './spikes.js';
 import type { FromEngine, ToEngine } from './protocol.js';
@@ -214,6 +215,18 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setFillContent':
         if (engine?.setFillContent(msg.id, msg.content, msg.final, msg.amend)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'requestLuts':
+        post({ t: 'luts', list: listLuts() });
+        break;
+      case 'loadLut': {
+        try {
+          const lut = registerLut(parseLutFile(msg.bytes, msg.fileName));
+          post({ t: 'luts', list: listLuts(), loaded: lut.id });
+        } catch (e) {
+          post({ t: 'luts', list: listLuts(), error: e instanceof Error ? e.message : String(e) });
+        }
+        break;
+      }
       case 'requestPatterns':
         if (engine) post({ t: 'patterns', list: engine.patternSummaries() });
         break;

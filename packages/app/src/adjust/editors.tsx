@@ -7,7 +7,7 @@
  * false during a drag and true when the gesture ends. The dialog previews on every change;
  * the Properties panel records one history step per `final`.
  */
-import { For, Show, createMemo, createSignal, type JSX } from 'solid-js';
+import { For, Show, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Button } from '@umbra/ui/widgets/controls';
 import {
@@ -81,6 +81,8 @@ export function AdjustmentEditor(props: EditorProps): JSX.Element {
             return <GradientMap value={v()} onChange={props.onChange} />;
           case 'selectiveColor':
             return <SelectiveColor value={v()} onChange={props.onChange} />;
+          case 'colorLookup':
+            return <ColorLookup value={v()} onChange={props.onChange} />;
           default:
             return <div class="dim adjust-none">This adjustment has no settings.</div>;
         }
@@ -947,6 +949,72 @@ function SelectiveColor(props: { value: Of<'selectiveColor'>; onChange: Change }
         ]}
         onChange={(m) => props.onChange({ ...props.value, relative: m === 'relative' }, true)}
       />
+    </>
+  );
+}
+
+// ---- Color Lookup --------------------------------------------------------------------------
+
+/**
+ * Color Lookup's 3DLUT File menu: the built-in looks, anything loaded this session or found in
+ * an opened PSD, and Load 3D LUT… for a .cube or .3dl. (Abstract and Device Link profiles are
+ * ICC and are not supported.)
+ */
+function ColorLookup(props: { value: Of<'colorLookup'>; onChange: Change }) {
+  let input!: HTMLInputElement;
+  onMount(() => {
+    store.engine?.({ t: 'requestLuts' });
+    // A file loaded from here is selected as soon as the worker has registered it.
+    const onLoaded = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      const lut = store.luts().find((l) => l.id === id);
+      if (lut) props.onChange({ kind: 'colorLookup', lutId: lut.id, name: lut.name }, true);
+    };
+    window.addEventListener('umbra:lut-loaded', onLoaded);
+    onCleanup(() => window.removeEventListener('umbra:lut-loaded', onLoaded));
+  });
+  const options = () => {
+    const list = store.luts();
+    const known = list.some((l) => l.id === props.value.lutId);
+    return [
+      ...list.map((l) => ({ value: l.id, label: l.name })),
+      ...(known ? [] : [{ value: props.value.lutId, label: props.value.name, separatorBefore: true }]),
+    ];
+  };
+  return (
+    <>
+      <Select
+        value={props.value.lutId}
+        label="3DLUT File"
+        width={170}
+        options={options()}
+        onChange={(id) => {
+          const lut = store.luts().find((l) => l.id === id);
+          if (lut) props.onChange({ kind: 'colorLookup', lutId: lut.id, name: lut.name }, true);
+        }}
+      />
+      <input
+        ref={input}
+        type="file"
+        accept=".cube,.3dl"
+        style={{ display: 'none' }}
+        onChange={async (e) => {
+          const file = e.currentTarget.files?.[0];
+          if (!file) return;
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          store.engine?.({ t: 'loadLut', fileName: file.name, bytes });
+          e.currentTarget.value = '';
+        }}
+      />
+      <Button width={130} onClick={() => input.click()}>
+        Load 3D LUT…
+      </Button>
+      <div class="dim">
+        {(() => {
+          const lut = store.luts().find((l) => l.id === props.value.lutId);
+          return lut ? `${lut.size}×${lut.size}×${lut.size} grid, tetrahedral` : 'Table not loaded — this layer has no effect.';
+        })()}
+      </div>
     </>
   );
 }

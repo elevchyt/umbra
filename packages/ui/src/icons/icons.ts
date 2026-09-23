@@ -217,6 +217,7 @@ export const ICONS: Record<string, IconDef> = {
     'M11 7.6a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z',
     'M13.4 1.8 11.6 3.6',
   ]),
+  adjColorLookup: I(['M3 5.2 8 2.4l5 2.8v5.6L8 13.6l-5-2.8Z', 'M3 5.2 8 8l5-2.8M8 8v5.6']),
   adjDesaturate: I(['M8 2.4a5.6 5.6 0 1 1 0 11.2A5.6 5.6 0 0 1 8 2.4Z', 'M4 4 12 12']),
   panelMenu: I('M3.4 5h9.2M3.4 8h9.2M3.4 11h9.2'),
   moreHorizontal: I(['M3.6 8h.01M8 8h.01M12.4 8h.01']),

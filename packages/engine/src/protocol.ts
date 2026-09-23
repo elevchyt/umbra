@@ -152,6 +152,9 @@ export type ToEngine =
   | { t: 'addFillLayer'; content: FillSummary }
   | { t: 'setFillContent'; id: number; content: FillSummary; final: boolean; amend?: boolean }
   | { t: 'requestPatterns' }
+  | { t: 'requestLuts' }
+  /** A .cube or .3dl file the user picked; the reply is the updated `luts` list. */
+  | { t: 'loadLut'; fileName: string; bytes: Uint8Array }
   | { t: 'definePattern'; name: string }
   | { t: 'setLayerAdjustment'; id: number; adjustment: Adjustment; final: boolean }
   | { t: 'requestHistogram'; source: 'layer' | 'below' | 'composite'; id?: number }
@@ -237,6 +240,7 @@ export type FromEngine =
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
+  | { t: 'luts'; list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }
   | { t: 'histogram'; source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }
   | { t: 'contextLost' }
   | { t: 'contextRestored' }

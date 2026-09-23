@@ -147,6 +147,8 @@ export interface Histogram {
 }
 /** The pattern library as the engine last reported it (thumbnails only; pixels stay there). */
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
+/** 3-D LUTs registered in the worker, for Color Lookup. */
+const [luts, setLuts] = createSignal<{ id: string; name: string; size: number }[]>([]);
 
 const [histograms, setHistograms] = createStore<Partial<Record<HistogramSource, Histogram>>>({});
 const histogram = (source: HistogramSource): Histogram | null => histograms[source] ?? null;
@@ -312,6 +314,8 @@ export const store = {
   setHistogram,
   patterns,
   setPatterns,
+  luts,
+  setLuts,
   get engine() {
     return engine();
   },

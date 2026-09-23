@@ -115,6 +115,11 @@ export function Workspace() {
         onThumbnail: store.setThumbnail,
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
+        onLuts: (m) => {
+          store.setLuts(m.list);
+          if (m.error) flash(`Could not load the LUT: ${m.error}`);
+          if (m.loaded) lutLoaded(m.loaded);
+        },
         onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
         onNoRecovery: () => startDefaultDocument(),
         onSampled: (color, toBackground) => {
@@ -714,7 +719,8 @@ export function Workspace() {
       case 'adjust.threshold':
       case 'adjust.gradientMap':
       case 'adjust.desaturate':
-      case 'adjust.selectiveColor': {
+      case 'adjust.selectiveColor':
+      case 'adjust.colorLookup': {
         // Image ▸ Adjustments act on pixels, so the target must be a pixel layer — Photoshop
         // greys these out for groups and adjustment layers; here the command explains itself.
         const kind = cmd.slice('adjust.'.length) as Adjustment['kind'];
@@ -745,7 +751,8 @@ export function Workspace() {
       case 'adjLayer.posterize':
       case 'adjLayer.threshold':
       case 'adjLayer.gradientMap':
-      case 'adjLayer.selectiveColor': {
+      case 'adjLayer.selectiveColor':
+      case 'adjLayer.colorLookup': {
         // Photoshop opens the Properties panel on the new layer rather than a dialog.
         const kind = cmd.slice('adjLayer.'.length) as Adjustment['kind'];
         send({ t: 'addAdjustmentLayer', adjustment: initialAdjustment(kind) });
@@ -773,6 +780,11 @@ export function Workspace() {
   /** The small one-field dialogs the Select ▸ Modify commands share. */
   function promptAmount(title: string, label: string, value: number, apply: (v: number) => void): void {
     setAmountPrompt({ title, label, value, apply });
+  }
+
+  /** Handed the id of a LUT the user just loaded, so the editor that asked can select it. */
+  function lutLoaded(id: string): void {
+    window.dispatchEvent(new CustomEvent('umbra:lut-loaded', { detail: id }));
   }
 
   function flash(message: string): void {

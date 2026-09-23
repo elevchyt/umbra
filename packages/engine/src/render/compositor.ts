@@ -393,6 +393,33 @@ export class LayerCompositor {
    */
   private tables = new Map<Float32Array, WebGLTexture>();
   private emptyTable?: WebGLTexture;
+  /** Color Lookup grids by identity, like `tables`; a 1³ stand-in keeps the sampler valid. */
+  private cubes = new Map<Float32Array, WebGLTexture>();
+  private emptyCube?: WebGLTexture;
+
+  private cubeTexture(cube: { size: number; data: Float32Array } | undefined): WebGLTexture {
+    const gl = this.gl;
+    const upload = (size: number, data: Float32Array): WebGLTexture => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_3D, tex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage3D(gl.TEXTURE_3D, 0, gl.RGB32F, size, size, size, 0, gl.RGB, gl.FLOAT, data);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_3D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      return tex;
+    };
+    if (!cube) return (this.emptyCube ??= upload(1, new Float32Array(3)));
+    let tex = this.cubes.get(cube.data);
+    if (tex) return tex;
+    tex = upload(cube.size, cube.data);
+    this.cubes.set(cube.data, tex);
+    if (this.cubes.size > 8) {
+      const [oldest, oldTex] = this.cubes.entries().next().value!;
+      gl.deleteTexture(oldTex);
+      this.cubes.delete(oldest);
+    }
+    return tex;
+  }
 
   private tableTexture(table: Float32Array | null): WebGLTexture {
     const gl = this.gl;
@@ -440,9 +467,12 @@ export class LayerCompositor {
     gl.bindTexture(gl.TEXTURE_2D, (mask ?? backdrop).tex);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, table);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_3D, this.cubeTexture(adj?.cube));
     p.u1i('u_backdrop', 0);
     p.u1i('u_mask', 1);
     p.u1i('u_adjTable', 2);
+    p.u1i('u_adjCube', 3);
 
     p.u1i('u_mode', BLEND_MODE_INDEX[layer.blendMode] ?? 0);
     p.u1f('u_opacity', layer.opacity);
@@ -808,6 +838,8 @@ void main() { fragColor = vec4(texture(u_color, v_uv).rgb, texture(u_alpha, v_uv
     this._applyAlpha?.dispose();
     this._adjust?.dispose();
     for (const tex of this.tables.values()) this.gl.deleteTexture(tex);
+    for (const tex of this.cubes.values()) this.gl.deleteTexture(tex);
+    if (this.emptyCube) this.gl.deleteTexture(this.emptyCube);
     if (this.emptyTable) this.gl.deleteTexture(this.emptyTable);
     this.tables.clear();
     this.gl.deleteBuffer(this.quad);

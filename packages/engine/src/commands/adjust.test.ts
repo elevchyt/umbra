@@ -19,6 +19,7 @@ import { savePsd } from '../psd-save.js';
 import { openPsd } from '../psd-open.js';
 import { addAdjustmentLayer, applyAdjustment, setAdjustment } from './adjust.js';
 import { ADJUSTMENT_SAMPLES as SAMPLES } from '../adjust-samples.js';
+import { getLut } from '@umbra/kernels/lut';
 
 const W = 48;
 const H = 32;
@@ -170,7 +171,15 @@ describe('adjustment layers in PSD', () => {
       const l = back.layers[1] as AdjustmentLayer;
       expect(l.kind).toBe('adjustment');
       const got = l.adjustment;
-      if (adj.kind === 'blackWhite' || adj.kind === 'photoFilter' || adj.kind === 'gradientMap') {
+      if (adj.kind === 'colorLookup') {
+        // The table travels as a .cube inside the file and is re-registered under a new id.
+        if (got.kind !== 'colorLookup') throw new Error('kind');
+        expect(got.name).toBe(adj.name);
+        const a = getLut(adj.lutId)!.data;
+        const b = getLut(got.lutId)!.data;
+        expect(b.length).toBe(a.length);
+        a.forEach((v, i) => expect(Math.abs(v - b[i]!)).toBeLessThan(1e-5));
+      } else if (adj.kind === 'blackWhite' || adj.kind === 'photoFilter' || adj.kind === 'gradientMap') {
         // Colours are stored as 8-bit (tint, filter) or 16-bit (stops): compare to 1/255.
         const flat = (a: unknown): number[] => JSON.stringify(a).match(/-?\d+(\.\d+)?(e-?\d+)?/g)!.map(Number);
         const want = flat(adj);

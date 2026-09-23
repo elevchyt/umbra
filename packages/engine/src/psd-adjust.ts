@@ -23,6 +23,14 @@ import {
 } from '@umbra/kernels/adjust';
 import type { CurvePoint } from '@umbra/kernels/curve';
 import type { FillContent, PatternDef } from '@umbra/kernels/fill';
+import { getLut, parseLutFile, registerLut, toCube } from '@umbra/kernels/lut';
+
+/** FNV-1a, so the same LUT file opened twice registers once. */
+function hashBytes(b: Uint8Array): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) h = Math.imul(h ^ b[i]!, 0x01000193);
+  return (h >>> 0).toString(36);
+}
 import type { GradientStyle } from '@umbra/kernels/gradient';
 
 type Rgb = [number, number, number];
@@ -219,6 +227,23 @@ export function fromPsdAdjustment(raw: unknown): PsdAdjustmentRead | null {
       return { adjustment: { kind: 'posterize', levels: a.levels ?? 4 }, lost };
     case 'threshold':
       return { adjustment: { kind: 'threshold', level: a.level ?? 128 }, lost };
+    case 'color lookup': {
+      // Only the 3DLUT kind is modelled; Abstract and Device Link profiles are ICC and are not.
+      const bytes = a.lut3DFileData;
+      if (a.lookupType && a.lookupType !== '3dlut') return null;
+      if (!bytes || (a.lutFormat && a.lutFormat !== 'cube' && a.lutFormat !== '3dl')) return null;
+      const fileName = a.lut3DFileName || `${a.name || 'LUT'}.${a.lutFormat ?? 'cube'}`;
+      const id = `psd:${fileName}:${hashBytes(bytes)}`;
+      if (!getLut(id)) {
+        try {
+          registerLut({ ...parseLutFile(bytes, fileName), id });
+        } catch {
+          return null;
+        }
+      }
+      if (a.dither) lost.push('Color Lookup dither');
+      return { adjustment: { kind: 'colorLookup', lutId: id, name: a.name || getLut(id)!.name }, lost };
+    }
     case 'selective color': {
       const ranges = Object.fromEntries(
         SELECTIVE_RANGES.map((r) => {
@@ -357,6 +382,21 @@ export function toPsdAdjustment(adj: Adjustment, source?: unknown): AgAdjustment
         colorStops: adj.gradient.colorStops.map((s) => ({ location: s.at, midpoint: s.midpoint ?? 0.5, color: toPsdRgb(s.color) })),
         opacityStops: adj.gradient.opacityStops.map((s) => ({ location: s.at, midpoint: s.midpoint ?? 0.5, opacity: s.opacity })),
       } as AgAdjustment;
+    case 'colorLookup': {
+      const lut = getLut(adj.lutId);
+      const format = lut?.source?.format ?? 'cube';
+      const bytes = lut?.source?.bytes ?? new TextEncoder().encode(lut ? toCube(lut) : '');
+      return {
+        ...base,
+        type: 'color lookup',
+        lookupType: '3dlut',
+        name: adj.name,
+        dither: false,
+        lutFormat: format,
+        lut3DFileName: `${adj.name}.${format}`,
+        lut3DFileData: bytes,
+      } as AgAdjustment;
+    }
     case 'selectiveColor':
       return {
         ...base,
