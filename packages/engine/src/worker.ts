@@ -739,7 +739,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'strokeBegin':
-        engine?.beginStroke(msg.brush, msg.color, msg.mode as never);
+        engine?.beginStroke(msg.brush, msg.color, msg.mode as never, msg.bg);
         break;
       case 'strokeEnd':
         engine?.endStroke();

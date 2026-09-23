@@ -8,6 +8,7 @@ import { STYLE_ITEMS, type StyleKey } from '../fx/LayerStyleDialog';
 import { MENUS } from '../menus/menus';
 import { StylesPanel } from '../fx/StylesPanel';
 import { PathsPanel } from '../paths/PathsPanel';
+import { BrushSettingsPanel } from '../brush/BrushSettings';
 import { pathSvg } from '../workspace/ShapeOptions';
 import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
 import { CharacterStylesPanel, GlyphsPanel, ParagraphStylesPanel } from '../type/GlyphsPanel';
@@ -64,7 +65,7 @@ export function renderPanel(id: string): JSX.Element {
     case 'adjustments':
       return <AdjustmentsPanel />;
     case 'brushSettings':
-      return <Placeholder name="Brush Settings" milestone="M8" what="shape dynamics, scattering, texture, dual brush, transfer" />;
+      return <BrushSettingsPanel />;
     case 'brushes':
       return <Placeholder name="Brushes" milestone="M3" what="brush presets and .abr import" />;
     case 'histogram':

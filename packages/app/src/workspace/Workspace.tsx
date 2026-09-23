@@ -4,7 +4,7 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -353,8 +353,29 @@ export function Workspace() {
       airbrushRate: b.airbrushRate,
       pressureSize: b.pressureSize,
       pressureOpacity: b.pressureOpacity,
+      // The Brush Settings sections: stringifying reads (and so subscribes to) every nested field.
+      ...(JSON.parse(
+        JSON.stringify({
+          tip: b.tip,
+          flipX: b.flipX,
+          flipY: b.flipY,
+          shapeDynamics: b.shapeDynamics,
+          scattering: b.scattering,
+          texture: b.texture,
+          dual: b.dual,
+          colorDynamics: b.colorDynamics,
+          transfer: b.transfer,
+          pose: b.pose,
+          noise: b.noise,
+          wetEdges: b.wetEdges,
+          protectTexture: b.protectTexture,
+          smoothingOptions: b.smoothingOptions,
+          symmetry: b.symmetry,
+        }),
+      ) as Partial<BrushParams>),
     };
     const mode = b.mode;
+    const bgColor = store.background();
     const g = store.gradientOptions;
     const gradientArgs = {
       style: g.style,
@@ -391,6 +412,7 @@ export function Workspace() {
     // The Pencil is the brush with a hard tip; that is all that distinguishes them.
     client.brush = tool === 'pencil' ? { ...params, hardness: 1 } : params;
     client.brushColor = [c.r, c.g, c.b];
+    client.brushBg = [bgColor.r, bgColor.g, bgColor.b];
     // The Eraser is the Clear paint mode with the brush's own settings.
     client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
   });

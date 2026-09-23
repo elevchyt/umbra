@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -70,9 +70,9 @@ const [selectOptions, setSelectOptions] = createStore({
  * Brush settings, shared by every paint tool as Photoshop's options bar does. `mode` is the
  * paint blend mode, which has two entries (Behind, Clear) a layer does not.
  */
-const [brush, setBrush] = createStore({
+const [brush, setBrush] = createStore<BrushParams & { mode: string }>({
   ...DEFAULT_BRUSH,
-  mode: 'normal' as string,
+  mode: 'normal',
 });
 
 /** Latest document thumbnail for the Navigator; null until one has been rendered. */

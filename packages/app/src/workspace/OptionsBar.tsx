@@ -4,7 +4,7 @@ import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID } from '../tools/registry';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, type SymmetryMode } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
 import { TypeToolOptions } from '../type/TypePanels';
@@ -201,6 +201,30 @@ export function OptionsBar(props: OptionsBarProps) {
             active={brush.pressureOpacity}
             onClick={() => store.setBrush('pressureOpacity', !brush.pressureOpacity)}
           />
+          <Separator />
+          <Select
+            label="Symmetry"
+            value={brush.symmetry?.mode ?? 'off'}
+            width={100}
+            title="Paint symmetry about the canvas centre"
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'vertical', label: 'Vertical' },
+              { value: 'horizontal', label: 'Horizontal' },
+              { value: 'dualAxis', label: 'Dual Axis' },
+              { value: 'diagonal', label: 'Diagonal' },
+              { value: 'radial', label: 'Radial' },
+              { value: 'mandala', label: 'Mandala' },
+            ]}
+            onChange={(mode) => {
+              const d = store.doc();
+              store.setBrush('symmetry', { ...DEFAULT_SYMMETRY, ...(brush.symmetry ?? {}), mode: mode as SymmetryMode, cx: (d?.width ?? 0) / 2, cy: (d?.height ?? 0) / 2 });
+            }}
+          />
+          <Show when={brush.symmetry?.mode === 'radial' || brush.symmetry?.mode === 'mandala'}>
+            <NumberField label="Segments" value={brush.symmetry!.segments} min={2} max={12} width={32} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, segments: v })} />
+          </Show>
+          <IconButton icon="gear" title="Brush Settings (F5)" onClick={() => store.openPanel('brushSettings')} />
         </Match>
 
         <Match when={store.activeTool().startsWith('marquee') || store.activeTool().startsWith('lasso')}>

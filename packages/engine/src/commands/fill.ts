@@ -6,6 +6,7 @@
  * the selection edge. Running them through the same CPU blend the reference compositor uses
  * means "Fill with Multiply at 50%" agrees with putting the same colour on a layer above.
  */
+import { wetEdges } from '@umbra/kernels/brush';
 import { TILE_SIZE, TILE_SHIFT, channelCount } from '@umbra/core/pixels';
 import { rectIntersect, rectIsEmpty, type Rect } from '@umbra/core/geom';
 import { compositePixel } from '@umbra/kernels/blend';
@@ -320,6 +321,8 @@ export function compositeStroke(
   strokePlane: Plane,
   opacity: number,
   mode: PaintMode,
+  /** Wet Edges: the stroke's coverage through the pooling curve. */
+  wet = false,
 ): Doc {
   const layer = findLayer(doc.layers, layerId);
   if (!layer || layer.kind !== 'pixel') return doc;
@@ -340,7 +343,8 @@ export function compositeStroke(
 
     for (let i = 0; i < TILE_SIZE * TILE_SIZE; i++) {
       const so = uniform ? 0 : i * 4;
-      const sa = (sd[so + 3]! / 255) * opacity;
+      const s0 = sd[so + 3]! / 255;
+      const sa = (wet ? wetEdges(s0) : s0) * opacity;
       if (sa <= 0) continue;
       const o = i * 4;
       const da = data[o + 3]! / 255;

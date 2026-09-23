@@ -7,6 +7,7 @@
  * mask toward that grey by the paint's coverage: `m += (grey − m)·α`. That is Normal mode on a
  * single channel, which is what Photoshop's mask painting is.
  */
+import { wetEdges } from '@umbra/kernels/brush';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { gradientRamp, gradientT } from '@umbra/kernels/gradient';
 import { findLayer, updateLayer, type Doc } from '../document.js';
@@ -75,7 +76,7 @@ export function gradientMask(doc: Doc, layerId: number, opts: GradientOptions): 
  * A finished brush or eraser stroke into a mask. The stroke plane carries the paint's grey in
  * its red channel (the engine paints masks in grey) and its coverage in alpha.
  */
-export function compositeStrokeIntoMask(doc: Doc, layerId: number, stroke: Plane, opacity: number): Doc {
+export function compositeStrokeIntoMask(doc: Doc, layerId: number, stroke: Plane, opacity: number, wet = false): Doc {
   const layer = findLayer(doc.layers, layerId);
   if (!layer?.mask) return doc;
   const writer = layer.mask.plane.base.writer();
@@ -86,7 +87,8 @@ export function compositeStrokeIntoMask(doc: Doc, layerId: number, stroke: Plane
     const sd = src.data;
     for (let i = 0; i < TILE_SIZE * TILE_SIZE; i++) {
       const so = src.uniform ? 0 : i * 4;
-      const a = (sd[so + 3]! / 255) * opacity;
+      const s0 = sd[so + 3]! / 255;
+      const a = (wet ? wetEdges(s0) : s0) * opacity;
       if (a <= 0) continue;
       data[i] = Math.round(data[i]! + (sd[so]! - data[i]!) * a);
     }

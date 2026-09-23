@@ -160,6 +160,7 @@ export class DocumentRenderer {
     layerId: number;
     opacity: number;
     mode: BlendMode;
+    wet?: boolean;
   } | null = null;
 
   /**
@@ -178,7 +179,7 @@ export class DocumentRenderer {
   }
 
   setStrokeOverlay(
-    overlay: { plane: MipPlane; layerId: number; opacity: number; mode: BlendMode } | null,
+    overlay: { plane: MipPlane; layerId: number; opacity: number; mode: BlendMode; wet?: boolean } | null,
   ): void {
     this.strokeOverlay = overlay;
   }
@@ -188,9 +189,9 @@ export class DocumentRenderer {
    * so it previews as a temporary multiplier on the target layer's mask: coverage starts at 1
    * and the stroke's alpha takes it down. That is exactly what the committed erase will do.
    */
-  private eraseOverlay: { plane: MipPlane; layerId: number; opacity: number } | null = null;
+  private eraseOverlay: { plane: MipPlane; layerId: number; opacity: number; wet?: boolean } | null = null;
 
-  setEraseOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number } | null): void {
+  setEraseOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number; wet?: boolean } | null): void {
     this.eraseOverlay = overlay;
   }
 
@@ -199,9 +200,9 @@ export class DocumentRenderer {
    * coverage as alpha, so drawing it premultiplied with "over" blending into the mask target
    * computes m + (grey − m)·α in the red channel — the committed result, previewed.
    */
-  private maskStrokeOverlay: { plane: MipPlane; layerId: number; opacity: number } | null = null;
+  private maskStrokeOverlay: { plane: MipPlane; layerId: number; opacity: number; wet?: boolean } | null = null;
 
-  setMaskStrokeOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number } | null): void {
+  setMaskStrokeOverlay(overlay: { plane: MipPlane; layerId: number; opacity: number; wet?: boolean } | null): void {
     this.maskStrokeOverlay = overlay;
   }
 
@@ -251,7 +252,9 @@ export class DocumentRenderer {
           maskDensity: 1,
           drawSource: () => {
             this.stats.layerPasses++;
+            this.tiles.wet = !!o.wet;
             this.stats.tileInstances += this.tiles.draw(o.plane, view, clip);
+            this.tiles.wet = false;
           },
         });
       }
@@ -311,7 +314,9 @@ export class DocumentRenderer {
           const gl = this.gl;
           gl.enable(gl.BLEND);
           gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          this.tiles.wet = !!maskStroke.wet;
           this.tiles.draw(maskStroke.plane, view, clip, false, maskStroke.opacity, true, live);
+          this.tiles.wet = false;
           gl.disable(gl.BLEND);
         }
         if (erase) {
@@ -319,7 +324,9 @@ export class DocumentRenderer {
           gl.enable(gl.BLEND);
           // dst *= (1 - srcAlpha): the stroke's coverage removes the layer's.
           gl.blendFunc(gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+          this.tiles.wet = !!erase.wet;
           this.tiles.draw(erase.plane, view, clip, false, erase.opacity, true, live);
+          this.tiles.wet = false;
           gl.disable(gl.BLEND);
         }
       };

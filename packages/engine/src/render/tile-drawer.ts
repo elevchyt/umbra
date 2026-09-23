@@ -49,6 +49,8 @@ uniform float u_isMask;
 uniform float u_opacity;
 /** 1.0 to emit premultiplied alpha, for accumulation with fixed-function blending. */
 uniform float u_premultiply;
+/** 1.0 for a live Wet Edges stroke: coverage through the pooling curve (kernels' wetEdges). */
+uniform float u_wet;
 const float PAGE_TILES = 8.0;
 const float PAGE_SIZE = 2048.0;
 out vec4 fragColor;
@@ -57,6 +59,7 @@ void main() {
   vec2 hi = (v_cell + 1.0) / PAGE_TILES - 0.5 / PAGE_SIZE;
   vec4 c = texture(u_atlas, vec3(clamp(v_uv, lo, hi), v_page));
   if (u_isMask > 0.5) { fragColor = vec4(c.rrr, 1.0); return; }
+  if (u_wet > 0.5) c.a = c.a * (0.5 + 2.0 * c.a * (1.0 - c.a));
   c.a *= u_opacity;
   fragColor = u_premultiply > 0.5 ? vec4(c.rgb * c.a, c.a) : c;
 }`;
@@ -80,6 +83,8 @@ function mul3(view: Float32Array, m: Mat): Float32Array {
 }
 
 export class TileDrawer {
+  /** Set by the renderer while it draws a live Wet Edges stroke. */
+  wet = false;
   private program: Program;
   private quad: WebGLBuffer;
   private instances: WebGLBuffer;
@@ -180,6 +185,7 @@ export class TileDrawer {
     this.program.u1f('u_isMask', isMask ? 1 : 0);
     this.program.u1f('u_opacity', opacity);
     this.program.u1f('u_premultiply', premultiply ? 1 : 0);
+    this.program.u1f('u_wet', this.wet ? 1 : 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instances);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.data, 0, n * 3);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);

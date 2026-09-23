@@ -401,6 +401,8 @@ export type ToEngine =
       t: 'strokeBegin';
       brush: BrushParams;
       color: [number, number, number];
+      /** The background colour, for Colour Dynamics. */
+      bg?: [number, number, number];
       mode: string;
     }
   | { t: 'strokeEnd' }

@@ -400,7 +400,7 @@ export class EngineClient {
         return;
       }
       if (this.paintMode && e.button === 0) {
-        this.send({ t: 'strokeBegin', brush: this.brush, color: this.brushColor, mode: this.paintBlendMode });
+        this.send({ t: 'strokeBegin', brush: this.brush, color: this.brushColor, bg: this.brushBg, mode: this.paintBlendMode });
         write(e, FLAG_DOWN);
       } else {
         this.panning = true;
@@ -530,6 +530,7 @@ export class EngineClient {
   }
 
   brushColor: [number, number, number] = [0, 0, 0];
+  brushBg: [number, number, number] = [1, 1, 1];
   brush: BrushParams = { ...DEFAULT_BRUSH };
   /** Paint blend mode, which unlike a layer's may also be 'behind' or 'clear'. */
   paintBlendMode = 'normal';

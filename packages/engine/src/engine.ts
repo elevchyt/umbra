@@ -136,11 +136,18 @@ import type { LayerLocks } from './document.js';
 import {
   DEFAULT_BRUSH,
   beginStroke as beginBrushStroke,
+  catchUp as catchUpStroke,
+  dabAlpha,
+  finishStroke,
   strokeTo,
   type BrushParams,
+  type BrushPattern,
+  type CoverageContext,
   type Dab,
   type StrokeState,
+  type TipBitmap,
 } from '@umbra/kernels/brush';
+import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
 import { openPsd, type PendingSource } from './psd-open.js';
@@ -226,6 +233,12 @@ export class Engine {
   brush: BrushParams = { ...DEFAULT_BRUSH };
   paintMode: PaintMode = 'normal';
   private strokeColor: [number, number, number] = [0, 0, 0];
+  /** Sampled brush tips (from ABR files and Define Brush Preset), by id. */
+  readonly brushTips = new Map<string, TipBitmap>();
+  /** The stroke's shader settings and the same for the CPU reference (Quick Mask, retouch). */
+  private dabStyle: DabStyle = {};
+  private coverageCtx: CoverageContext = {};
+  private patternLum = new Map<string, BrushPattern>();
   private strokeParams = {
     size: 40,
     hardness: 0.6,
@@ -3673,13 +3686,54 @@ export class Engine {
 
   // ---- painting ---------------------------------------------------------------------
 
-  beginStroke(params: BrushParams, color: [number, number, number], mode: PaintMode): void {
-    this.brush = params;
+  /** A pattern's luminance, for brush textures (cached per pattern). */
+  private brushPattern(id: string): { id: string; pattern: BrushPattern } | null {
+    const def = this.findPattern(id) ?? this.patternLibrary[0] ?? null;
+    if (!def) return null;
+    let lum = this.patternLum.get(def.id);
+    if (!lum) {
+      const v = new Float32Array(def.width * def.height);
+      for (let i = 0; i < v.length; i++) {
+        const a = def.data[i * 4 + 3]! / 255;
+        // Transparent pattern pixels read as white: they leave the tip untouched.
+        const l = (0.299 * def.data[i * 4]! + 0.587 * def.data[i * 4 + 1]! + 0.114 * def.data[i * 4 + 2]!) / 255;
+        v[i] = l * a + (1 - a);
+      }
+      lum = { width: def.width, height: def.height, lum: v };
+      this.patternLum.set(def.id, lum);
+    }
+    return { id: def.id, pattern: lum };
+  }
+
+  beginStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg: [number, number, number] = [1, 1, 1]): void {
+    // Each stroke gets its own seed unless one is given, so jitter differs stroke to stroke
+    // but a stroke can be replayed exactly.
+    const seed = params.seed ?? 1 + Math.floor(Math.random() * 0x7ffffffe);
+    this.brush = { ...params, seed };
+    params = this.brush;
     this.paintMode = mode;
     this.strokeColor = color;
     this.strokeParams = { size: params.size, hardness: params.hardness, color: [...color, 1] };
-    this.strokeState = beginBrushStroke(params);
+    this.strokeState = beginBrushStroke(params, { fg: color, bg, zoom: this.view.zoom });
     this.lastDab = null;
+    // What the dab shader (and the CPU reference) need beyond each dab.
+    const style: DabStyle = { noise: !!params.noise, noiseSeed: seed & 0xffff };
+    const ctx: CoverageContext = { tips: (id) => this.brushTips.get(id), noise: !!params.noise, noiseSeed: seed & 0xffff };
+    const d = params.dual?.enabled ? params.dual : null;
+    if (d) {
+      const tip = d.tip.kind === 'sampled' ? d.tip.id : undefined;
+      style.dual = { tip, hardness: d.hardness, mode: DUAL_MODES.indexOf(d.mode) };
+      ctx.dual = { tip: tip ? this.brushTips.get(tip) : undefined, hardness: d.hardness, mode: d.mode };
+    }
+    const t = params.texture?.enabled ? params.texture : null;
+    const pat = t ? this.brushPattern(t.patternId) : null;
+    if (t && pat) {
+      this.dabs.textures.setPattern(pat.id, pat.pattern.width, pat.pattern.height, pat.pattern.lum);
+      style.texture = { scale: t.scale / 100, brightness: t.brightness, contrast: t.contrast, invert: t.invert, mode: TEXTURE_MODES.indexOf(t.mode) };
+      ctx.texture = { pattern: pat.pattern, scale: t.scale, brightness: t.brightness, contrast: t.contrast, invert: t.invert, mode: t.mode };
+    }
+    this.dabStyle = style;
+    this.coverageCtx = ctx;
 
     if (this.quickMask) {
       // Edit a copy so the pre-stroke mask stays on the undo stack, exactly as a pixel stroke
@@ -3794,6 +3848,8 @@ export class Engine {
   }
 
   endStroke(): void {
+    // Catch-up on Stroke End: the brush runs on to where the pointer let go.
+    if (this.painting && this.strokeState) for (const dab of finishStroke(this.strokeState)) this.stampDab(dab);
     if (this.quickMask) {
       if (!this.painting) return;
       this.painting = false;
@@ -3822,8 +3878,8 @@ export class Engine {
     const intoFilterMask = this.strokeIntoFilterMask;
     this.commit(
       this.strokeIntoMask
-        ? this.onTarget({ id, filter: intoFilterMask }, (d) => MaskPaint.compositeStrokeIntoMask(d, id, strokePlane, this.brush.opacity))
-        : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
+        ? this.onTarget({ id, filter: intoFilterMask }, (d) => MaskPaint.compositeStrokeIntoMask(d, id, strokePlane, this.brush.opacity, !!this.brush.wetEdges))
+        : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode, !!this.brush.wetEdges),
       this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
     this.fadeState = intoFilterMask ? null : { before, after: this.doc, name: this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
@@ -3851,6 +3907,9 @@ export class Engine {
         y: doc.y,
         pressure: s.pressure,
         time: s.timeAbs,
+        tiltX: s.tiltX,
+        tiltY: s.tiltY,
+        twist: s.twist,
       })) {
         this.stampDab(dab);
       }
@@ -3868,7 +3927,10 @@ export class Engine {
    * — a held-still pointer produces no events at all.
    */
   private airbrushTick(): void {
-    if (!this.painting || !this.strokeState || !this.brush.airbrush) return;
+    if (!this.painting || !this.strokeState) return;
+    // Stroke Catch-up: a lagging brush keeps closing on a pointer held still.
+    for (const dab of catchUpStroke(this.strokeState)) this.stampDab(dab);
+    if (!this.brush.airbrush) return;
     if (!this.strokeState.brush) return;
     const at = this.strokeState.brush;
     for (const dab of strokeTo(this.strokeState, {
@@ -3883,11 +3945,17 @@ export class Engine {
 
   private stampDab(dab: Dab): void {
     if (this.quickMask) {
-      this.stampQuickMaskDab(dab.x, dab.y, dab.radius);
+      this.stampQuickMaskDab(dab);
       return;
     }
     const writer = this.strokeWriter;
     if (!writer) return;
+    // Colour Dynamics give a dab its own colour; into a mask it is the colour's grey.
+    let color: [number, number, number] = dab.color ?? this.strokeColor;
+    if (this.strokeIntoMask) {
+      const g = dab.color && this.paintMode !== 'clear' ? MaskPaint.lumOf(dab.color) : this.strokeParams.color[0];
+      color = [g, g, g];
+    }
     this.dabs.paint(
       this.atlas,
       (tx, ty) => writer.mutableTile(tx, ty),
@@ -3898,9 +3966,16 @@ export class Engine {
         hardness: dab.hardness,
         angle: dab.angle,
         roundness: dab.roundness,
-        color: [this.strokeColor[0], this.strokeColor[1], this.strokeColor[2], dab.flow],
+        color: [color[0], color[1], color[2], dab.flow],
+        flipX: dab.flipX,
+        flipY: dab.flipY,
+        tip: dab.tip,
+        dual: dab.dual,
+        textureDepth: dab.textureDepth,
       },
       this.selectionTexture(),
+      this.dabStyle,
+      (id) => this.brushTips.get(id),
     );
   }
 
@@ -3916,37 +3991,24 @@ export class Engine {
    * Brush colour chooses direction, as in Photoshop: black masks (removes from the selection),
    * white unmasks, and greys land in between.
    */
-  private stampQuickMaskDab(x: number, y: number, radius: number): void {
+  private stampQuickMaskDab(dab: Dab): void {
     const sel = this.doc.selection;
     if (!sel) return;
     const { mask, width, height } = sel;
-    const [r, g, b, alpha] = this.strokeParams.color;
+    const [r, g, b] = dab.color ?? this.strokeParams.color;
     // Rec. 709 luma, the same weighting the greyscale conversion uses. Black paints rubylith
     // (coverage 0, protected); white paints it away.
     const target = 255 * (0.2126 * r + 0.7152 * g + 0.0722 * b);
-    const hardness = this.strokeParams.hardness;
-    const inner = radius * hardness;
-    const outer = Math.max(radius, inner + 0.5);
-
-    const x0 = Math.max(0, Math.floor(x - outer));
-    const x1 = Math.min(width, Math.ceil(x + outer) + 1);
-    const y0 = Math.max(0, Math.floor(y - outer));
-    const y1 = Math.min(height, Math.ceil(y + outer) + 1);
+    const reach = dab.radius / Math.max(0.01, Math.min(1, dab.roundness)) * (dab.tip ? Math.SQRT2 : 1) + 1;
+    const x0 = Math.max(0, Math.floor(dab.x - reach));
+    const x1 = Math.min(width, Math.ceil(dab.x + reach) + 1);
+    const y0 = Math.max(0, Math.floor(dab.y - reach));
+    const y1 = Math.min(height, Math.ceil(dab.y + reach) + 1);
     if (x1 <= x0 || y1 <= y0) return;
-
     for (let py = y0; py < y1; py++) {
-      const dy = py + 0.5 - y;
       for (let px = x0; px < x1; px++) {
-        const dx = px + 0.5 - x;
-        const d = Math.hypot(dx, dy);
-        if (d >= outer) continue;
-        // Same falloff as the GPU dab: hard to `inner`, then a smoothstep out to the rim.
-        let a = 1;
-        if (d > inner) {
-          const t = (d - inner) / (outer - inner);
-          a = 1 - t * t * (3 - 2 * t);
-        }
-        a *= alpha;
+        // The CPU reference: the same tip, dual brush, texture and noise as the GPU dab.
+        const a = dabAlpha(dab, px + 0.5, py + 0.5, this.coverageCtx);
         if (a <= 0) continue;
         const i = py * width + px;
         mask[i] = Math.round(mask[i]! + (target - mask[i]!) * a);
@@ -3989,7 +4051,7 @@ export class Engine {
     const live = this.strokeWriter && this.strokeLayerId !== null;
     this.renderer.setMaskStrokeOverlay(
       live && this.strokeIntoMask && !this.strokeIntoFilterMask
-        ? { plane: new MipPlane(this.strokeWriter!.preview(), 0), layerId: this.strokeLayerId!, opacity: this.brush.opacity }
+        ? { plane: new MipPlane(this.strokeWriter!.preview(), 0), layerId: this.strokeLayerId!, opacity: this.brush.opacity, wet: !!this.brush.wetEdges }
         : null,
     );
     this.renderer.setEraseOverlay(
@@ -3998,6 +4060,7 @@ export class Engine {
             plane: new MipPlane(this.strokeWriter.preview(), 0),
             layerId: this.strokeLayerId,
             opacity: this.brush.opacity,
+            wet: !!this.brush.wetEdges,
           }
         : null,
     );
@@ -4010,6 +4073,7 @@ export class Engine {
             // Behind previews as Normal; the difference only shows where the layer already has
             // pixels, and the exact result lands when the stroke is composited.
             mode: this.paintMode === 'behind' ? 'normal' : this.paintMode,
+            wet: !!this.brush.wetEdges,
           }
         : null,
     );

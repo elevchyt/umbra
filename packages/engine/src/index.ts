@@ -12,7 +12,31 @@ export { toCompositeLayers, toCompositeLayer } from './render/cpu-composite.js';
 export { probeCaps, describeCaps, type GpuCaps } from './gpu/caps.js';
 // Re-exported so the UI can describe a brush without depending on @umbra/kernels directly:
 // the dependency rule is core ← kernels ← engine ← app (spec 03 §3).
-export { DEFAULT_BRUSH, type BrushParams } from '@umbra/kernels/brush';
+export {
+  DEFAULT_BRUSH,
+  DEFAULT_SHAPE_DYNAMICS,
+  DEFAULT_SCATTERING,
+  DEFAULT_TEXTURE,
+  DEFAULT_DUAL,
+  DEFAULT_COLOR_DYNAMICS,
+  DEFAULT_TRANSFER,
+  DEFAULT_POSE,
+  DEFAULT_SMOOTHING,
+  DEFAULT_SYMMETRY,
+  NO_DYNAMIC,
+  renderDabs,
+  beginStroke as beginBrushStroke,
+  strokeTo as brushStrokeTo,
+  finishStroke as finishBrushStroke,
+  type BrushParams,
+  type ControlSource,
+  type Dynamic,
+  type DualMode,
+  type TextureMode,
+  type SymmetryMode,
+  type TipBitmap,
+  type Dab,
+} from '@umbra/kernels/brush';
 export {
   FOREGROUND_TO_BACKGROUND,
   FOREGROUND_TO_TRANSPARENT,
