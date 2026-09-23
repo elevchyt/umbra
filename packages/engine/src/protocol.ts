@@ -8,7 +8,8 @@ import type { ApplyImageOptions, CalculationsOptions } from '@umbra/kernels/appl
 import type { FilterParams } from '@umbra/kernels/filters/types';
 import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
-import type { SmartCommand, SmartFilterOp } from './engine.js';
+import type { AdvancedBlending } from '@umbra/kernels/composite';
+import type { LayerStyleProps, SmartCommand, SmartFilterOp, StyleCommand } from './engine.js';
 
 type Rgb3 = [number, number, number];
 
@@ -52,6 +53,8 @@ export interface LayerSummary {
   kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart';
   /** The layer style, when the layer has one. */
   effects?: LayerEffects;
+  /** Advanced blending: channels, knockout, Blend If (Layer Style ▸ Blending Options). */
+  blending: AdvancedBlending;
   /** Smart objects: the contents and the smart filters, for the Layers panel's filter rows. */
   smart?: SmartSummary;
   /** Adjustment layers: the parameters, for the Properties panel to edit. */
@@ -230,10 +233,11 @@ export type ToEngine =
   /** The dialog's preview box: a document rectangle, answered with before and after. */
   | { t: 'filterBox'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; rect: { x0: number; y0: number; x1: number; y1: number }; seq: number; smartIndex?: number }
   | { t: 'smartCommand'; cmd: SmartCommand }
-  /** A layer's style (null clears it). */
-  | { t: 'setLayerEffects'; id: number; effects: LayerEffects | null; name?: string }
-  /** Latest wins; null ends the preview. The dialog's Global Light edits preview with it. */
-  | { t: 'previewLayerEffects'; id: number; effects: LayerEffects | null; globalLight?: GlobalLight }
+  /** A layer's style: effects (null clears them) and, from Blending Options, its blending; a changed Global Light rides along. */
+  | { t: 'setLayerStyle'; id: number; effects: LayerEffects | null; props?: LayerStyleProps; globalLight?: GlobalLight; name?: string }
+  /** Latest wins; effects and props both absent ends the preview. */
+  | { t: 'previewLayerStyle'; id: number; effects: LayerEffects | null; props?: LayerStyleProps; globalLight?: GlobalLight }
+  | { t: 'styleCommand'; cmd: StyleCommand; amount?: number }
   | { t: 'setGlobalLight'; light: GlobalLight }
   | { t: 'editContents' }
   /** Save the open contents into the smart object (every instance), and optionally close them. */

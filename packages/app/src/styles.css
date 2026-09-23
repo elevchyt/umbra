@@ -1070,3 +1070,49 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .point-pick { position: relative; width: 120px; background: var(--panel-sunken); border: 1px solid var(--border-dark); cursor: crosshair; }
 .point-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border: 1px solid #fff; box-shadow: 0 0 0 1px #000; border-radius: 50%; pointer-events: none; }
 .kernel-grid { display: grid; gap: 2px; }
+
+/* ---- Layer Style dialog (M6) ---- */
+.fx-dialog { display: grid; grid-template-columns: 180px 1fr 116px; gap: 12px; align-items: start; min-height: 480px; }
+.fx-list { display: flex; flex-direction: column; background: var(--panel-sunken); border: 1px solid var(--border-dark); padding: 4px 0; }
+.fx-item { display: flex; align-items: center; gap: 6px; padding: 3px 8px; cursor: default; white-space: nowrap; }
+.fx-item:hover { background: var(--row-hover); }
+.fx-item.selected { background: var(--row-selected); }
+.fx-item.sub { padding-left: 26px; }
+.fx-item.header { font-weight: 600; padding-left: 10px; }
+.fx-item span { flex: 1; }
+.fx-plus { width: 18px; height: 18px; padding: 0; background: none; border: 1px solid var(--border-dark); color: var(--text); cursor: pointer; line-height: 1; }
+.fx-list-buttons { display: flex; gap: 4px; justify-content: flex-end; padding: 6px 6px 2px; margin-top: auto; }
+.fx-page { display: flex; flex-direction: column; gap: 8px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.fx-title { margin: 0 0 2px; font-size: 13px; font-weight: 600; }
+.fx-group { border: 1px solid var(--border-dark); border-radius: var(--radius); padding: 6px 10px 10px; display: flex; flex-direction: column; gap: 6px; margin: 0; }
+.fx-group legend { color: var(--text-dim); padding: 0 4px; }
+.fx-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fx-col { display: flex; flex-direction: column; gap: 4px; }
+.fx-label { min-width: 70px; color: var(--text-dim); }
+.fx-slide input[type='range'] { flex: 1; min-width: 120px; }
+.fx-swatch { width: 34px; height: 20px; padding: 0; border: 1px solid var(--border-dark); background: none; cursor: pointer; }
+.fx-dial { cursor: pointer; }
+.fx-dial circle { fill: var(--panel-sunken); stroke: var(--border-light); }
+.fx-dial line { stroke: var(--text); stroke-width: 1.6; }
+.fx-contour { background: var(--panel-sunken); border: 1px solid var(--border-dark); }
+.fx-contour path { fill: none; stroke: var(--text); stroke-width: 1.2; }
+.fx-gradient { width: 120px; height: 18px; }
+.fx-radio label { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; }
+.fx-side { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+.fx-tile { width: 100px; height: 100px; border: 1px solid var(--border-dark); }
+.fx-blendif { position: relative; height: 16px; margin: 0 6px; background: linear-gradient(to right, #000, #fff); border: 1px solid var(--border-dark); }
+.fx-blendif-handle { position: absolute; top: 100%; width: 9px; height: 9px; margin-left: -4.5px; cursor: ew-resize; clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.fx-blendif-handle.black { background: #000; outline: 1px solid #888; }
+.fx-blendif-handle.white { background: #fff; outline: 1px solid #888; }
+.fx-blendif-head { justify-content: space-between; }
+.fx-menu-anchor { position: relative; display: inline-flex; }
+.fx-menu { position: absolute; bottom: 100%; left: 0; z-index: 40; min-width: 170px; background: var(--panel-raised); border: 1px solid var(--border-dark); box-shadow: 0 4px 14px rgb(0 0 0 / 0.4); padding: 4px 0; }
+.fx-menu-item { padding: 4px 12px; white-space: nowrap; cursor: default; }
+.fx-menu-item:hover { background: var(--row-hover); }
+.layer-fx { margin-left: auto; padding: 0 4px; background: none; border: none; color: var(--text); font-style: italic; font-size: 11px; cursor: pointer; }
+.layer-fx.off { color: var(--text-disabled); }
+.fx-row-effects, .fx-row-effect { min-height: 20px; font-size: 11px; }
+.fx-row-effects .layer-name { color: var(--text-dim); }
+.fx-row-effect.off .smart-filter-name { color: var(--text-disabled); text-decoration: line-through; }
+.fx-menu-tall { max-height: 420px; overflow-y: auto; }
+.fx-menu-sep { height: 1px; margin: 4px 0; background: var(--border-dark); }

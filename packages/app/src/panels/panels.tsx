@@ -4,7 +4,9 @@ import { AdjustmentEditor } from '../adjust/editors';
 import { ADJUSTMENT_ICON, initialAdjustment } from '../adjust/initial';
 import { FillEditor, PatternPicker, patternThumb } from '../adjust/fill';
 import { gradientCss } from '../adjust/editors';
-import { FILL_LABEL, FILTER_BY_ID, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
+import { STYLE_ITEMS, type StyleKey } from '../fx/LayerStyleDialog';
+import { MENUS } from '../menus/menus';
+import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
@@ -74,6 +76,11 @@ function Placeholder(props: { name: string; milestone: string; what: string }) {
 // ---- Layers ---------------------------------------------------------------------------
 
 function LayersPanel() {
+  const [fxMenu, setFxMenu] = createSignal(false);
+  const [adjMenu, setAdjMenu] = createSignal(false);
+  // Effect lists show until folded, as Photoshop shows a new style's.
+  const [fxClosed, setFxClosed] = createSignal<Set<number>>(new Set());
+  const fxOpen = () => ({ has: (id: number) => !fxClosed().has(id) });
   const rows = () => store.doc()?.layers ?? [];
   const active = () => store.doc()?.activeLayerIds ?? [];
 
@@ -276,9 +283,33 @@ function LayersPanel() {
                 <Show when={l.opacity < 1}>
                   <span class="layer-badge" title="Opacity">{Math.round(l.opacity * 100)}%</span>
                 </Show>
+                <Show when={l.effects}>
+                  <button
+                    type="button"
+                    class="layer-fx"
+                    classList={{ off: !l.effects!.enabled }}
+                    title={fxOpen().has(l.id) ? 'Hide the list of effects' : 'Show the list of effects'}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const next = new Set(fxClosed());
+                      if (next.has(l.id)) next.delete(l.id);
+                      else next.add(l.id);
+                      setFxClosed(next);
+                    }}
+                    onDblClick={(e) => {
+                      e.stopPropagation();
+                      store.openDialog('layerStyle', { layerId: l.id, page: 'blending' });
+                    }}
+                  >
+                    fx {fxOpen().has(l.id) ? '▾' : '▸'}
+                  </button>
+                </Show>
               </div>
               <Show when={l.kind === 'smart' && l.smart && l.smart.filters.length > 0 ? l.smart : null}>
                 {(sm) => <SmartFilterRows layerId={l.id} depth={l.depth} smart={sm()} />}
+              </Show>
+              <Show when={l.effects && fxOpen().has(l.id) ? l.effects : null}>
+                {(fx) => <EffectRows layerId={l.id} depth={l.depth} effects={fx()} />}
               </Show>
               </>
             )}
@@ -299,9 +330,29 @@ function LayersPanel() {
         <button type="button" class="mini-icon" title="Link layers — not available yet" disabled>
           <Icon name="linkChain" size={15} />
         </button>
-        <button type="button" class="mini-icon" title="Add a layer style — arrives in M6" disabled>
-          <Icon name="fx" size={15} />
-        </button>
+        <div class="fx-menu-anchor">
+          <button type="button" class="mini-icon" title="Add a layer style" disabled={!selected() || selected()?.kind === 'adjustment'} onClick={() => setFxMenu(!fxMenu())}>
+            <Icon name="fx" size={15} />
+          </button>
+          <Show when={fxMenu()}>
+            <div class="fx-menu" onMouseLeave={() => setFxMenu(false)}>
+              <For each={STYLE_ITEMS.filter((i) => i.key !== 'bevelContour' && i.key !== 'bevelTexture')}>
+                {(item) => (
+                  <div
+                    class="fx-menu-item"
+                    onClick={() => {
+                      setFxMenu(false);
+                      const id = selected()?.id;
+                      if (id !== undefined) store.openDialog('layerStyle', { layerId: id, page: item.key });
+                    }}
+                  >
+                    {item.label}…
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
         <button
           type="button"
           class="mini-icon"
@@ -320,9 +371,32 @@ function LayersPanel() {
         >
           <Icon name="addMask" size={15} />
         </button>
-        <button type="button" class="mini-icon" title="Create new fill or adjustment layer — arrives in M4" disabled>
-          <Icon name="adjustment" size={15} />
-        </button>
+        <div class="fx-menu-anchor">
+          <button type="button" class="mini-icon" title="Create new fill or adjustment layer" disabled={!store.doc()} onClick={() => setAdjMenu(!adjMenu())}>
+            <Icon name="adjustment" size={15} />
+          </button>
+          <Show when={adjMenu()}>
+            <div class="fx-menu fx-menu-tall" onMouseLeave={() => setAdjMenu(false)}>
+              <For each={NEW_LAYER_ITEMS()}>
+                {(item) =>
+                  item.cmd ? (
+                    <div
+                      class="fx-menu-item"
+                      onClick={() => {
+                        setAdjMenu(false);
+                        window.dispatchEvent(new CustomEvent('umbra:command', { detail: item.cmd }));
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                  ) : (
+                    <div class="fx-menu-sep" />
+                  )
+                }
+              </For>
+            </div>
+          </Show>
+        </div>
         <button
           type="button"
           class="mini-icon"
@@ -1245,6 +1319,13 @@ function HistoryPanel() {
  * filter mask and an eye for them all, then one row per filter, topmost first — eye, name
  * (double-click to edit its settings), and buttons for its blending options, order and removal.
  */
+/** The footer's fill/adjustment menu: Layer ▸ New Fill Layer and New Adjustment Layer, as Photoshop's button lists them. */
+const NEW_LAYER_ITEMS = () => {
+  const layer = MENUS.find((m) => m.label === 'Layer')!.items;
+  const sub = (label: string) => (layer.find((n) => n.label === label)?.items ?? []).filter((n) => n.cmd);
+  return [...sub('New Fill Layer'), { label: '' }, ...sub('New Adjustment Layer')] as { label?: string; cmd?: string }[];
+};
+
 function SmartFilterRows(props: { layerId: number; depth: number; smart: SmartSummary }) {
   const send = (m: unknown) => store.engine?.(m as never);
   const select = () => send({ t: 'selectLayer', id: props.layerId });
@@ -1331,6 +1412,75 @@ function SmartFilterRows(props: { layerId: number; depth: number; smart: SmartSu
             <button type="button" class="mini-icon smart-filter-btn" title="Delete this filter" onClick={(e) => { e.stopPropagation(); op(i, { kind: 'delete' }); }}>
               <Icon name="trash" size={12} />
             </button>
+          </div>
+        )}
+      </For>
+    </>
+  );
+}
+
+/**
+ * The rows under a layer with a style (spec 01 §5, Layers): "Effects" with an eye for them
+ * all, then one row per effect, as Photoshop lists them; double-click opens its page.
+ */
+function EffectRows(props: { layerId: number; depth: number; effects: LayerEffects }) {
+  const send = (m: unknown) => store.engine?.(m as never);
+  const commit = (effects: LayerEffects, name: string) => send({ t: 'setLayerStyle', id: props.layerId, effects, name });
+  type Row = { key: StyleKey; index: number; label: string; enabled: boolean };
+  const rows = (): Row[] => {
+    const fx = props.effects;
+    const out: Row[] = [];
+    for (const item of STYLE_ITEMS) {
+      const v = (fx as unknown as Record<string, unknown>)[item.key];
+      if (Array.isArray(v)) v.forEach((e: { enabled: boolean }, index) => out.push({ key: item.key, index, label: item.label, enabled: e.enabled }));
+      else if (v && typeof v === 'object') out.push({ key: item.key, index: 0, label: item.label, enabled: (v as { enabled: boolean }).enabled });
+    }
+    return out;
+  };
+  const toggle = (r: Row) => {
+    const fx = props.effects as unknown as Record<string, unknown>;
+    const v = fx[r.key];
+    const next = Array.isArray(v) ? v.map((e, i) => (i === r.index ? { ...e, enabled: !e.enabled } : e)) : { ...(v as object), enabled: !r.enabled };
+    commit({ ...props.effects, [r.key]: next } as LayerEffects, `${r.enabled ? 'Hide' : 'Show'} ${r.label}`);
+  };
+  return (
+    <>
+      <div class="layer-row fx-row-effects" style={{ 'padding-left': `${22 + props.depth * 14}px` }} onClick={() => send({ t: 'selectLayer', id: props.layerId })}>
+        <button
+          type="button"
+          class="layer-eye"
+          title={props.effects.enabled ? 'Hide all effects' : 'Show all effects'}
+          onClick={(e) => {
+            e.stopPropagation();
+            commit({ ...props.effects, enabled: !props.effects.enabled }, props.effects.enabled ? 'Hide Effects' : 'Show Effects');
+          }}
+        >
+          <Icon name={props.effects.enabled ? 'eye' : 'eyeOff'} size={14} />
+        </button>
+        <span class="layer-name">Effects</span>
+      </div>
+      <For each={rows()}>
+        {(r) => (
+          <div
+            class="layer-row fx-row-effect"
+            classList={{ off: !r.enabled || !props.effects.enabled }}
+            style={{ 'padding-left': `${22 + props.depth * 14}px` }}
+            onClick={() => send({ t: 'selectLayer', id: props.layerId })}
+            onDblClick={() => store.openDialog('layerStyle', { layerId: props.layerId, page: r.key })}
+            title="Double-click to edit"
+          >
+            <button
+              type="button"
+              class="layer-eye"
+              title={r.enabled ? `Hide ${r.label}` : `Show ${r.label}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                toggle(r);
+              }}
+            >
+              <Icon name={r.enabled ? 'eye' : 'eyeOff'} size={14} />
+            </button>
+            <span class="layer-name smart-filter-name">{r.label}</span>
           </div>
         )}
       </For>

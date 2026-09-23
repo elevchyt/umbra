@@ -2,7 +2,8 @@
  * Engine: owns the document, the history and the GL context. Lives in a worker so that
  * neither UI work nor engine work can stall the other (spec 03 §2).
  */
-import { DEFAULT_GLOBAL_LIGHT, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
+import { DEFAULT_GLOBAL_LIGHT, mapEffectPatterns, scaleEffects, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
+import { EffectsCache, type EffectLayer } from './effects-layers.js';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { EMPTY_RECT, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
@@ -30,6 +31,8 @@ import {
   makePixelLayer,
   makeAdjustmentLayer,
   insertLayer,
+  insertBelow,
+  DEFAULT_BLENDING_STATE,
   replaceLayer,
   panelRows,
   totalTiles,
@@ -139,6 +142,13 @@ function transformReadout(box: Rect, m: Mat) {
 
 const STROKE_SPACING = 0.25; // fraction of diameter, Photoshop's default
 
+export type StyleCommand = 'copy' | 'paste' | 'clear' | 'hideAll' | 'scale' | 'createLayers' | 'rasterize';
+export interface LayerStyleProps {
+  opacity?: number;
+  fill?: number;
+  blendMode?: BlendMode;
+  blending?: Layer['blending'];
+}
 export type SmartCommand = 'convert' | 'rasterize' | 'viaCopy' | 'toLayers' | 'clearFilters' | 'toggleFilters' | 'toggleFilterMask' | 'deleteFilterMask';
 export type SmartFilterOp = { kind: 'toggle' } | { kind: 'delete' } | { kind: 'move'; to: number } | { kind: 'blend'; blendMode: BlendMode; opacity: number };
 
@@ -442,23 +452,46 @@ export class Engine {
 
   // ---- layer styles ----------------------------------------------------------------------
 
-  /** The Layer Style dialog's OK (and every one-shot style command): a new style for a layer. */
-  setLayerEffects(id: number, effects: LayerEffects | null, historyName = 'Layer Style'): boolean {
+  /**
+   * A style's patterns arrive from the UI by id (it only holds thumbnails); give them their
+   * pixels from the library.
+   */
+  private resolveEffects(fx: LayerEffects): LayerEffects {
+    return mapEffectPatterns(fx, (p) => (p.data.length ? p : this.findPattern(p.id)));
+  }
+
+  private styled(id: number, effects: LayerEffects | null, props?: LayerStyleProps): Doc {
+    const fx = effects ? this.resolveEffects(effects) : undefined;
+    return {
+      ...this.doc,
+      layers: updateLayer(this.doc.layers, id, (l) => ({
+        ...l,
+        effects: fx,
+        ...(props?.opacity !== undefined ? { opacity: props.opacity } : {}),
+        ...(props?.fill !== undefined ? { fill: props.fill } : {}),
+        ...(props?.blendMode !== undefined ? { blendMode: props.blendMode } : {}),
+        ...(props?.blending !== undefined ? { blending: props.blending } : {}),
+      })),
+    };
+  }
+
+  /** The Layer Style dialog's OK: effects and, from its Blending Options page, the layer's blending. */
+  setLayerStyle(id: number, effects: LayerEffects | null, props?: LayerStyleProps, globalLight?: GlobalLight, historyName = 'Layer Style'): boolean {
     const layer = findLayer(this.doc.layers, id);
-    if (!layer || layer.kind === 'adjustment') return false;
+    if (!layer || (effects && layer.kind === 'adjustment')) return false;
     this.previewDoc = null;
-    const next = { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, effects: effects ?? undefined })) };
-    this.commit(next, historyName);
+    const next = this.styled(id, effects, props);
+    this.commit(globalLight ? { ...next, globalLight } : next, historyName);
     return true;
   }
 
   /** The Layer Style dialog's live preview; null ends it. */
-  previewLayerEffects(id: number, effects: LayerEffects | null, globalLight?: GlobalLight): void {
-    if (!effects) {
+  previewLayerStyle(id: number, effects: LayerEffects | null, props?: LayerStyleProps, globalLight?: GlobalLight): void {
+    if (!effects && !props) {
       this.previewDoc = null;
       return;
     }
-    const doc = { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, effects })) };
+    const doc = this.styled(id, effects, props);
     this.previewDoc = globalLight ? { ...doc, globalLight } : doc;
   }
 
@@ -466,6 +499,86 @@ export class Engine {
   setGlobalLight(light: GlobalLight): boolean {
     this.previewDoc = null;
     this.commit({ ...this.doc, globalLight: light }, 'Global Light');
+    return true;
+  }
+
+  /** Copy Layer Style keeps the effects and the blending options, as Photoshop's does. */
+  private styleClipboard: { effects: LayerEffects | undefined; fill: number; blending: Layer['blending'] } | null = null;
+
+  styleCommand(cmd: StyleCommand, amount?: number): boolean {
+    const ids = this.doc.activeLayerIds;
+    const layer = ids[0] === undefined ? undefined : findLayer(this.doc.layers, ids[0]);
+    let doc = this.doc;
+    let name = '';
+    switch (cmd) {
+      case 'copy':
+        if (!layer) return false;
+        this.styleClipboard = { effects: layer.effects, fill: layer.fill, blending: layer.blending };
+        return true;
+      case 'paste': {
+        const c = this.styleClipboard;
+        if (!c) return false;
+        for (const id of ids) doc = { ...doc, layers: updateLayer(doc.layers, id, (l) => (l.kind === 'adjustment' ? l : { ...l, effects: c.effects, fill: c.fill, blending: c.blending })) };
+        name = 'Paste Layer Style';
+        break;
+      }
+      case 'clear':
+        for (const id of ids) doc = { ...doc, layers: updateLayer(doc.layers, id, (l) => ({ ...l, effects: undefined, fill: 1, blending: DEFAULT_BLENDING_STATE })) };
+        name = 'Clear Layer Style';
+        break;
+      case 'hideAll': {
+        // Photoshop's item toggles: Hide All Effects when any show, else Show All Effects.
+        const anyOn = [...walkLayers(doc.layers)].some(({ layer: l }) => l.effects?.enabled);
+        let layers = doc.layers;
+        for (const { layer: l } of walkLayers(doc.layers)) {
+          if (l.effects) layers = updateLayer(layers, l.id, (x) => ({ ...x, effects: { ...x.effects!, enabled: !anyOn } }));
+        }
+        doc = { ...doc, layers };
+        name = anyOn ? 'Hide All Effects' : 'Show All Effects';
+        break;
+      }
+      case 'scale':
+        if (!layer?.effects || !amount) return false;
+        doc = { ...doc, layers: updateLayer(doc.layers, layer.id, (l) => ({ ...l, effects: scaleEffects(l.effects!, amount / 100) })) };
+        name = 'Scale Effects';
+        break;
+      case 'createLayers': {
+        if (!layer?.effects) return false;
+        const made = new EffectsCache().get(layer, this.doc);
+        if (!made) return false;
+        // The generated layers become real ones, named as Photoshop names them.
+        const real = (e: EffectLayer) => makePixelLayer(`${layer.name}'s ${e.name.split(' ▸ ')[1]}`, e.plane.base, { blendMode: e.blendMode, opacity: e.opacity * layer.opacity, visible: layer.visible });
+        let layers = updateLayer(doc.layers, layer.id, (l) => ({ ...l, effects: undefined }));
+        let below: number | undefined = undefined;
+        // The lower ones go beneath the layer (the topmost of them just under it), the upper
+        // ones above it in order.
+        for (const e of [...made.below].reverse()) {
+          const l = real(e);
+          layers = insertBelow(layers, l, below ?? layer.id);
+          below = l.id;
+        }
+        let above = layer.id;
+        for (const e of made.above) {
+          const l = real(e);
+          layers = insertLayer(layers, l, above);
+          above = l.id;
+        }
+        doc = { ...doc, layers };
+        name = 'Create Layers';
+        break;
+      }
+      case 'rasterize':
+        if (!layer?.effects || layer.kind === 'group') return false;
+        doc = {
+          ...doc,
+          layers: replaceLayer(doc.layers, layer.id, makePixelLayer(layer.name, LayerCmd.rasterize([{ ...layer, opacity: 1, visible: true }], { x0: 0, y0: 0, x1: doc.width, y1: doc.height }, doc.globalLight), { id: layer.id, opacity: layer.opacity, blendMode: layer.blendMode, visible: layer.visible, clipped: layer.clipped })),
+        };
+        name = 'Rasterize Layer Style';
+        break;
+    }
+    if (doc === this.doc) return false;
+    this.previewDoc = null;
+    this.commit(doc, name);
     return true;
   }
 
@@ -2807,7 +2920,8 @@ export class Engine {
         name: layer.name,
         kind: layer.kind,
         smart: layer.kind === 'smart' ? Engine.smartToSummary(layer) : undefined,
-        effects: layer.effects,
+        effects: layer.effects ? Engine.effectsToSummary(layer.effects) : undefined,
+        blending: layer.blending,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,
@@ -2823,6 +2937,11 @@ export class Engine {
         tiles: layer.kind === 'pixel' || layer.kind === 'smart' ? layer.plane.base.tileCount : 0,
       })),
     };
+  }
+
+  /** A style for the UI: patterns by id only (their pixels stay here). */
+  private static effectsToSummary(fx: LayerEffects): LayerEffects {
+    return mapEffectPatterns(fx, (p) => ({ ...p, data: new Uint8Array(0) }));
   }
 
   private static smartToSummary(layer: SmartObjectLayer): SmartSummary {

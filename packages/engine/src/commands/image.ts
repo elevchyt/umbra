@@ -7,6 +7,7 @@
  */
 import { scale as scaleMat, translate as translateMat, type Mat } from '@umbra/kernels/matrix';
 import { retransform } from '../smart.js';
+import { scaleEffects } from '@umbra/kernels/effects/types';
 import { TILE_SIZE, TILE_SHIFT, channelCount, maxValue } from '@umbra/core/pixels';
 import { rectUnion, rectIsEmpty, type Rect } from '@umbra/core/geom';
 import { Plane } from '../tiles/plane.js';
@@ -199,6 +200,13 @@ export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane, sma
   });
 }
 
+function scaleStyles(layers: readonly Layer[], k: number): Layer[] {
+  return layers.map((l) => {
+    const fx = l.effects ? { effects: scaleEffects(l.effects, k) } : {};
+    return l.kind === 'group' ? { ...l, ...fx, children: scaleStyles(l.children, k) } : { ...l, ...fx };
+  });
+}
+
 /** mapLayers for a geometric change: smart objects take `matrix` into their transform. */
 function mapGeometry(layers: readonly Layer[], fn: (p: Plane) => Plane, matrix: Mat, size: { width: number; height: number }): Layer[] {
   return mapLayers(layers, fn, (l) => retransform(l, matrix, size, fn));
@@ -213,7 +221,8 @@ export function imageSize(doc: Doc, width: number, height: number, method: Resam
     ...doc,
     width,
     height,
-    layers: mapGeometry(doc.layers, (p) => resamplePlane(p, sx, sy, method, bounds), scaleMat(sx, sy), { width, height }),
+    // Styles scale with the pixels, as Photoshop's Image Size does with Scale Styles on.
+    layers: scaleStyles(mapGeometry(doc.layers, (p) => resamplePlane(p, sx, sy, method, bounds), scaleMat(sx, sy), { width, height }), (sx + sy) / 2),
   };
 }
 

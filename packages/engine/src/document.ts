@@ -409,6 +409,16 @@ export function insertLayer(
   return placed ? out : [...layers, layer];
 }
 
+/** Insert `layer` immediately below `aboveId`, wherever that is in the tree. */
+export function insertBelow(layers: readonly Layer[], layer: Layer, aboveId: number): Layer[] {
+  const out: Layer[] = [];
+  for (const l of layers) {
+    if (l.id === aboveId) out.push(layer);
+    out.push(l.kind === 'group' ? { ...l, children: insertBelow(l.children, layer, aboveId) } : l);
+  }
+  return out;
+}
+
 /** Flattened display order for the Layers panel: top-most first, groups above their children. */
 export interface PanelRow {
   layer: Layer;

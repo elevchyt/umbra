@@ -265,3 +265,36 @@ export function hasVisibleEffects(fx: LayerEffects | undefined): fx is LayerEffe
     any(fx.stroke)
   );
 }
+
+/**
+ * Layer ▸ Layer Style ▸ Scale Effects, and what Image Size does to a style: every size and
+ * distance in pixels multiplied by `k` (angles, opacities and percentages untouched).
+ */
+export function scaleEffects(fx: LayerEffects, k: number): LayerEffects {
+  const px = (v: number) => Math.round(v * k * 10) / 10;
+  const shadow = (s: ShadowEffect): ShadowEffect => ({ ...s, distance: px(s.distance), size: px(s.size) });
+  const glow = (g: GlowEffect | null) => (g ? { ...g, size: px(g.size) } : null);
+  return {
+    ...fx,
+    dropShadow: fx.dropShadow.map(shadow),
+    innerShadow: fx.innerShadow.map(shadow),
+    outerGlow: glow(fx.outerGlow),
+    innerGlow: glow(fx.innerGlow),
+    bevel: fx.bevel ? { ...fx.bevel, size: px(fx.bevel.size), soften: px(fx.bevel.soften), textureScale: fx.bevel.textureScale * k } : null,
+    satin: fx.satin ? { ...fx.satin, distance: px(fx.satin.distance), size: px(fx.satin.size) } : null,
+    gradientOverlay: fx.gradientOverlay.map((g) => ({ ...g, scale: Math.min(150, Math.max(10, g.scale * k)) })),
+    patternOverlay: fx.patternOverlay ? { ...fx.patternOverlay, scale: fx.patternOverlay.scale * k } : null,
+    stroke: fx.stroke.map((s) => ({ ...s, size: Math.max(1, px(s.size)) })),
+  };
+}
+
+/** Every pattern a style uses, for resolving and for PSD. */
+export function mapEffectPatterns(fx: LayerEffects, fn: (p: PatternDef) => PatternDef | null): LayerEffects {
+  const one = (p: PatternDef | null) => (p ? fn(p) : null);
+  return {
+    ...fx,
+    bevel: fx.bevel ? { ...fx.bevel, texture: one(fx.bevel.texture) } : null,
+    patternOverlay: fx.patternOverlay ? { ...fx.patternOverlay, pattern: one(fx.patternOverlay.pattern) } : null,
+    stroke: fx.stroke.map((s) => (s.fill.type === 'pattern' ? { ...s, fill: { ...s.fill, pattern: one(s.fill.pattern) } } : s)),
+  };
+}

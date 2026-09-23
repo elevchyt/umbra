@@ -261,15 +261,19 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         latestPreview(() => engine?.previewFilter(m.id, m.params, m.fg, m.bg, m.smartIndex));
         break;
       }
-      case 'setLayerEffects':
+      case 'setLayerStyle':
         pendingPreview = null;
-        if (engine?.setLayerEffects(msg.id, msg.effects, msg.name)) post({ t: 'doc', doc: engine.summary() });
+        if (engine?.setLayerStyle(msg.id, msg.effects, msg.props, msg.globalLight, msg.name)) post({ t: 'doc', doc: engine.summary() });
         break;
-      case 'previewLayerEffects': {
+      case 'previewLayerStyle': {
         const m = msg;
-        latestPreview(() => engine?.previewLayerEffects(m.id, m.effects, m.globalLight));
+        latestPreview(() => engine?.previewLayerStyle(m.id, m.effects, m.props, m.globalLight));
         break;
       }
+      case 'styleCommand':
+        pendingPreview = null;
+        if (engine?.styleCommand(msg.cmd, msg.amount)) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'setGlobalLight':
         pendingPreview = null;
         if (engine?.setGlobalLight(msg.light)) post({ t: 'doc', doc: engine.summary() });

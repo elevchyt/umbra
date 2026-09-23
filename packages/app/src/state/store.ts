@@ -266,6 +266,8 @@ export type DialogId =
   | 'gallery'
   | 'smartBlend'
   | 'closeContents'
+  | 'layerStyle'
+  | 'globalLight'
   | 'fade'
   | 'calculations'
   | 'definePattern';

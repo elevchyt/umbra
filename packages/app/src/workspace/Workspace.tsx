@@ -14,6 +14,8 @@ import { FilterDialog, colours as filterColours, type FilterDialogPayload } from
 import { FadeDialog } from '../filters/FadeDialog';
 import { GalleryDialog, type GalleryPayload } from '../filters/GalleryDialog';
 import { SmartBlendDialog, type SmartBlendPayload } from '../filters/SmartBlendDialog';
+import { LayerStyleDialog, type LayerStylePayload, type StyleKey } from '../fx/LayerStyleDialog';
+import { GlobalLightDialog } from '../fx/GlobalLightDialog';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -375,7 +377,69 @@ export function Workspace() {
       return;
     }
 
+    const styleActive = () => store.doc()?.activeLayerIds[0];
+    const STYLE_PAGE: Record<string, StyleKey> = {
+      'style.blendingOptions': 'blending',
+      'style.bevelEmboss': 'bevel',
+      'style.stroke': 'stroke',
+      'style.innerShadow': 'innerShadow',
+      'style.innerGlow': 'innerGlow',
+      'style.satin': 'satin',
+      'style.colorOverlay': 'colorOverlay',
+      'style.gradientOverlay': 'gradientOverlay',
+      'style.patternOverlay': 'patternOverlay',
+      'style.outerGlow': 'outerGlow',
+      'style.dropShadow': 'dropShadow',
+    };
+    const openStylePage = () => {
+      const id = styleActive();
+      const l = store.doc()?.layers.find((x) => x.id === id);
+      if (id === undefined || !l) return;
+      if (l.kind === 'adjustment' && cmd !== 'style.blendingOptions') {
+        flash('Layer effects cannot be applied to an adjustment layer.');
+        return;
+      }
+      store.openDialog('layerStyle', { layerId: id, page: STYLE_PAGE[cmd] });
+    };
+
     switch (cmd) {
+      case 'style.blendingOptions':
+      case 'style.bevelEmboss':
+      case 'style.stroke':
+      case 'style.innerShadow':
+      case 'style.innerGlow':
+      case 'style.satin':
+      case 'style.colorOverlay':
+      case 'style.gradientOverlay':
+      case 'style.patternOverlay':
+      case 'style.outerGlow':
+      case 'style.dropShadow':
+        openStylePage();
+        return;
+      case 'style.copy':
+        send({ t: 'styleCommand', cmd: 'copy' });
+        return;
+      case 'style.paste':
+        send({ t: 'styleCommand', cmd: 'paste' });
+        return;
+      case 'style.clear':
+        send({ t: 'styleCommand', cmd: 'clear' });
+        return;
+      case 'style.hideAll':
+        send({ t: 'styleCommand', cmd: 'hideAll' });
+        return;
+      case 'style.createLayers':
+        send({ t: 'styleCommand', cmd: 'createLayers' });
+        return;
+      case 'rasterize.layerStyle':
+        send({ t: 'styleCommand', cmd: 'rasterize' });
+        return;
+      case 'style.scaleEffects':
+        setAmountPrompt({ title: 'Scale Layer Effects', label: 'Scale', value: 100, unit: '%', min: 1, max: 1000, apply: (v) => send({ t: 'styleCommand', cmd: 'scale', amount: v }) });
+        return;
+      case 'style.globalLight':
+        store.openDialog('globalLight');
+        return;
       case 'so.convert':
       case 'filter.convertForSmart':
         send({ t: 'smartCommand', cmd: 'convert' });
@@ -941,6 +1005,9 @@ export function Workspace() {
     label: string;
     value: number;
     apply: (v: number) => void;
+    unit?: string;
+    min?: number;
+    max?: number;
   } | null>(null);
 
   /** The small one-field dialogs the Select ▸ Modify commands share. */
@@ -1058,6 +1125,16 @@ export function Workspace() {
     };
     input.click();
   }
+
+  // Panels run menu commands by event (the Layers panel's fill/adjustment button).
+  onMount(() => {
+    const run = (e: Event) => {
+      const cmd = (e as CustomEvent<string>).detail;
+      if (typeof cmd === 'string' && isEnabled(cmd)) runCommand(cmd);
+    };
+    window.addEventListener('umbra:command', run);
+    onCleanup(() => window.removeEventListener('umbra:command', run));
+  });
 
   // ---- keyboard -------------------------------------------------------------------------
   onMount(() => {
@@ -1211,6 +1288,11 @@ export function Workspace() {
     // Built, but only meaningful in a state: there has to be a filter to repeat, a step to fade.
     if (cmd === 'filter.last') return !!store.doc()?.lastFilter;
     if (cmd === 'edit.fade') return !!store.doc()?.fadeName;
+    if (cmd === 'style.copy' || cmd === 'style.clear' || cmd === 'style.createLayers' || cmd === 'style.scaleEffects' || cmd === 'rasterize.layerStyle') {
+      const d = store.doc();
+      return !!d?.layers.find((l) => l.id === d.activeLayerIds[0])?.effects;
+    }
+    if (cmd === 'style.hideAll') return !!store.doc()?.layers.some((l) => l.effects);
     const smartOnly = SMART_ONLY[cmd];
     if (smartOnly) {
       const d = store.doc();
@@ -1402,6 +1484,9 @@ export function Workspace() {
               title={p().title}
               label={p().label}
               initial={p().value}
+              unit={p().unit}
+              min={p().min}
+              max={p().max}
               onCancel={() => setAmountPrompt(null)}
               onApply={(v) => {
                 setAmountPrompt(null);
@@ -1486,6 +1571,12 @@ export function Workspace() {
             {store.doc()?.editingContents?.path.at(-2)}”.
           </p>
         </Dialog>
+      </Show>
+      <Show when={store.dialog()?.id === 'layerStyle'}>
+        <LayerStyleDialog payload={store.dialog()!.payload as LayerStylePayload} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'globalLight'}>
+        <GlobalLightDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'smartBlend'}>
         <SmartBlendDialog payload={store.dialog()!.payload as SmartBlendPayload} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
