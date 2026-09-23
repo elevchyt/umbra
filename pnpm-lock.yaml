@@ -105,6 +105,18 @@ importers:
         specifier: workspace:*
         version: link:../psd
 
+  packages/text:
+    dependencies:
+      '@umbra/core':
+        specifier: workspace:*
+        version: link:../core
+      '@umbra/kernels':
+        specifier: workspace:*
+        version: link:../kernels
+      harfbuzzjs:
+        specifier: 1.6.2
+        version: 1.6.2
+
   packages/ui:
     dependencies:
       '@umbra/core':
@@ -1204,6 +1216,9 @@ packages:
 
   graceful-fs@4.2.11:
     resolution: {integrity: sha512-RbJ5/jmFcNNCcDV5o9eTnBLJ/HszWV0P73bc+Ff4nS/rJj+YaS6IGyiOL0VoBYX+l1Wrl3k63h/KrH+nhJ0XvQ==}
+
+  harfbuzzjs@1.6.2:
+    resolution: {integrity: sha512-95c1vWuzoHjM19d5fQgPbz1wcv1pTa0UM9dZrdPgSMUEVuSwuzeVPkq6UhHHw3jLOkE9AYzzTP8XQkRBpPYpEg==}
 
   has-flag@4.0.0:
     resolution: {integrity: sha512-EykJT/Q1KjTWctppgIAgfSO0tKVuZUjhgMr17kqTumMl6Afv3EISleU7qZUzoXDFTAHTDC4NOoG/ZxU3EvlMPQ==}
@@ -3142,6 +3157,8 @@ snapshots:
       responselike: 2.0.1
 
   graceful-fs@4.2.11: {}
+
+  harfbuzzjs@1.6.2: {}
 
   has-flag@4.0.0: {}
 
