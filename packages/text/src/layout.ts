@@ -62,6 +62,8 @@ export interface LayoutLine {
 }
 
 export interface Decoration {
+  /** The line it belongs to. */
+  line: number;
   x0: number;
   y0: number;
   x1: number;
@@ -77,6 +79,8 @@ export interface TextLayout {
   decorations: Decoration[];
   /** Ink-agnostic bounds: the line boxes, document px. */
   bounds: { x0: number; y0: number; x1: number; y1: number };
+  /** Paragraph type whose text does not fit its box: the lines past it are not drawn. */
+  overflow: boolean;
 }
 
 /** What each character is drawn as: the style with the synthesized positions resolved. */
@@ -270,7 +274,7 @@ export function layoutText(spec: TextSpec, { registry, hb }: LayoutOptions): Tex
     let ls = 0;
     const avail = (first: boolean) => measure - para.indentLeft - para.indentRight - (first ? para.indentFirst : 0);
     while (ls <= ptext.length) {
-      const hard = ptext.indexOf(' ', ls);
+      const hard = ptext.indexOf('\u2028', ls);
       const limit = hard === -1 ? ptext.length : hard;
       let le = limit;
       const room = avail(ranges.length === 0);
@@ -341,7 +345,7 @@ export function layoutText(spec: TextSpec, { registry, hb }: LayoutOptions): Tex
       // Width and justification.
       const contentWidth = widthOf(a, b);
       const room = avail(li === 0);
-      const justify = para.align.startsWith('justify') && Number.isFinite(room) && (!lastOfPara || para.align === 'justifyAll') && !(b < ptext.length && ptext[b] === ' ');
+      const justify = para.align.startsWith('justify') && Number.isFinite(room) && (!lastOfPara || para.align === 'justifyAll') && !(b < ptext.length && ptext[b] === '\u2028');
       let extraPerSpace = 0;
       let extraPerCluster = 0;
       if (justify && contentWidth < room) {
@@ -436,8 +440,8 @@ export function layoutText(spec: TextSpec, { registry, hb }: LayoutOptions): Tex
           const f = faceFor(registry, st);
           const k = st.size / f.metrics.upem;
           const m = f.metrics;
-          if (st.underline) decorations.push({ x0: cl.a0, x1: cl.a1, y0: pen - m.underlineOffset * k - (m.underlineSize * k) / 2, y1: pen - m.underlineOffset * k + (m.underlineSize * k) / 2, color: st.color });
-          if (st.strikethrough) decorations.push({ x0: cl.a0, x1: cl.a1, y0: pen - m.strikeoutOffset * k - m.strikeoutSize * k, y1: pen - m.strikeoutOffset * k, color: st.color });
+          if (st.underline) decorations.push({ line: lines.length, x0: cl.a0, x1: cl.a1, y0: pen - m.underlineOffset * k - (m.underlineSize * k) / 2, y1: pen - m.underlineOffset * k + (m.underlineSize * k) / 2, color: st.color });
+          if (st.strikethrough) decorations.push({ line: lines.length, x0: cl.a0, x1: cl.a1, y0: pen - m.strikeoutOffset * k - m.strikeoutSize * k, y1: pen - m.strikeoutOffset * k, color: st.color });
         }
       }
       lines.push({ start: off + a, end: off + b, paragraph: pi, baseline: vertical ? colX : pen, a0: start, a1: cursor, ascent, descent, rtl: base === 1, clusters });
@@ -464,5 +468,30 @@ export function layoutText(spec: TextSpec, { registry, hb }: LayoutOptions): Tex
     }
   }
   if (!lines.length) x0 = y0 = x1 = y1 = 0;
-  return { text: full, vertical, glyphs, lines, decorations, bounds: { x0, y0, x1, y1 } };
+  // Paragraph type shows only the lines that fit in its box, as Photoshop does; the rest
+  // stays in the text (the caret can still reach it) but is not drawn.
+  let overflow = false;
+  if (spec.kind === 'paragraph' && spec.box) {
+    const limit = vertical ? 0 : spec.box.height;
+    const hidden = new Set<number>();
+    lines.forEach((l, i) => {
+      const out = vertical ? l.baseline - Math.max(l.ascent, l.descent) < limit - 1e-6 : l.baseline + l.descent > limit + 1e-6;
+      if (out && i > 0) hidden.add(i);
+    });
+    if (hidden.size) {
+      overflow = true;
+      const ranges = [...hidden].map((i) => [lines[i]!.start, lines[i]!.end] as const);
+      const inHidden = (c: number) => ranges.some(([a, b]) => c >= a && c < b);
+      return {
+        text: full,
+        vertical,
+        glyphs: glyphs.filter((g) => !inHidden(g.cluster)),
+        lines,
+        decorations: decorations.filter((d) => !hidden.has(d.line)),
+        bounds: { x0, y0, x1, y1 },
+        overflow,
+      };
+    }
+  }
+  return { text: full, vertical, glyphs, lines, decorations, bounds: { x0, y0, x1, y1 }, overflow };
 }

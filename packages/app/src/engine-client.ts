@@ -34,6 +34,8 @@ export interface EngineClientEvents {
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
+  onFonts?: (list: { family: string; styles: { style: string; postscript: string }[] }[], added?: number) => void;
+  onTypeSelection?: (text: string) => void;
   onCustomShapes?: (list: { id: string; name: string; path: import('@umbra/engine').Path }[], error?: string) => void;
   onParity?: (pass: boolean, text: string) => void;
   onContextLost?: () => void;
@@ -143,6 +145,12 @@ export class EngineClient {
       case 'styles':
         this.events.onStyles?.(msg.list);
         break;
+      case 'fonts':
+        this.events.onFonts?.(msg.list, msg.added);
+        break;
+      case 'typeSelection':
+        this.events.onTypeSelection?.(msg.text);
+        break;
       case 'customShapes':
         this.events.onCustomShapes?.(msg.list, msg.error);
         break;
@@ -232,6 +240,9 @@ export class EngineClient {
   /** Set while a vector tool (Pen, anchors, Path/Direct Selection) is active. */
   vectorTool: string | null = null;
   private vectorDown = false;
+  /** Set while a type tool is active: presses place or edit type. */
+  typeTool = false;
+  private typeDown = false;
   private transformDragging = false;
   /** Combine mode chosen in the options bar; modifier keys override it for one gesture. */
   selectOp = 'new';
@@ -337,6 +348,12 @@ export class EngineClient {
         this.transformDragging = true;
         return;
       }
+      if (this.typeTool && e.button === 0 && !this.transformActive) {
+        const p = toLocal(e);
+        this.typeDown = true;
+        this.send({ t: 'typePointer', phase: 'down', x: p.x, y: p.y, shift: e.shiftKey, clicks: e.detail });
+        return;
+      }
       if (this.vectorTool && e.button === 0 && !this.transformActive) {
         const p = toLocal(e);
         this.vectorDown = true;
@@ -416,6 +433,11 @@ export class EngineClient {
         });
         return;
       }
+      if (this.typeDown) {
+        const p = toLocal(e);
+        this.send({ t: 'typePointer', phase: 'move', x: p.x, y: p.y, shift: e.shiftKey, clicks: 0 });
+        return;
+      }
       if (this.vectorTool && !this.transformActive) {
         // Moves go even with the button up: the Pen's rubber band follows the pointer.
         const p = toLocal(e);
@@ -448,6 +470,11 @@ export class EngineClient {
       // race the ring: messages are delivered immediately, but ring samples are only drained on
       // the next tick, so the stroke would end before its own samples had been consumed and the
       // tail of the stroke would be silently dropped.
+      if (this.typeDown) {
+        this.typeDown = false;
+        const p = toLocal(e);
+        this.send({ t: 'typePointer', phase: 'up', x: p.x, y: p.y, shift: e.shiftKey, clicks: e.detail });
+      }
       if (this.vectorDown) {
         this.vectorDown = false;
         const p = toLocal(e);

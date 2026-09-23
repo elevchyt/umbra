@@ -20,6 +20,7 @@ import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { Path } from '@umbra/kernels/vector/path';
 import type { StrokeStyle } from '@umbra/kernels/vector/stroke';
 import type { LiveShape } from '@umbra/kernels/vector/shapes';
+import type { AntiAlias, TextSpec } from '@umbra/text/style';
 
 export type LabelColor =
   | 'none'
@@ -206,7 +207,31 @@ export interface ShapeLayer extends LayerBase {
   readonly plane: MipPlane;
 }
 
-export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer | SmartObjectLayer | ShapeLayer;
+/**
+ * A type layer (spec 02 §6): the text and its styles, laid out by the type engine and drawn
+ * through `transform` (layout space → document). Like a shape layer it carries its rendered
+ * pixels. A layer opened from a PSD whose fonts are missing keeps the file's pixels until it
+ * is edited (`missingFonts`), as Photoshop does.
+ */
+export interface TypeLayer extends LayerBase {
+  readonly kind: 'type';
+  readonly text: TextSpec;
+  readonly antiAlias: AntiAlias;
+  readonly transform: Mat;
+  readonly plane: MipPlane;
+  readonly missingFonts?: readonly string[];
+}
+
+export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer | SmartObjectLayer | ShapeLayer | TypeLayer;
+
+/** The layers that carry a pixel plane of their own (the compositor draws them as pixels). */
+export type PlaneLayer = PixelLayer | SmartObjectLayer | ShapeLayer | TypeLayer;
+export function hasPlane(l: Layer): l is PlaneLayer {
+  return l.kind === 'pixel' || l.kind === 'smart' || l.kind === 'shape' || l.kind === 'type';
+}
+
+/** Layers drawn from vectors and re-rendered after a transform rather than resampled. */
+export type VectorLayer = ShapeLayer | TypeLayer;
 
 /**
  * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
@@ -488,7 +513,7 @@ export function panelRows(layers: readonly Layer[], depth = 0): PanelRow[] {
 export function totalTiles(layers: readonly Layer[]): number {
   let n = 0;
   for (const { layer } of walkLayers(layers)) {
-    if (layer.kind === 'pixel' || layer.kind === 'smart' || layer.kind === 'shape') n += layer.plane.base.tileCount;
+    if (hasPlane(layer)) n += layer.plane.base.tileCount;
     if (layer.mask) n += layer.mask.plane.base.tileCount;
   }
   return n;

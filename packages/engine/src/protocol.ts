@@ -10,10 +10,11 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, VectorMaskCommand } from './engine.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand } from './engine.js';
 import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
 import type { ShapeOptions, ShapeToolId } from './shape-tool.js';
 import type { Path } from '@umbra/kernels/vector/path';
+import type { AntiAlias, CharStyle, ParaStyle, TextSpec } from '@umbra/text/style';
 import type { LiveShape } from '@umbra/kernels/vector/shapes';
 import type { StrokeStyle } from '@umbra/kernels/vector/stroke';
 
@@ -56,9 +57,11 @@ import type { GpuCaps } from './gpu/caps.js';
 export interface LayerSummary {
   id: number;
   name: string;
-  kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart' | 'shape';
+  kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart' | 'shape' | 'type';
   /** Shape layers: the path, live-shape parameters, fill and stroke, for Properties and the tools. */
   shape?: { path: Path; live?: LiveShape; fill: FillContentSummary | null; stroke: ShapeStrokeSummary | null };
+  /** Type layers: the text, its anti-aliasing and placement, and fonts the file named that are missing. */
+  type?: { text: TextSpec; antiAlias: AntiAlias; transform: { a: number; b: number; c: number; d: number; e: number; f: number }; missingFonts?: string[] };
   /** The layer's vector mask path, when it has one. */
   vectorMask?: { path: Path; enabled: boolean };
   /** The layer style, when the layer has one. */
@@ -127,6 +130,12 @@ export interface DocSummary {
   /** The Paths panel: saved paths and the Work Path, and the one selected. */
   paths: { id: number; name: string; work: boolean; path: Path }[];
   activePathId: number | null;
+  /** The type engine has loaded (HarfBuzz and the bundled fonts). */
+  typeReady: boolean;
+  /** An open type editing session: the caret and selection, and the styles there. */
+  typeEdit: { layerId: number; caret: number; anchor: number; style: CharStyle; para: ParaStyle; selected: string; mask: boolean } | null;
+  /** A one-off note for the status bar. */
+  statusNote: string | null;
   /** The active layer's own path (shape outline or vector mask), which the Paths panel lists first. */
   layerPath: { kind: 'shape' | 'mask'; name: string; path: Path } | null;
   /** The smart object whose FILTER mask is the edit target. */
@@ -264,6 +273,20 @@ export type ToEngine =
   /** The active vector tool (null: none), and its options-bar settings. */
   | { t: 'setVectorTool'; tool: VectorToolId | ShapeToolId | null; options?: Partial<VectorOptions> }
   | { t: 'setShapeOptions'; options: Partial<ShapeOptions> }
+  /** The type tools: their settings (null leaves them, committing any edit). */
+  | { t: 'setTypeTool'; options: { mask: boolean; vertical: boolean; style: CharStyle; para: ParaStyle; antiAlias: AntiAlias } | null }
+  | { t: 'typePointer'; phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; clicks: number }
+  | { t: 'typeInput'; text: string }
+  | { t: 'typeKey'; key: string; shift: boolean; ctrl: boolean; alt: boolean }
+  | { t: 'typeCommit' }
+  | { t: 'typeCancel' }
+  /** Copy/Cut in a type session: answered with `typeSelection`; Cut also deletes it. */
+  | { t: 'typeCopy'; cut: boolean }
+  | { t: 'setTypeStyle'; patch: Partial<CharStyle> }
+  | { t: 'setTypePara'; patch: Partial<ParaStyle> }
+  | { t: 'typeCommand'; cmd: TypeCommand }
+  | { t: 'requestFonts' }
+  | { t: 'addFonts'; buffers: ArrayBuffer[] }
   | { t: 'vectorMaskCommand'; cmd: VectorMaskCommand }
   /** Properties for a shape layer; non-final edits show without a history step. */
   | { t: 'setShape'; id: number; live?: LiveShape; fill?: FillSummary | null; stroke?: ShapeStrokeSummary | null; final: boolean }
@@ -387,6 +410,8 @@ export type FromEngine =
   | { t: 'patterns'; list: PatternSummary[] }
   | { t: 'styles'; list: StylePreset[] }
   | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }
+  | { t: 'fonts'; list: { family: string; styles: { style: string; postscript: string }[] }[]; added?: number }
+  | { t: 'typeSelection'; text: string }
   | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }

@@ -93,7 +93,7 @@ export function numberedName(doc: Doc, base: string): string {
 }
 
 /** An explicit name, suffixed with a number only if it is already taken. */
-function nameFor(doc: Doc, base: string): string {
+export function nameFor(doc: Doc, base: string): string {
   const used = new Set([...walkLayers(doc.layers)].map((w) => w.layer.name));
   if (!used.has(base)) return base;
   for (let n = 1; ; n++) {

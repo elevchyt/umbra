@@ -4,7 +4,7 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -24,6 +24,8 @@ import { PANEL_META, PANEL_BY_COMMAND, renderPanel } from '../panels/panels';
 import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
+import { TypeInput } from './TypeInput';
+import { applyChar, currentChar } from '../type/TypePanels';
 import { Button } from '@umbra/ui/widgets/controls';
 import { DocumentTabs, StatusBar } from './Chrome';
 import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, NameDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
@@ -32,6 +34,11 @@ const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
 /** The tools the engine's vector state machine drives. */
 const VECTOR_TOOLS = new Set(['pen', 'freeformPen', 'curvaturePen', 'addAnchor', 'deleteAnchor', 'convertPoint', 'pathSelect', 'directSelect']);
+/** Type ▸ Paste Lorem Ipsum. */
+const LOREM = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Integer nec odio. Praesent libero. Sed cursus ante dapibus diam. Sed nisi. Nulla quis sem at nibh elementum imperdiet. Duis sagittis ipsum. Praesent mauris. Fusce nec tellus sed augue semper porta.';
+
+/** The type tools, and which of them are vertical or make masks. */
+const TYPE_TOOLS = new Set(['typeHorizontal', 'typeVertical', 'typeMaskHorizontal', 'typeMaskVertical']);
 /** The shape tools: their drags go through the same pointer channel to the engine. */
 const SHAPE_TOOL_IDS = new Set(['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape']);
 
@@ -127,6 +134,7 @@ export function Workspace() {
           // arrives by message, so it is trustworthy even when a hidden pane stalls frames.
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraDoc = d;
           store.setDoc(d);
+          if (d.statusNote) store.setStatusMessage(d.statusNote);
           // While a smart object's contents are open, the tab keeps the outer document's name.
           const name = d.editingContents?.path[0] ?? d.name;
           if (store.tabs.length === 0) {
@@ -148,6 +156,10 @@ export function Workspace() {
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
+        onFonts: (list, added) => {
+          store.setFonts(list);
+          if (added !== undefined) store.setStatusMessage(added ? `Added ${added} font${added === 1 ? '' : 's'}` : 'No fonts could be read from that file');
+        },
         onCustomShapes: (list, error) => {
           store.setCustomShapes(list);
           if (error) store.setStatusMessage(`Load Shapes: ${error}`);
@@ -244,6 +256,30 @@ export function Workspace() {
     const vector = VECTOR_TOOLS.has(tool) || SHAPE_TOOL_IDS.has(tool) ? tool : null;
     client.vectorTool = vector;
     client.send({ t: 'setVectorTool', tool: vector as never, options: store.vectorOptions() });
+  });
+
+  // The type tools: their settings (font, size, anti-aliasing; the foreground colour).
+  // Leaving them commits an edit in progress, as Photoshop does on a tool change.
+  createEffect(() => {
+    const tool = store.activeTool();
+    const o = store.typeOptions();
+    const f = store.foreground();
+    const ready = store.engineReady();
+    if (!client || !ready) return;
+    const on = TYPE_TOOLS.has(tool);
+    client.typeTool = on;
+    client.send({
+      t: 'setTypeTool',
+      options: on
+        ? {
+            mask: tool.startsWith('typeMask'),
+            vertical: tool.endsWith('Vertical'),
+            style: { ...DEFAULT_CHAR, font: o.font, family: o.family, fontStyle: o.fontStyle, size: o.size, color: [f.r, f.g, f.b] },
+            para: { ...DEFAULT_PARA, align: o.align },
+            antiAlias: o.antiAlias,
+          }
+        : null,
+    });
   });
 
   // Shape options follow the options bar; Pixels mode paints with the foreground colour.
@@ -895,6 +931,59 @@ export function Workspace() {
       case 'edit.definePattern':
         store.openDialog('definePattern');
         break;
+      case 'type.aaNone':
+      case 'type.aaSharp':
+      case 'type.aaCrisp':
+      case 'type.aaStrong':
+      case 'type.aaSmooth': {
+        const aa = cmd.slice(7).toLowerCase() as AntiAlias;
+        store.setTypeOptions({ ...store.typeOptions(), antiAlias: aa });
+        send({ t: 'typeCommand', cmd: `aa:${aa}` });
+        break;
+      }
+      case 'type.horizontal':
+        send({ t: 'typeCommand', cmd: 'horizontal' });
+        break;
+      case 'type.vertical':
+        send({ t: 'typeCommand', cmd: 'vertical' });
+        break;
+      case 'type.otLiga':
+        applyChar({ ligatures: !currentChar().ligatures });
+        break;
+      case 'type.otDlig':
+        applyChar({ discretionaryLigatures: !currentChar().discretionaryLigatures });
+        break;
+      case 'type.otSwsh':
+      case 'type.otOnum':
+      case 'type.otFrac':
+      case 'type.otOrdn':
+      case 'type.otSalt':
+      case 'type.otTitl': {
+        const tag = cmd.slice(7).toLowerCase();
+        const f = currentChar().features;
+        applyChar({ features: { ...f, [tag]: !f[tag] } });
+        break;
+      }
+      case 'type.createWorkPath':
+        send({ t: 'typeCommand', cmd: 'workPath' });
+        break;
+      case 'type.convertToShape':
+        send({ t: 'typeCommand', cmd: 'toShape' });
+        break;
+      case 'type.rasterize':
+      case 'rasterize.type':
+        send({ t: 'typeCommand', cmd: 'rasterize' });
+        break;
+      case 'type.toParagraph': {
+        const d = store.doc();
+        const l = d?.layers.find((x) => x.id === d.activeLayerIds[0]);
+        send({ t: 'typeCommand', cmd: l?.type?.text.kind === 'paragraph' ? 'toPoint' : 'toParagraph' });
+        break;
+      }
+      case 'type.loremIpsum':
+        if (store.doc()?.typeEdit) send({ t: 'typeInput', text: LOREM });
+        else store.setStatusMessage('Paste Lorem Ipsum works while editing type.');
+        break;
       case 'edit.defineShape':
         store.openDialog('defineShape');
         break;
@@ -1394,6 +1483,7 @@ export function Workspace() {
         </div>
       </Show>
 
+      <TypeInput />
       <Show when={store.optionsVisible() && store.screenMode() !== 'full'}>
         <OptionsBar
           onCommand={runCommand}

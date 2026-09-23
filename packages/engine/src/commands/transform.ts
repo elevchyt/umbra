@@ -28,8 +28,8 @@ import {
   sampleCubic,
   type Resample,
 } from './image.js';
-import { findLayer, updateLayer, walkLayers, type Doc, type Layer, type ShapeLayer, type SmartObjectLayer } from '../document.js';
-import { retransformShape } from '../shape-layers.js';
+import { findLayer, hasPlane, updateLayer, walkLayers, type Doc, type Layer, type SmartObjectLayer, type VectorLayer } from '../document.js';
+import { retransformVector, typeBounds } from '../type-layers.js';
 import { transformVectorMasks } from './image.js';
 import { pathBounds } from '@umbra/kernels/vector/path';
 import { contentBounds, retransform } from '../smart.js';
@@ -149,16 +149,16 @@ function targetIds(doc: Doc): number[] {
   if (doc.activeLayerIds.length > 0) return [...doc.activeLayerIds];
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     const l = doc.layers[i]!;
-    if (l.kind === 'pixel' || l.kind === 'smart' || l.kind === 'shape') return [l.id];
+    if (hasPlane(l)) return [l.id];
   }
   return [];
 }
 
-function mapLayerTree(layer: Layer, fn: (p: Plane) => Plane, smart: (l: SmartObjectLayer) => Layer, shape: (l: ShapeLayer) => Layer): Layer {
+function mapLayerTree(layer: Layer, fn: (p: Plane) => Plane, smart: (l: SmartObjectLayer) => Layer, shape: (l: VectorLayer) => Layer): Layer {
   // A smart object takes the matrix into its transform and re-renders from its contents.
   if (layer.kind === 'smart') return smart(layer);
   // A shape layer transforms its path exactly.
-  if (layer.kind === 'shape') return shape(layer);
+  if (layer.kind === 'shape' || layer.kind === 'type') return shape(layer);
   const mask = layer.mask ? { ...layer.mask, plane: new MipPlane(fn(layer.mask.plane.base)) } : layer.mask;
   if (layer.kind === 'group') {
     return { ...layer, mask, children: layer.children.map((c) => mapLayerTree(c, fn, smart, shape)) };
@@ -193,7 +193,7 @@ export function transformLayers(
     const layer = findLayer(layers, id);
     if (!layer || layer.locks.position || layer.locks.all) continue;
     const fn = (p: Plane) => transformPlane(p, matrix, clip, method);
-    layers = updateLayer(layers, id, (l) => transformVectorMasks([mapLayerTree(l, fn, (s) => retransform(s, matrix, doc, fn), (s) => retransformShape(s, matrix, doc, fn))], matrix)[0]!);
+    layers = updateLayer(layers, id, (l) => transformVectorMasks([mapLayerTree(l, fn, (s) => retransform(s, matrix, doc, fn), (s) => retransformVector(s, matrix, doc, fn))], matrix)[0]!);
   }
   return layers === doc.layers ? doc : { ...doc, layers };
 }
@@ -270,10 +270,10 @@ export function transformBounds(doc: Doc, ids?: readonly number[]): Rect | null 
     const layer = findLayer(doc.layers, id);
     if (!layer) continue;
     for (const { layer: l } of walkLayers([layer])) {
-      if (l.kind !== 'pixel' && l.kind !== 'smart' && l.kind !== 'shape') continue;
+      if (!hasPlane(l)) continue;
       // A smart object's box is its whole placed content, even where the canvas clips it; a
-      // shape's is its path.
-      const b = l.kind === 'smart' ? contentBounds(l) : l.kind === 'shape' ? (pathBounds(l.path) ?? l.plane.base.bounds) : l.plane.base.bounds;
+      // shape's is its path; type's is its ink.
+      const b = l.kind === 'smart' ? contentBounds(l) : l.kind === 'shape' ? (pathBounds(l.path) ?? l.plane.base.bounds) : l.kind === 'type' ? typeBounds(l) : l.plane.base.bounds;
       if (rectIsEmpty(b)) continue;
       box = box
         ? {

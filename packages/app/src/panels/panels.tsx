@@ -9,6 +9,7 @@ import { MENUS } from '../menus/menus';
 import { StylesPanel } from '../fx/StylesPanel';
 import { PathsPanel } from '../paths/PathsPanel';
 import { pathSvg } from '../workspace/ShapeOptions';
+import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
 import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
@@ -49,6 +50,10 @@ export function renderPanel(id: string): JSX.Element {
       return <ChannelsPanel />;
     case 'paths':
       return <PathsPanel />;
+    case 'character':
+      return <CharacterPanel />;
+    case 'paragraph':
+      return <ParagraphPanel />;
     case 'adjustments':
       return <AdjustmentsPanel />;
     case 'brushSettings':
@@ -221,6 +226,11 @@ function LayersPanel() {
                     // Photoshop opens an adjustment layer's settings from its thumbnail, and a
                     // smart object's contents.
                     if (l.kind === 'adjustment' || l.kind === 'fill' || l.kind === 'shape') store.openPanel('properties');
+                    // Double-clicking a type layer's thumbnail selects all its text for editing.
+                    if (l.kind === 'type') {
+                      store.setActiveTool('typeHorizontal');
+                      store.openPanel('character');
+                    }
                     if (l.kind === 'smart') store.engine?.({ t: 'editContents' });
                   }}
                 >
@@ -235,6 +245,11 @@ function LayersPanel() {
                   </Show>
                   <Show when={l.kind === 'smart'}>
                     <span class="layer-smart-badge" title={`Smart object — ${l.smart?.sourceName ?? ''}`} />
+                  </Show>
+                  <Show when={l.kind === 'type'}>
+                    <span class="layer-type-thumb" title={l.type?.missingFonts?.length ? `Missing fonts: ${l.type.missingFonts.join(', ')}` : 'Type layer'} classList={{ missing: !!l.type?.missingFonts?.length }}>
+                      T
+                    </span>
                   </Show>
                   <Show when={l.kind === 'shape' && l.shape}>
                     {(sh) => (

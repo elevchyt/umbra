@@ -12,7 +12,8 @@
   "dependencies": {
     "@umbra/core": "workspace:*",
     "@umbra/kernels": "workspace:*",
-    "@umbra/psd": "workspace:*"
+    "@umbra/psd": "workspace:*",
+    "@umbra/text": "workspace:*"
   },
   "devDependencies": {
     "ag-psd": "^31.0.2"

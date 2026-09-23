@@ -7,6 +7,7 @@ import { TOOL_BY_ID } from '../tools/registry';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
+import { TypeToolOptions } from '../type/TypePanels';
 
 /**
  * Options bar — spec 01 §1. Contents are contextual on the active tool, and the leftmost slot
@@ -371,6 +372,10 @@ export function OptionsBar(props: OptionsBarProps) {
           <span class="options-label">Make:</span>
           <IconButton icon="marqueeRect" title="Make Selection from the path" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'toSelection', op: 'new' } as never)} />
           <IconButton icon="pen" title="Make a Work Path from the selection" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 } as never)} />
+        </Match>
+
+        <Match when={['typeHorizontal', 'typeVertical', 'typeMaskHorizontal', 'typeMaskVertical'].includes(store.activeTool())}>
+          <TypeToolOptions />
         </Match>
 
         <Match when={['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape'].includes(store.activeTool())}>

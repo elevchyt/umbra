@@ -12,15 +12,27 @@ import { DEFAULT_STROKE, strokeShapes } from '@umbra/kernels/vector/stroke';
 import type { AntiAlias, Rgb } from './style.js';
 import type { PlacedGlyph, TextLayout } from './layout.js';
 
-/** A glyph's contours as sub-paths in document px. */
-export function glyphSubpaths(g: PlacedGlyph): Subpath[] {
+/** An affine map (x' = a·x + c·y + e, y' = b·x + d·y + f) from layout space to the page. */
+export interface Affine {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+
+const apply = (m: Affine | undefined, p: Pt): Pt => (m ? { x: m.a * p.x + m.c * p.y + m.e, y: m.b * p.x + m.d * p.y + m.f } : p);
+
+/** A glyph's contours as sub-paths in document px (through `m` when given). */
+export function glyphSubpaths(g: PlacedGlyph, m?: Affine): Subpath[] {
   const o = g.face.outline(g.gid);
   const k = g.scale;
   const map = (fx: number, fy: number): Pt => {
     // Font units (y up) → local px (y down), scaled, slanted.
     const lx = fx * k * g.sx + g.skew * fy * k * g.sy;
     const ly = -fy * k * g.sy;
-    return g.rotate ? { x: g.x - ly, y: g.y + lx } : { x: g.x + lx, y: g.y + ly };
+    return apply(m, g.rotate ? { x: g.x - ly, y: g.y + lx } : { x: g.x + lx, y: g.y + ly });
   };
   return o.contours.map((c) => {
     const knots: Knot[] = [];
@@ -48,24 +60,28 @@ export function glyphSubpaths(g: PlacedGlyph): Subpath[] {
  * the later contours exclude — even-odd, which is what nonzero gives for the non-overlapping
  * contours real glyphs have — and each glyph adds to what came before.
  */
-export function layoutToPath(layout: TextLayout): Path {
+export function layoutToPath(layout: TextLayout, m?: Affine): Path {
   const subpaths: Subpath[] = [];
   for (const g of layout.glyphs) {
-    glyphSubpaths(g).forEach((sp, i) => subpaths.push(i === 0 ? sp : { ...sp, op: 'exclude' }));
+    glyphSubpaths(g, m).forEach((sp, i) => subpaths.push(i === 0 ? sp : { ...sp, op: 'exclude' }));
   }
   for (const d of layout.decorations) {
-    const c = (x: number, y: number): Knot => ({ anchor: { x, y }, in: { x, y }, out: { x, y }, smooth: false });
+    const c = (x: number, y: number): Knot => {
+      const p = apply(m, { x, y });
+      return { anchor: p, in: p, out: p, smooth: false };
+    };
     subpaths.push({ closed: true, op: 'add', knots: [c(d.x0, d.y0), c(d.x1, d.y0), c(d.x1, d.y1), c(d.x0, d.y1)] });
   }
   return { subpaths };
 }
 
-function glyphShapes(g: PlacedGlyph): Shape[] {
-  const sps = glyphSubpaths(g);
+function glyphShapes(g: PlacedGlyph, m?: Affine): Shape[] {
+  const sps = glyphSubpaths(g, m);
   const fill: Shape = { polys: sps.map((sp) => flattenSubpath(sp, 0.05)), op: 'add', rule: 'nonzero' };
   if (!g.bold) return [fill];
   // Faux bold: the outline stroked, centred, twice the growth wide, united with the fill.
-  const stroked = strokeShapes({ subpaths: sps }, { ...DEFAULT_STROKE, width: g.bold * 2, join: 'round' }).map((s) => ({ ...s, op: 'add' as const }));
+  const k = m ? Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) : 1;
+  const stroked = strokeShapes({ subpaths: sps }, { ...DEFAULT_STROKE, width: g.bold * 2 * k, join: 'round' }).map((s) => ({ ...s, op: 'add' as const }));
   return [fill, ...stroked];
 }
 
@@ -113,7 +129,7 @@ export interface TextBitmap {
  * Draw a layout into an RGBA bitmap covering `rect` (document px, integers). Glyphs are
  * composited in order, source-over, each rasterised over its own box only.
  */
-export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number; x1: number; y1: number }, antiAlias: AntiAlias = 'sharp'): TextBitmap {
+export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number; x1: number; y1: number }, antiAlias: AntiAlias = 'sharp', m?: Affine): TextBitmap {
   const w = Math.max(0, rect.x1 - rect.x0);
   const h = Math.max(0, rect.y1 - rect.y0);
   const acc = new Float32Array(w * h * 4); // premultiplied
@@ -138,16 +154,8 @@ export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number;
       }
     }
   };
-  for (const g of layout.glyphs) paint(glyphShapes(g), g.color);
-  for (const d of layout.decorations) {
-    const p = [
-      { x: d.x0, y: d.y0 },
-      { x: d.x1, y: d.y0 },
-      { x: d.x1, y: d.y1 },
-      { x: d.x0, y: d.y1 },
-    ];
-    paint([{ polys: [p], op: 'add' }], d.color);
-  }
+  for (const g of layout.glyphs) paint(glyphShapes(g, m), g.color);
+  for (const d of layout.decorations) paint([{ polys: [decorationPoly(d, m)], op: 'add' }], d.color);
   const data = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = acc[i * 4 + 3]!;
@@ -160,17 +168,23 @@ export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number;
   return { data, width: w, height: h, left: rect.x0, top: rect.y0 };
 }
 
+function decorationPoly(d: { x0: number; y0: number; x1: number; y1: number }, m?: Affine): Pt[] {
+  return [
+    { x: d.x0, y: d.y0 },
+    { x: d.x1, y: d.y0 },
+    { x: d.x1, y: d.y1 },
+    { x: d.x0, y: d.y1 },
+  ].map((p) => apply(m, p));
+}
+
 /** The ink bounds of a layout (glyph outlines and decorations), document px. */
-export function inkBounds(layout: TextLayout): { x0: number; y0: number; x1: number; y1: number } | null {
+export function inkBounds(layout: TextLayout, m?: Affine): { x0: number; y0: number; x1: number; y1: number } | null {
   let box: { x0: number; y0: number; x1: number; y1: number } | null = null;
   const grow = (b: { x0: number; y0: number; x1: number; y1: number } | null) => {
     if (!b) return;
     box = box ? { x0: Math.min(box.x0, b.x0), y0: Math.min(box.y0, b.y0), x1: Math.max(box.x1, b.x1), y1: Math.max(box.y1, b.y1) } : b;
   };
-  for (const g of layout.glyphs) {
-    const b = glyphBox(glyphShapes(g));
-    grow(b && { x0: b.x0 - g.bold, y0: b.y0 - g.bold, x1: b.x1 + g.bold, y1: b.y1 + g.bold });
-  }
-  for (const d of layout.decorations) grow(d);
+  for (const g of layout.glyphs) grow(glyphBox(glyphShapes(g, m)));
+  for (const d of layout.decorations) grow(glyphBox([{ polys: [decorationPoly(d, m)], op: 'add' }]));
   return box;
 }

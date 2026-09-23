@@ -242,6 +242,17 @@ export const ICONS: Record<string, IconDef> = {
   distributeH: I(['M2.5 2v12M13.5 2v12', 'M6.5 5h3v6h-3z']),
   distributeV: I(['M2 2.5h12M2 13.5h12', 'M5 6.5h6v3H5z']),
   arrange: I(['M2.5 6.5h7v7h-7z', 'M6.5 2.5h7v7h-7']),
+  // ---- text alignment ----------------------------------------------------------------
+  textLeft: I('M2 3.5h12M2 6.5h8M2 9.5h12M2 12.5h7'),
+  textCenter: I('M2 3.5h12M4 6.5h8M2 9.5h12M4.5 12.5h7'),
+  textRight: I('M2 3.5h12M6 6.5h8M2 9.5h12M7 12.5h7'),
+  justifyLeft: I('M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h6'),
+  justifyCenter: I('M2 3.5h12M2 6.5h12M2 9.5h12M5 12.5h6'),
+  justifyRight: I('M2 3.5h12M2 6.5h12M2 9.5h12M8 12.5h6'),
+  justifyAll: I('M2 3.5h12M2 6.5h12M2 9.5h12M2 12.5h12'),
+  textOrientation: I(['M3 3h6M6 3v8', 'M11 5v8M9.5 11.5 11 13l1.5-1.5']),
+  commit: I('M3 8.5 6.5 12 13 4'),
+  cancel: I('M3.5 3.5l9 9M12.5 3.5l-9 9'),
 };
 
 export type IconName = keyof typeof ICONS;

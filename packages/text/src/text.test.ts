@@ -87,7 +87,7 @@ describe('Latin: kerning, ligatures, tracking', () => {
 
 describe('lines: leading, wrapping, alignment, justification', () => {
   it('auto leading is 120 % of the size; a set leading wins', () => {
-    const l = lay(spec('one\ntwo three'));
+    const l = lay(spec('one\ntwo\u2028three'));
     expect(l.lines).toHaveLength(3);
     expect(l.lines[1]!.baseline - l.lines[0]!.baseline).toBeCloseTo(48, 6);
     expect(l.lines[2]!.baseline - l.lines[1]!.baseline).toBeCloseTo(48, 6);
@@ -117,6 +117,17 @@ describe('lines: leading, wrapping, alignment, justification', () => {
     // Lines break at spaces: every line but the first starts on a word.
     for (const line of l.lines.slice(1)) expect(text[line.start - 1]).toBe(' ');
     expect(l.lines[0]!.baseline).toBeCloseTo(24 * 1.069, 3);
+  });
+
+  it('paragraph type draws only the lines that fit its box', () => {
+    const text = 'one two three four five six seven eight nine ten';
+    const l = lay(spec(text, { size: 20, underline: true }, {}, { kind: 'paragraph', box: { width: 90, height: 55 } }));
+    expect(l.overflow).toBe(true);
+    // 20 px type, 24 px leading: two lines fit in 55 px.
+    const shown = new Set(l.glyphs.map((g) => l.lines.findIndex((ln) => g.cluster >= ln.start && g.cluster < ln.end)));
+    expect([...shown].sort()).toEqual([0, 1]);
+    expect(new Set(l.decorations.map((d) => d.line))).toEqual(new Set([0, 1]));
+    expect(lay(spec(text, { size: 20 }, {}, { kind: 'paragraph', box: { width: 90, height: 500 } })).overflow).toBe(false);
   });
 
   it('a word longer than the line breaks inside it', () => {

@@ -78,3 +78,5 @@ export { DEFAULT_SHAPE_OPTIONS, SHAPE_TOOLS, type ShapeOptions, type ShapeToolId
 export { rasterizePath } from '@umbra/kernels/vector/raster';
 export type { Path } from '@umbra/kernels/vector/path';
 export { transformPath, pathBounds } from '@umbra/kernels/vector/path';
+export type { TypeCommand } from './engine.js';
+export { DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type CharStyle, type ParaStyle, type TextSpec } from '@umbra/text/style';

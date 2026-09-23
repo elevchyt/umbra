@@ -10,6 +10,8 @@ import { coverageToPath } from '@umbra/kernels/vector/trace';
 import { BUILTIN_SHAPES, readCsh, type CustomShape } from '@umbra/kernels/vector/custom';
 import { DEFAULT_SHAPE_OPTIONS, SHAPE_NAMES, SHAPE_TOOLS, shapeFromDrag, type ShapeOptions, type ShapeToolId } from './shape-tool.js';
 import { liveAfterEdit, makeShapeLayer, reshaped, VectorMaskCache, withLive } from './shape-layers.js';
+import { ensureText, fontRegistry, layoutOf, makeTypeLayer, retyped, textReady, typeBounds, typeLayerName, typePath } from './type-layers.js';
+import { caretAt, hitTest, lineRangeAt, paragraphAt, replaceText, restyleAll, restyleParagraphs, restyleRange, selectionRects, stepCaret, styleAt, textOf, wordAt, type AntiAlias, type CharStyle, type ParaStyle, type TextSpec } from '@umbra/text';
 import type { LiveShape } from '@umbra/kernels/vector/shapes';
 import { layerPathName } from './shape-tool.js';
 import { combine as combineMask, createMask } from '@umbra/kernels/selection';
@@ -60,6 +62,8 @@ import {
   type SmartSource,
   type SavedPath,
   type ShapeLayer,
+  type TypeLayer,
+  hasPlane,
 } from './document.js';
 import { History } from './history.js';
 import {
@@ -174,6 +178,7 @@ export interface PathCommand {
   brush?: BrushParams;
   simulatePressure?: boolean;
 }
+export type TypeCommand = 'rasterize' | 'toShape' | 'workPath' | 'horizontal' | 'vertical' | 'toParagraph' | 'toPoint' | `aa:${'none' | 'sharp' | 'crisp' | 'strong' | 'smooth'}`;
 export type VectorMaskCommand = 'revealAll' | 'hideAll' | 'currentPath' | 'delete' | 'toggle' | 'rasterize' | 'rasterizeShape';
 export type StyleCommand = 'copy' | 'paste' | 'clear' | 'hideAll' | 'scale' | 'createLayers' | 'rasterize';
 export interface LayerStyleProps {
@@ -356,6 +361,13 @@ export class Engine {
   // ---- document ---------------------------------------------------------------------
 
   private commit(doc: Doc, historyName: string): void {
+    // Any other command ends a type session: its text becomes a history step of its own.
+    const te = this.typeEdit;
+    if (te && !this.committingType) {
+      this.typeEdit = null;
+      this.typeDrag = null;
+      if (te.created || te.undo.length) this.history.push(te.created ? 'Type Tool' : 'Edit Type Layer', this.doc);
+    }
     // Any committed edit makes a spatial preview stale, and ends what Fade could fade.
     this.previewDoc = null;
     this.fadeState = null;
@@ -705,6 +717,8 @@ export class Engine {
   }
 
   undo(): boolean {
+    // Undo from the menu ends a type session first (Ctrl+Z inside one undoes typing instead).
+    this.typeCommit();
     const doc = this.history.undo();
     if (!doc) return false;
     this.doc = doc;
@@ -714,6 +728,7 @@ export class Engine {
   }
 
   redo(): boolean {
+    this.typeCommit();
     const doc = this.history.redo();
     if (!doc) return false;
     this.doc = doc;
@@ -888,6 +903,8 @@ export class Engine {
     const trail = this.vector.trail;
     const drawn = this.dragShape();
     const extra = drawn ? overlayOutline(drawn.path) : [];
+    const type = this.typeOverlay();
+    if (type) return { outlines: extra, anchors: [], handles: [], rubber: null, marquee: type.marquee ?? null, trail: null, ...type };
     if (!p) return trail || drawn ? { outlines: extra, anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
     const tools = this.vectorToolActive;
     const selected = new Set(this.vector.selected.map((r) => `${r.s}:${r.k}`));
@@ -1124,6 +1141,553 @@ export class Engine {
     }
     if (stroked) this.history.amend('Stroke Path', this.doc);
     return stroked;
+  }
+
+  // ---- type ------------------------------------------------------------------------------
+
+  /** The type tools' settings: the style new type starts in, and whether it makes a mask. */
+  typeTool: { mask: boolean; vertical: boolean; style: CharStyle; para: ParaStyle; antiAlias: AntiAlias } | null = null;
+  /** An open editing session on a type layer. */
+  typeEdit: {
+    layerId: number;
+    caret: number;
+    anchor: number;
+    created: boolean;
+    mask: boolean;
+    before: Doc;
+    /** The style the next typed text takes, when the panels changed it at a collapsed caret. */
+    typing: CharStyle | null;
+    undo: { text: TextSpec; caret: number; anchor: number }[];
+    redo: { text: TextSpec; caret: number; anchor: number }[];
+  } | null = null;
+  private typeDrag: { mode: 'create' | 'select'; start: { x: number; y: number }; now: { x: number; y: number } } | null = null;
+
+  /** Choose (or leave) a type tool; loads the type engine the first time. */
+  async setTypeTool(opts: { mask: boolean; vertical: boolean; style: CharStyle; para: ParaStyle; antiAlias: AntiAlias } | null): Promise<void> {
+    if (!opts) {
+      this.typeCommit();
+      this.typeTool = null;
+      return;
+    }
+    this.typeTool = opts;
+    await ensureText();
+  }
+
+  private typeLayer(): TypeLayer | null {
+    const e = this.typeEdit;
+    const l = e ? findLayer(this.doc.layers, e.layerId) : undefined;
+    return l?.kind === 'type' ? l : null;
+  }
+
+  /** Replace the edited layer's text (no history: the session is one step). */
+  private setTypeText(text: TextSpec, caret: number, anchor = caret, record = true): void {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (!e || !l) return;
+    if (record) {
+      e.undo.push({ text: l.text, caret: e.caret, anchor: e.anchor });
+      if (e.undo.length > 200) e.undo.shift();
+      e.redo = [];
+    }
+    const next = retyped({ ...l, text }, this.doc);
+    this.doc = { ...this.doc, layers: replaceLayer(this.doc.layers, l.id, next) };
+    this.compositeCache = null;
+    e.caret = caret;
+    e.anchor = anchor;
+  }
+
+  /** The layer-space point of a document point, for the edited layer. */
+  private toLayout(l: TypeLayer, p: { x: number; y: number }): { x: number; y: number } {
+    const inv = invertMat(l.transform);
+    return inv ? applyMat(inv, p) : p;
+  }
+
+  /** The topmost visible type layer under a document point. */
+  private typeLayerAt(p: { x: number; y: number }): TypeLayer | null {
+    const hits = [...walkLayers(this.doc.layers)].map((w) => w.layer).filter((l): l is TypeLayer => l.kind === 'type' && l.visible);
+    for (let i = hits.length - 1; i >= 0; i--) {
+      const l = hits[i]!;
+      const box = l.text.kind === 'paragraph' && l.text.box ? this.toLayout(l, p) : null;
+      if (box && box.x >= 0 && box.y >= 0 && box.x <= l.text.box!.width && box.y <= l.text.box!.height) return l;
+      const b = typeBounds(l);
+      const m = 4 / Math.max(1e-6, this.view.zoom);
+      if (p.x >= b.x0 - m && p.x <= b.x1 + m && p.y >= b.y0 - m && p.y <= b.y1 + m) return l;
+    }
+    return null;
+  }
+
+  private beginTypeEdit(l: TypeLayer, caret: number, created: boolean, before: Doc): void {
+    this.typeEdit = { layerId: l.id, caret, anchor: caret, created, mask: !!this.typeTool?.mask, before, typing: null, undo: [], redo: [] };
+    if (!this.doc.activeLayerIds.includes(l.id) || this.doc.activeLayerIds.length !== 1) this.doc = { ...this.doc, activeLayerIds: [l.id] };
+    // A layer whose fonts were missing is drawn with substitutes from here on.
+    if (l.missingFonts?.length) {
+      this.doc = { ...this.doc, layers: replaceLayer(this.doc.layers, l.id, retyped(l, this.doc)) };
+      this.statusNote = `Missing fonts replaced by Noto Sans: ${l.missingFonts.join(', ')}`;
+    }
+  }
+  /** A one-off message for the status bar (read and cleared by the summary). */
+  statusNote: string | null = null;
+
+  /** What the type tools draw over the canvas: caret, selection, box, a box being dragged. */
+  private typeOverlay(): (Partial<PathOverlay> & { marquee?: PathOverlay['marquee'] }) | null {
+    const drag = this.typeDrag;
+    if (drag?.mode === 'create') {
+      const { start: a, now: b } = drag;
+      return { marquee: { x0: Math.min(a.x, b.x), y0: Math.min(a.y, b.y), x1: Math.max(a.x, b.x), y1: Math.max(a.y, b.y) } };
+    }
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    const layout = l && layoutOf(l.text);
+    if (!e || !l || !layout) return null;
+    const m = l.transform;
+    const T = (x: number, y: number) => applyMat(m, { x, y });
+    const c = caretAt(layout, e.caret);
+    const caret: [{ x: number; y: number }, { x: number; y: number }] = layout.vertical ? [T(c.from, c.at), T(c.to, c.at)] : [T(c.at, c.from), T(c.at, c.to)];
+    const highlight = e.caret === e.anchor ? [] : selectionRects(layout, e.caret, e.anchor).map((r) => [T(r.x0, r.y0), T(r.x1, r.y0), T(r.x1, r.y1), T(r.x0, r.y1)]);
+    const bx = l.text.kind === 'paragraph' ? l.text.box : undefined;
+    const box = bx ? [T(0, 0), T(bx.width, 0), T(bx.width, bx.height), T(0, bx.height)] : null;
+    return { caret: e.caret === e.anchor ? caret : null, highlight, box };
+  }
+
+  /** Type tool pointer events, in screen coordinates. */
+  typePointer(e: { phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; clicks: number }): boolean {
+    if (!this.typeTool || !textReady()) return false;
+    const p = docPointAtScreen(this.view, e.x, e.y);
+    const edit = this.typeEdit;
+    if (e.phase === 'down') {
+      const l = this.typeLayer();
+      if (edit && l) {
+        const hit = this.typeLayerAt(p);
+        if (hit?.id === l.id) {
+          const layout = layoutOf(l.text)!;
+          const q = this.toLayout(l, p);
+          const i = hitTest(layout, q.x, q.y);
+          const text = layout.text;
+          if (e.clicks === 2) [edit.anchor, edit.caret] = wordAt(text, i);
+          else if (e.clicks === 3) [edit.anchor, edit.caret] = lineRangeAt(text, i);
+          else if (e.clicks >= 4) [edit.anchor, edit.caret] = [0, text.length];
+          else {
+            edit.caret = i;
+            if (!e.shift) edit.anchor = i;
+          }
+          edit.typing = null;
+          this.typeDrag = e.clicks <= 1 ? { mode: 'select', start: p, now: p } : null;
+          return true;
+        }
+        // A click away from the text commits it (and starts nothing, as in Photoshop).
+        this.typeCommit();
+        return true;
+      }
+      const hit = this.typeTool.mask ? null : this.typeLayerAt(p);
+      if (hit) {
+        const layout = layoutOf(hit.text);
+        const q = this.toLayout(hit, p);
+        this.beginTypeEdit(hit, layout ? hitTest(layout, q.x, q.y) : 0, false, this.doc);
+        this.typeDrag = { mode: 'select', start: p, now: p };
+        return true;
+      }
+      this.typeDrag = { mode: 'create', start: p, now: p };
+      return true;
+    }
+    const drag = this.typeDrag;
+    if (!drag) return false;
+    drag.now = p;
+    if (drag.mode === 'select' && edit) {
+      const l = this.typeLayer();
+      const layout = l && layoutOf(l.text);
+      if (l && layout) {
+        const q = this.toLayout(l, p);
+        edit.caret = hitTest(layout, q.x, q.y);
+      }
+    }
+    if (e.phase === 'move') return true;
+    this.typeDrag = null;
+    if (drag.mode === 'create') {
+      const t = this.typeTool;
+      const w = Math.abs(drag.now.x - drag.start.x);
+      const h = Math.abs(drag.now.y - drag.start.y);
+      const box = w * this.view.zoom > 4 && h * this.view.zoom > 4;
+      const spec: TextSpec = {
+        kind: box ? 'paragraph' : 'point',
+        orientation: t.vertical ? 'vertical' : 'horizontal',
+        ...(box ? { box: { width: w, height: h } } : {}),
+        runs: [{ text: '', style: t.style }],
+        paragraphs: [t.para],
+      };
+      const origin = box ? { x: Math.min(drag.start.x, drag.now.x), y: Math.min(drag.start.y, drag.now.y) } : drag.start;
+      const layer = makeTypeLayer(t.mask ? 'Type Mask' : 'Layer', spec, translateMat(origin.x, origin.y), t.antiAlias, this.doc);
+      const before = this.doc;
+      const above = this.doc.activeLayerIds[0];
+      this.doc = { ...this.doc, layers: insertLayer(this.doc.layers, layer, above), activeLayerIds: [layer.id] };
+      this.activePathId = null;
+      this.beginTypeEdit(layer, 0, true, before);
+    }
+    return true;
+  }
+
+  /** Text typed (or pasted, or composed by an IME) into the session. */
+  typeInput(str: string): boolean {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (!e || !l) return false;
+    const clean = str.replace(/\r\n?/g, '\n');
+    const a = Math.min(e.caret, e.anchor);
+    const b = Math.max(e.caret, e.anchor);
+    const next = replaceText(l.text, a, b, clean, e.typing ?? undefined);
+    e.typing = null;
+    this.setTypeText(next, a + clean.length);
+    return true;
+  }
+
+  /** The selected text of the session, for Copy and Cut. */
+  typeSelection(): string {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (!e || !l) return '';
+    return textOf(l.text).slice(Math.min(e.caret, e.anchor), Math.max(e.caret, e.anchor)).replace(/\u2028/g, '\n');
+  }
+
+  typeKey(k: { key: string; shift: boolean; ctrl: boolean; alt: boolean }): boolean {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (!e || !l) return false;
+    const text = textOf(l.text);
+    const a = Math.min(e.caret, e.anchor);
+    const b = Math.max(e.caret, e.anchor);
+    const move = (to: number) => {
+      e.caret = Math.max(0, Math.min(text.length, to));
+      if (!k.shift) e.anchor = e.caret;
+      e.typing = null;
+      return true;
+    };
+    const layout = layoutOf(l.text);
+    const key = k.key;
+    if (k.ctrl && !k.alt) {
+      const lower = key.toLowerCase();
+      if (lower === 'a') {
+        e.anchor = 0;
+        e.caret = text.length;
+        return true;
+      }
+      if (lower === 'z') return k.shift ? this.typeRedo() : this.typeUndo();
+      if (lower === 'y') return this.typeRedo();
+      if (key === 'Enter') {
+        this.typeCommit();
+        return true;
+      }
+      // Photoshop's type shortcuts: Ctrl+Shift+ B/I/U/K/L/C/R/</>.
+      if (k.shift) {
+        const st = styleAt(l.text, a === b ? a : a + 1);
+        const toggle = (p: Partial<CharStyle>) => this.setTypeStyle(p);
+        if (lower === 'b') return toggle({ fauxBold: !st.fauxBold });
+        if (lower === 'i') return toggle({ fauxItalic: !st.fauxItalic });
+        if (lower === 'u') return toggle({ underline: !st.underline });
+        if (lower === 'k') return toggle({ allCaps: !st.allCaps });
+        if (lower === 'l') return this.setTypePara({ align: 'left' });
+        if (lower === 'c') return this.setTypePara({ align: 'center' });
+        if (lower === 'r') return this.setTypePara({ align: 'right' });
+        if (key === '>' || key === '.') return toggle({ size: st.size + 2 });
+        if (key === '<' || key === ',') return toggle({ size: Math.max(1, st.size - 2) });
+      }
+    }
+    // Alt+Left/Right: tracking (a selection) or kerning (at the caret), 20/1000 em.
+    if (k.alt && (key === 'ArrowLeft' || key === 'ArrowRight')) {
+      const d = (key === 'ArrowRight' ? 20 : -20) * (k.ctrl ? 5 : 1);
+      if (a === b) {
+        if (a === 0) return false;
+        const st = styleAt(l.text, a);
+        const kern = (typeof st.kerning === 'number' ? st.kerning : 0) + d;
+        this.setTypeText(restyleRange(l.text, stepCaret(text, a, -1, false), a, { kerning: kern }), e.caret, e.anchor);
+        return true;
+      }
+      const st = styleAt(l.text, a + 1);
+      this.setTypeText(restyleRange(l.text, a, b, { tracking: st.tracking + d }), e.caret, e.anchor);
+      return true;
+    }
+    switch (key) {
+      case 'Escape':
+        this.typeCancel();
+        return true;
+      case 'Enter': {
+        return this.typeInput(k.shift ? '\u2028' : '\n');
+      }
+      case 'Backspace':
+      case 'Delete': {
+        if (a !== b) {
+          this.setTypeText(replaceText(l.text, a, b, ''), a);
+          return true;
+        }
+        const back = key === 'Backspace';
+        const to = stepCaret(text, a, back ? -1 : 1, k.ctrl);
+        if (to === a) return false;
+        const [s, t] = back ? [to, a] : [a, to];
+        this.setTypeText(replaceText(l.text, s, t, ''), s);
+        return true;
+      }
+      case 'ArrowLeft':
+      case 'ArrowRight': {
+        const vertical = l.text.orientation === 'vertical';
+        if (vertical) return this.typeLineStep(key === 'ArrowLeft' ? 1 : -1, k.shift);
+        if (!k.shift && a !== b) return move(key === 'ArrowLeft' ? a : b);
+        // Visual direction: in a right-to-left line, Left moves forward in the text.
+        const li = layout ? caretAt(layout, e.caret).line : 0;
+        const rtl = layout?.lines[li]?.rtl ?? false;
+        const forward = (key === 'ArrowRight') !== rtl;
+        return move(stepCaret(text, e.caret, forward ? 1 : -1, k.ctrl));
+      }
+      case 'ArrowUp':
+      case 'ArrowDown': {
+        if (l.text.orientation === 'vertical') return move(stepCaret(text, e.caret, key === 'ArrowDown' ? 1 : -1, k.ctrl));
+        return this.typeLineStep(key === 'ArrowDown' ? 1 : -1, k.shift);
+      }
+      case 'Home':
+      case 'End': {
+        if (k.ctrl) return move(key === 'Home' ? 0 : text.length);
+        const line = layout?.lines[layout ? caretAt(layout, e.caret).line : 0];
+        if (!line) return false;
+        let end = line.end;
+        if (key === 'End' && end > line.start && (text[end - 1] === ' ' || text[end - 1] === '\u2028')) end--;
+        return move(key === 'Home' ? line.start : end);
+      }
+    }
+    return false;
+  }
+
+  /** Up/Down (Left/Right in vertical type): the nearest caret on the neighbouring line. */
+  private typeLineStep(dir: 1 | -1, extend: boolean): boolean {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    const layout = l && layoutOf(l.text);
+    if (!e || !l || !layout) return false;
+    const c = caretAt(layout, e.caret);
+    const target = layout.lines[c.line + dir];
+    if (!target) {
+      e.caret = dir < 0 ? 0 : layout.text.length;
+    } else {
+      const across = target.baseline;
+      e.caret = layout.vertical ? hitTest(layout, across, c.at) : hitTest(layout, c.at, across);
+    }
+    if (!extend) e.anchor = e.caret;
+    e.typing = null;
+    return true;
+  }
+
+  private typeUndo(): boolean {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    const prev = e?.undo.pop();
+    if (!e || !l || !prev) return false;
+    e.redo.push({ text: l.text, caret: e.caret, anchor: e.anchor });
+    this.setTypeText(prev.text, prev.caret, prev.anchor, false);
+    return true;
+  }
+
+  private typeRedo(): boolean {
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    const next = e?.redo.pop();
+    if (!e || !l || !next) return false;
+    e.undo.push({ text: l.text, caret: e.caret, anchor: e.anchor });
+    this.setTypeText(next.text, next.caret, next.anchor, false);
+    return true;
+  }
+
+  private committingType = false;
+
+  /** Commit the session: one history step (or none, for new type left empty). */
+  typeCommit(): boolean {
+    this.committingType = true;
+    try {
+      return this.typeCommitInner();
+    } finally {
+      this.committingType = false;
+    }
+  }
+
+  private typeCommitInner(): boolean {
+    const e = this.typeEdit;
+    if (!e) return false;
+    const l = this.typeLayer();
+    this.typeEdit = null;
+    this.typeDrag = null;
+    if (!l) return false;
+    const text = textOf(l.text);
+    if (!text.trim()) {
+      // Empty type is not kept: new type vanishes; emptied type is deleted.
+      if (e.created) {
+        this.doc = e.before;
+        this.compositeCache = null;
+        return true;
+      }
+      this.commit({ ...this.doc, layers: LayerCmd.deleteLayer(this.doc, l.id).layers }, 'Delete Layer');
+      return true;
+    }
+    if (e.mask) {
+      const path = typePath(l);
+      const sel = path ? this.pathSelection(path, 'new', 0, true) : null;
+      this.commit({ ...e.before, selection: sel }, 'Type Mask');
+      return true;
+    }
+    const named = e.created ? { ...l, name: LayerCmd.nameFor(this.doc, typeLayerName(text)) } : l;
+    const doc = { ...this.doc, layers: replaceLayer(this.doc.layers, l.id, named) };
+    if (!e.created && e.undo.length === 0) {
+      this.doc = doc;
+      return true;
+    }
+    this.commit(doc, e.created ? 'Type Tool' : 'Edit Type Layer');
+    return true;
+  }
+
+  typeCancel(): boolean {
+    const e = this.typeEdit;
+    if (!e) return false;
+    this.typeEdit = null;
+    this.typeDrag = null;
+    this.doc = e.before;
+    this.compositeCache = null;
+    return true;
+  }
+
+  /** The type layers a panel change applies to outside an editing session: the selected ones. */
+  private selectedTypeLayers(): TypeLayer[] {
+    const ids = new Set(this.doc.activeLayerIds);
+    return [...walkLayers(this.doc.layers)].map((w) => w.layer).filter((l): l is TypeLayer => l.kind === 'type' && ids.has(l.id));
+  }
+
+  /**
+   * Character panel / options bar: while editing, the selection (or the style typing
+   * continues in); otherwise every selected type layer, whole. Also the tool's default.
+   */
+  setTypeStyle(patch: Partial<CharStyle>): boolean {
+    // With no text to apply it to, a change sets what new type starts with.
+    if (this.typeTool && !this.typeEdit && !this.selectedTypeLayers().length) this.typeTool = { ...this.typeTool, style: { ...this.typeTool.style, ...patch } };
+    if (!textReady()) return false;
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (e && l) {
+      const a = Math.min(e.caret, e.anchor);
+      const b = Math.max(e.caret, e.anchor);
+      if (!textOf(l.text).length) {
+        this.setTypeText(restyleAll(l.text, patch), e.caret, e.anchor);
+        return true;
+      }
+      if (a === b) {
+        e.typing = { ...(e.typing ?? styleAt(l.text, a)), ...patch };
+        return true;
+      }
+      this.setTypeText(restyleRange(l.text, a, b, patch), e.caret, e.anchor);
+      return true;
+    }
+    const targets = this.selectedTypeLayers();
+    if (!targets.length) return false;
+    let layers = this.doc.layers;
+    for (const t of targets) layers = replaceLayer(layers, t.id, retyped({ ...t, text: restyleAll(t.text, patch) }, this.doc));
+    this.commit({ ...this.doc, layers }, 'Edit Type Layer');
+    return true;
+  }
+
+  setTypePara(patch: Partial<ParaStyle>): boolean {
+    if (this.typeTool && !this.typeEdit && !this.selectedTypeLayers().length) this.typeTool = { ...this.typeTool, para: { ...this.typeTool.para, ...patch } };
+    if (!textReady()) return false;
+    const e = this.typeEdit;
+    const l = this.typeLayer();
+    if (e && l) {
+      this.setTypeText(restyleParagraphs(l.text, e.caret, e.anchor, patch), e.caret, e.anchor);
+      return true;
+    }
+    const targets = this.selectedTypeLayers();
+    if (!targets.length) return false;
+    let layers = this.doc.layers;
+    for (const t of targets) layers = replaceLayer(layers, t.id, retyped({ ...t, text: restyleParagraphs(t.text, 0, textOf(t.text).length, patch) }, this.doc));
+    this.commit({ ...this.doc, layers }, 'Edit Type Layer');
+    return true;
+  }
+
+  /** Type ▸ … and Layer ▸ Rasterize ▸ Type on the active type layer (or the edited one). */
+  typeCommand(cmd: TypeCommand): boolean {
+    if (!textReady()) return false;
+    this.typeCommit();
+    const id = this.doc.activeLayerIds[0];
+    const l = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (l?.kind !== 'type') return false;
+    const put = (next: Layer, name: string) => {
+      this.commit({ ...this.doc, layers: replaceLayer(this.doc.layers, l.id, next) }, name);
+      return true;
+    };
+    const layout = layoutOf(l.text);
+    switch (cmd) {
+      case 'rasterize': {
+        const { text: _t, antiAlias: _a, transform: _m, missingFonts: _f, kind: _k, ...rest } = l;
+        return put(makePixelLayer(l.name, l.plane.base, { ...rest, id: l.id }), 'Rasterize Type');
+      }
+      case 'toShape': {
+        const path = typePath(l);
+        if (!path) return false;
+        const color = l.text.runs[0]?.style.color ?? [0, 0, 0];
+        const { text: _t, antiAlias: _a, transform: _m, missingFonts: _f, kind: _k, plane: _p, ...rest } = l;
+        return put(makeShapeLayer(l.name, path, { type: 'solid', color }, null, this.doc, { ...rest, id: l.id }), 'Convert to Shape');
+      }
+      case 'workPath': {
+        const path = typePath(l);
+        if (!path) return false;
+        const pid = this.nextPathId++;
+        this.activePathId = pid;
+        this.vector.reset();
+        this.commit({ ...this.doc, paths: [...(this.doc.paths ?? []).filter((p) => !p.work), { id: pid, name: 'Work Path', path, work: true }] }, 'Create Work Path');
+        return true;
+      }
+      case 'horizontal':
+      case 'vertical':
+        if (l.text.orientation === cmd) return false;
+        return put(retyped({ ...l, text: { ...l.text, orientation: cmd } }, this.doc), cmd === 'vertical' ? 'Vertical' : 'Horizontal');
+      case 'toParagraph': {
+        if (l.text.kind === 'paragraph' || !layout) return false;
+        const b = layout.bounds;
+        const text = { ...l.text, kind: 'paragraph' as const, box: { width: Math.ceil(b.x1 - b.x0) + 2, height: Math.ceil(b.y1 - b.y0) + 2 } };
+        return put(retyped({ ...l, text, transform: compose(translateMat(b.x0, b.y0), l.transform) }, this.doc), 'Convert to Paragraph Text');
+      }
+      case 'toPoint': {
+        if (l.text.kind !== 'paragraph' || !layout) return false;
+        // Each wrapped line ends with a return, as Photoshop converts it.
+        let spec = l.text;
+        const t = layout.text;
+        for (const line of [...layout.lines].reverse()) if (line.start > 0 && t[line.start - 1] !== '\n' && t[line.start - 1] !== '\u2028') spec = replaceText(spec, line.start, line.start, '\n');
+        const align = spec.paragraphs[0]?.align ?? 'left';
+        const w = l.text.box?.width ?? 0;
+        const ox = align === 'center' || align === 'justifyCenter' ? w / 2 : align === 'right' || align === 'justifyRight' ? w : 0;
+        const baseline = layout.lines[0]?.baseline ?? 0;
+        const { box: _b, ...rest } = spec;
+        return put(retyped({ ...l, text: { ...rest, kind: 'point' }, transform: compose(translateMat(ox, baseline), l.transform) }, this.doc), 'Convert to Point Text');
+      }
+      default: {
+        const aa = cmd.startsWith('aa:') ? (cmd.slice(3) as AntiAlias) : null;
+        if (!aa || aa === l.antiAlias) return false;
+        return put(retyped({ ...l, antiAlias: aa }, this.doc), 'Anti Alias');
+      }
+    }
+  }
+
+  /** Fonts for the menus: families with their styles and PostScript names. */
+  fontList(): { family: string; styles: { style: string; postscript: string }[] }[] {
+    const reg = fontRegistry();
+    if (!reg) return [];
+    const map = new Map<string, { style: string; postscript: string }[]>();
+    for (const f of reg.faces) map.set(f.family, [...(map.get(f.family) ?? []), { style: f.style, postscript: f.postscriptName }]);
+    return [...map].map(([family, styles]) => ({ family, styles })).sort((a, b) => a.family.localeCompare(b.family));
+  }
+
+  /** Add font files (the user's, or the system's through Local Font Access). */
+  async addFonts(buffers: ArrayBuffer[]): Promise<number> {
+    const reg = await ensureText();
+    let n = 0;
+    for (const b of buffers) {
+      try {
+        n += reg.add(new Uint8Array(b), 'user').length;
+      } catch {
+        // Not a font HarfBuzz can read; skip it.
+      }
+    }
+    return n;
   }
 
   // ---- selection ----------------------------------------------------------------------
@@ -3434,6 +3998,20 @@ export class Engine {
       globalLight: this.doc.globalLight ?? DEFAULT_GLOBAL_LIGHT,
       paths: (this.doc.paths ?? []).map((p) => ({ id: p.id, name: p.name, work: p.work, path: p.path })),
       activePathId: this.targetPath()?.id ?? null,
+      typeReady: textReady(),
+      typeEdit: (() => {
+        const e = this.typeEdit;
+        const l = this.typeLayer();
+        if (!e || !l) return null;
+        const a = Math.min(e.caret, e.anchor);
+        const b = Math.max(e.caret, e.anchor);
+        return { layerId: l.id, caret: e.caret, anchor: e.anchor, style: e.typing ?? styleAt(l.text, a === b ? a : a + 1), para: l.text.paragraphs[paragraphAt(l.text, e.caret)] ?? l.text.paragraphs[0]!, selected: textOf(l.text).slice(a, b), mask: e.mask };
+      })(),
+      statusNote: (() => {
+        const n = this.statusNote;
+        this.statusNote = null;
+        return n;
+      })(),
       layerPath: (() => {
         const lp = this.layerPath();
         return lp ? { kind: lp.kind, name: layerPathName(lp.layer.name, lp.kind), path: lp.path } : null;
@@ -3473,6 +4051,7 @@ export class Engine {
               }
             : undefined,
         vectorMask: layer.vectorMask,
+        type: layer.kind === 'type' ? { text: layer.text, antiAlias: layer.antiAlias, transform: layer.transform, missingFonts: layer.missingFonts ? [...layer.missingFonts] : undefined } : undefined,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,
@@ -3485,7 +4064,7 @@ export class Engine {
         maskEnabled: layer.mask ? layer.mask.enabled : false,
         locks: layer.locks,
         expanded: layer.kind === 'group' ? layer.expanded : false,
-        tiles: layer.kind === 'pixel' || layer.kind === 'smart' || layer.kind === 'shape' ? layer.plane.base.tileCount : 0,
+        tiles: hasPlane(layer) ? layer.plane.base.tileCount : 0,
       })),
     };
   }

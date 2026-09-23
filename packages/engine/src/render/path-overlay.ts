@@ -16,6 +16,10 @@ export interface PathOverlay {
   rubber: [Pt, Pt] | null;
   marquee: { x0: number; y0: number; x1: number; y1: number } | null;
   trail: Pt[] | null;
+  /** Type editing: selected text (quads, filled translucent), the caret, the paragraph box. */
+  highlight?: Pt[][];
+  caret?: [Pt, Pt] | null;
+  box?: Pt[] | null;
 }
 
 const VERT = /* glsl */ `#version 300 es
@@ -67,6 +71,32 @@ export class PathOverlayRenderer {
     this.program.use();
     gl.bindVertexArray(this.vao);
     gl.disable(gl.BLEND);
+
+    if (o.highlight?.length) {
+      const tri: number[] = [];
+      for (const q of o.highlight) {
+        const c = q.map(clip);
+        tri.push(...c[0]!, ...c[1]!, ...c[2]!, ...c[0]!, ...c[2]!, ...c[3]!);
+      }
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      this.draw(gl.TRIANGLES, tri, [0.15, 0.45, 1, 0.35]);
+      gl.disable(gl.BLEND);
+    }
+    if (o.box) {
+      const b: number[] = [];
+      for (let i = 0; i < o.box.length; i++) b.push(...clip(o.box[i]!), ...clip(o.box[(i + 1) % o.box.length]!));
+      this.draw(gl.LINES, b, [0.55, 0.55, 0.55, 1]);
+    }
+    if (o.caret) {
+      // Black with a white edge beside it, so it reads over any colour.
+      const [a, b] = o.caret;
+      const [dx] = px(1);
+      const ca = clip(a);
+      const cb = clip(b);
+      this.draw(gl.LINES, [ca[0] + dx, ca[1], cb[0] + dx, cb[1]], [1, 1, 1, 1]);
+      this.draw(gl.LINES, [...ca, ...cb], [0, 0, 0, 1]);
+    }
 
     const lines: number[] = [];
     const seg = (a: Pt, b: Pt) => lines.push(...clip(a), ...clip(b));

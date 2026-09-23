@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -149,6 +149,17 @@ export interface Histogram {
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
 /** The vector tools' options bar: Auto Add/Delete, Curve Fit, the path operation. */
 const [vectorOptions, setVectorOptions] = createSignal<{ autoAddDelete: boolean; curveFit: number; op: 'add' | 'subtract' | 'intersect' | 'exclude' }>({ autoAddDelete: true, curveFit: 2, op: 'add' });
+/** The type tools' options bar: the font, size and anti-aliasing new type starts with. */
+const [typeOptions, setTypeOptions] = createSignal<{ font: string; family: string; fontStyle: string; size: number; antiAlias: AntiAlias; align: 'left' | 'center' | 'right' }>({
+  font: 'NotoSans-Regular',
+  family: 'Noto Sans',
+  fontStyle: 'Regular',
+  size: 24,
+  antiAlias: 'sharp',
+  align: 'left',
+});
+/** The fonts the type engine has, by family. */
+const [fonts, setFonts] = createSignal<{ family: string; styles: { style: string; postscript: string }[] }[]>([]);
 /** The shape tools' options bar (Shape/Path/Pixels, fill, stroke, radius, sides…). */
 const [shapeOptions, setShapeOptions] = createSignal<ShapeOptions>(DEFAULT_SHAPE_OPTIONS);
 /** The custom shapes the engine holds: built-ins, .csh imports and Define Custom Shape. */
@@ -357,6 +368,10 @@ export const store = {
   setVectorOptions,
   shapeOptions,
   setShapeOptions,
+  typeOptions,
+  setTypeOptions,
+  fonts,
+  setFonts,
   customShapes,
   setCustomShapes,
   luts,

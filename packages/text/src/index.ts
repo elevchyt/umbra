@@ -6,3 +6,4 @@ export * from './layout.js';
 export * from './outline.js';
 export * from './caret.js';
 export * from './bundled.js';
+export * from './edit.js';

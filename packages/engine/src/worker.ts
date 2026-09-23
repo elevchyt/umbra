@@ -3,6 +3,7 @@
  * Engine worker entry point. Owns the document and the GL context; the UI thread only sends
  * commands and rAF ticks, and receives stats (spec 03 §2).
  */
+import { ensureText } from './type-layers.js';
 import { listLuts, parseLutFile, registerLut } from '@umbra/kernels/lut';
 import { Engine } from './engine.js';
 import { runSpikes } from './spikes.js';
@@ -273,6 +274,58 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setVectorTool':
         engine?.setVectorTool(msg.tool, msg.options);
         break;
+      case 'setTypeTool': {
+        const eng = engine;
+        void eng?.setTypeTool(msg.options).then(() => {
+          post({ t: 'doc', doc: eng.summary() });
+          if (msg.options) post({ t: 'fonts', list: eng.fontList() });
+        });
+        break;
+      }
+      case 'typePointer':
+        if (engine?.typePointer(msg) && msg.phase !== 'move') post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeInput':
+        if (engine?.typeInput(msg.text)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeKey':
+        if (engine?.typeKey(msg)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeCommit':
+        if (engine?.typeCommit()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeCancel':
+        if (engine?.typeCancel()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeCopy':
+        if (engine) {
+          post({ t: 'typeSelection', text: engine.typeSelection() });
+          if (msg.cut && engine.typeInput('')) post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
+      case 'setTypeStyle':
+        if (engine?.setTypeStyle(msg.patch)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setTypePara':
+        if (engine?.setTypePara(msg.patch)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'typeCommand': {
+        const eng = engine;
+        void ensureText().then(() => {
+          if (eng?.typeCommand(msg.cmd)) post({ t: 'doc', doc: eng.summary() });
+        });
+        break;
+      }
+      case 'requestFonts': {
+        const eng = engine;
+        void ensureText().then(() => eng && post({ t: 'fonts', list: eng.fontList() }));
+        break;
+      }
+      case 'addFonts': {
+        const eng = engine;
+        void eng?.addFonts(msg.buffers).then((added) => post({ t: 'fonts', list: eng.fontList(), added }));
+        break;
+      }
       case 'setShapeOptions':
         engine?.setShapeOptions(msg.options);
         break;

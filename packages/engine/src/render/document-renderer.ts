@@ -277,7 +277,7 @@ export class DocumentRenderer {
 
   private toGpuLayer(layer: Layer, view: ViewState, clip: Rect): GpuLayer {
     const out: GpuLayer = {
-      kind: layer.kind === 'fill' || layer.kind === 'smart' || layer.kind === 'shape' ? 'pixel' : layer.kind,
+      kind: layer.kind === 'fill' || layer.kind === 'smart' || layer.kind === 'shape' || layer.kind === 'type' ? 'pixel' : layer.kind,
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,

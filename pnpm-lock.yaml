@@ -64,6 +64,9 @@ importers:
       '@umbra/psd':
         specifier: workspace:*
         version: link:../psd
+      '@umbra/text':
+        specifier: workspace:*
+        version: link:../text
     devDependencies:
       ag-psd:
         specifier: ^31.0.2
