@@ -494,6 +494,57 @@ missing-font flow, Match-Font-less. PSD `TySh`/EngineData + vector blocks read/w
 **Exit:** type golden suite (Latin, RTL, CJK, Indic; kerning/tracking/leading/justification
 cases) within layout tolerance of ≤ 1 px glyph position vs Photoshop raster for bundled fonts.
 
+**Revised exit (2026-09-23), as for M4–M6: there is no Photoshop to take rasters from.** The
+golden suite checks each behaviour against its own definition instead: metrics kerning
+tightens AV and numeric kerning disables it; ligatures form and can be turned off; tracking
+adds exactly 1/1000 em per character; auto leading is 120 %; paragraph type wraps inside its
+box, justifies all but the last line to the exact measure and hides what overflows; bidi
+reorders Hebrew with embedded Latin; Arabic joins and forms lam-alef; Devanagari reorders the
+i-matra; CJK advances a full em, breaks between ideographs and honours kinsoku; vertical type
+stands CJK upright; carets and hit tests round-trip; a type layer's outline path fills to
+the same pixels it draws (< 0.5 %); shapes, vector masks and type round-trip through PSD. The
+≤ 1 px comparison against Photoshop stays open until real PSD rasters are available.
+
+**Status (2026-09-23): complete**, with the deferrals below. Vector: Pen, Freeform and
+Curvature Pen, anchor tools, Path/Direct Selection, the Paths panel, Fill/Stroke Path, Make
+Selection/Work Path; six shape tools (Shape/Path/Pixels) with live-shape properties; Combine
+Shapes, Merge Shape Components, Path Alignment/Arrangement; custom shapes with `.csh`; vector
+masks; PSD `vmsk`/`vscg`/`vstk`/`vogk`. Type: a new `@umbra/text` package — HarfBuzz (lazy
+WASM), a font registry with fallback, script itemisation, bidi, a single-line composer, outlines,
+caret geometry, Warp Text — and type layers with in-place editing, point/paragraph/path/area
+type, the Character, Paragraph, Glyphs and Styles panels, the font menu, Type Mask, and PSD
+`TySh` (keeping Photoshop's pixels until edited). Parity 133/133; 840 tests.
+
+Deferred: the Every-line Composer and hyphenation; optical kerning; paragraph-box handles;
+writing path/area type to PSD (ag-psd cannot); Photoshop's custom warps; Match Font (a
+non-goal); spell check and Find/Replace; font previews in the menu. `docs/not-working.md` lists
+them with the smaller gaps.
+
+**Findings.**
+1. **Vector masks are raster masks at draw time.** Folding a vector mask's coverage into the
+   layer's mask (`prepareLayers`, cached per layer) meant neither compositor, merge, export
+   nor the parity suite needed to know vector masks exist — the same trick as M6's effects.
+2. **Shape and type layers carry their pixels.** Like smart objects they are drawn as pixel
+   layers from a plane re-rendered on the CPU whenever their vectors change, and geometry
+   composes into their vectors (or transform) so a rotate re-renders crisply instead of
+   resampling. Type opened from a PSD keeps Photoshop's own rendering until it is edited,
+   which is also how missing fonts stay faithful.
+3. **Traced outlines need even-odd.** Make Work Path from a ring selection filled the hole:
+   every traced contour was a union. Traced contours never cross, so XOR-ing them is exactly
+   even-odd; glyph contours convert the same way for Convert to Shape.
+4. **Small caps were upper-cased away.** Upper-casing lowercase letters before shaping (for
+   synthesised small caps) meant a font's own `smcp` never saw a lowercase letter; now only
+   synthesised small caps upper-case.
+5. **A type session is one history step, and nothing interleaves with it.** Any other command
+   that commits first closes the session as its own step, so Undo never lands halfway
+   through someone's typing and a cancelled session never discards another command's work.
+6. **A raw U+2028 is a line break to the parser.** Written into a regular expression it broke
+   the module twice — the text arrived through a tool that turned `\u2028` escapes into the
+   character. A test now scans every source for raw line and paragraph separators.
+7. **Scripted key presses can be empty.** The browser automation sends `key: ''` for names it
+   does not know ('Return', 'period'), which looked like Enter and Ctrl+Shift+> were broken;
+   'Enter' and '>' work. Check the event before blaming the handler.
+
 ### M8 — Retouching + full brush engine (XL)
 Clone Stamp (+ Clone Source panel: 5 sources, offset/scale/rotate, overlay), Pattern Stamp,
 Healing Brush, Spot Healing (content-aware / create texture / proximity), Patch (normal +

@@ -13,9 +13,11 @@ looks like it does. Tick things off as they land.
   where they expect it. They should be *disabled* rather than silently inert, which is itself
   an entry in §1.
 
-First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted again when M4
-finished the same day. Of 505 menu commands, **146 are wired**, 34 are panel toggles
-generated from the panel registry, and **325 are not built** — greyed out, correctly. Regenerate
+First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted when M4 and again
+when M7 finished the same day. By the script at the bottom, **249 of 504 menu commands are
+wired** (panel toggles included); the rest are not built — greyed out, correctly. (The script
+reads `case` labels, so it cannot see the Filter menu, whose filters go through one generic
+handler; the table below counts those by hand.) Regenerate
 with the script at the bottom; `shell.test.ts` fails if a menu item's `done:` flag and its
 handler ever disagree.
 
@@ -158,10 +160,10 @@ the feature is complete.
 | Menu | Wired | Chiefly waiting on |
 |---|---|---|
 | File | 10 / 50 | export & automation (M11), linked smart objects (M11) |
-| Edit | 27 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
+| Edit | 28 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
 | Image | 37 / 56 | colour modes (M10), Duplicate and Arbitrary rotation (M11), variables (M11) |
-| Layer | 69 / 137 | linked smart objects (M11), align & distribute (M9), type & shapes (M7), vector masks (M7) |
-| Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
+| Layer | 82 / 137 | linked smart objects (M11), align & distribute (M9), Vector Mask ▸ Link, Rasterize ▸ Layer / All Layers |
+| Type | 27 / 39 | Match Font (a non-goal), font preview size, language options, Update All Text Layers, default type styles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
 | Filter | 61 / 74 | Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
@@ -173,6 +175,39 @@ counted every `case` in `Workspace.tsx`, which included `isChecked`'s — a tick
 implementation.
 
 ### Specifically, in the menus you are most likely to reach for
+
+- [x] **Vector: the Pen tools, Paths panel and shape layers (M7).** Pen, Freeform (Curve Fit),
+      Curvature, Add/Delete/Convert Anchor, Path and Direct Selection; Fill/Stroke Path, Make
+      Selection, Make Work Path; the six shape tools in Shape, Path and Pixels modes with
+      fill, stroke (width, align, caps, joins, dashes) and live-shape properties; Combine
+      Shapes, Merge Shape Components, Path Alignment and Arrangement; custom shapes (a built-in
+      set, `.csh` files, Define Custom Shape); vector masks (Reveal/Hide All, Current Path,
+      Delete, Enable, Rasterize); PSD read/write of all of it.
+- [ ] **`.csh` reading is written from the format's description** and checked by writing and
+      reading our own files — no Adobe-made library has been through it yet.
+- [ ] **Merge Shape Components traces a 4× rasterisation** and refits curves (`[fit]`, within
+      ¼ px) where Photoshop computes the boolean exactly; corners soften slightly.
+- [ ] **Only rectangles and ellipses stay live through PSD** (`vogk`); other live shapes come
+      back as paths. Vector Mask ▸ Link is not built (masks always move with their layer).
+- [x] **Type (M7).** Point, paragraph, on-path and in-shape type, horizontal and vertical;
+      editing in place (caret, selection by click count and Shift-arrows, word and line steps,
+      bidi-aware arrows, IME and clipboard through an off-screen field, in-session undo);
+      the options bar, Character, Paragraph, Glyphs and Character/Paragraph Styles panels;
+      the font menu with search, favourites, Add Fonts… and System Fonts (Local Font Access);
+      Warp Text (15 styles); Convert to Shape, Create Work Path, Rasterize, point ⇄ paragraph;
+      Type Mask tools; PSD `TySh` read/write keeping Photoshop's pixels until a layer is
+      edited, and Resolve Missing Fonts. HarfBuzz shapes Latin, Arabic, Hebrew, Devanagari and
+      CJK; Noto Sans (OFL) is bundled.
+- [ ] **The composer is single-line only** (Every-line Composer falls back to it), hyphenation
+      is stored but not applied, optical kerning is metrics kerning, and justification uses
+      only the desired word spacing.
+- [ ] **Path and area type save to PSD as point type** — ag-psd can read a type path but not
+      write one. Photoshop's "custom" warp is not read.
+- [ ] **A paragraph box cannot be resized with handles** yet (Free Transform scales the text
+      with it). Vertical type draws no underline or strikethrough.
+- [ ] **Warp styles and the anti-alias modes are `[fit]`** — Photoshop publishes neither.
+      The IME candidate window opens at the window's edge, not at the caret. Character and
+      Paragraph Styles are kept with the app, not in the document.
 
 - [x] **Layer ▸ Layer Style — all ten effects** (multi-instance Drop Shadow, Inner Shadow,
       Color/Gradient Overlay and Stroke), the Layer Style dialog with Blending Options (Blend

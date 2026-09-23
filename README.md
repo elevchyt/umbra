@@ -9,10 +9,12 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M6 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
+**M0–M7 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
 Photoshop's adjustments (destructive and as adjustment layers), fill layers, masks, the
 Filter menu (58 filters and the 47-effect Filter Gallery), smart objects and smart filters,
-layer styles and advanced blending work; vector and type do not.
+layer styles and advanced blending, the Pen tools, paths, shape layers and vector masks, and
+type (HarfBuzz shaping, point/paragraph/path/area type, Warp Text) work; retouching and the
+full brush engine (M8) do not.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
