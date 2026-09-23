@@ -1042,6 +1042,22 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .layer-thumb.targeted, .layer-mask-thumb.targeted { outline: 1px solid var(--text); outline-offset: 1px; }
 .filter-box { width: 220px; height: 220px; align-self: center; border: 1px solid var(--border-dark); cursor: grab; background: #808080; image-rendering: pixelated; }
 .filter-zoom { justify-content: center; }
+.preview-box { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+.gallery { display: grid; grid-template-columns: auto 1fr 230px; gap: 10px; align-items: start; }
+.gallery-folders { height: 440px; overflow-y: auto; background: var(--panel-sunken); border: 1px solid var(--border-dark); padding: 4px; }
+.gallery-folder-head { display: block; width: 100%; text-align: left; background: none; border: none; color: var(--text); padding: 3px 4px; cursor: pointer; font: inherit; }
+.gallery-folder-head:hover { background: var(--row-hover); }
+.gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 4px; padding: 2px 2px 6px 14px; }
+.gallery-thumb { display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: 2px solid transparent; padding: 1px; color: var(--text-dim); cursor: pointer; font: inherit; font-size: 10px; }
+.gallery-thumb canvas { width: 72px; height: 54px; display: block; }
+.gallery-thumb span { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gallery-thumb.selected { border-color: var(--accent); color: var(--text); }
+.gallery-side { display: flex; flex-direction: column; gap: 8px; min-height: 440px; }
+.gallery-stack { flex: 1; min-height: 120px; max-height: 180px; overflow-y: auto; background: var(--panel-sunken); border: 1px solid var(--border-dark); }
+.gallery-layer { display: flex; align-items: center; gap: 6px; padding: 3px 4px; cursor: default; border-bottom: 1px solid var(--border-dark); }
+.gallery-layer.selected { background: var(--row-selected); }
+.gallery-eye { width: 20px; height: 18px; background: none; border: 1px solid var(--border-dark); color: inherit; cursor: pointer; font-size: 11px; padding: 0; }
+.gallery-stack-buttons { justify-content: flex-end; }
 .point-pick { position: relative; width: 120px; background: var(--panel-sunken); border: 1px solid var(--border-dark); cursor: crosshair; }
 .point-dot { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border: 1px solid #fff; box-shadow: 0 0 0 1px #000; border-radius: 50%; pointer-events: none; }
 .kernel-grid { display: grid; gap: 2px; }

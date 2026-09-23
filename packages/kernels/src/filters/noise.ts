@@ -84,7 +84,7 @@ export function medianChannels(src: Raster, radius: number): Uint8Array {
   return out;
 }
 
-function fromStraight8(src: Raster, px: Uint8Array): Raster {
+export function fromStraight8(src: Raster, px: Uint8Array): Raster {
   const out = makeRaster(src.width, src.height);
   for (let i = 0; i < px.length; i += 4) {
     const a = px[i + 3]! / 255;

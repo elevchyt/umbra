@@ -4,7 +4,8 @@
  * held down to see the original. The Preview checkbox adds the on-canvas preview, computed in
  * the worker (latest request wins).
  */
-import { For, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
+import { For, createEffect, createSignal, onCleanup } from 'solid-js';
+import { PreviewBox } from './PreviewBox';
 import { Select, Checkbox, Button } from '@umbra/ui/widgets/controls';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { FILTER_BY_ID, defaultsOf, type FilterParams, type ParamSpec } from '@umbra/engine';
@@ -13,7 +14,6 @@ import { store } from '../state/store';
 import { Param } from '../adjust/editors';
 
 const BOX = 220;
-const ZOOMS = [0.125, 0.25, 0.5, 1, 2, 4];
 
 /** Filter settings last used per filter this session — Photoshop reopens dialogs with them. */
 const lastParams = new Map<string, FilterParams>();
@@ -28,141 +28,61 @@ export function FilterDialog(props: { id: string; send: (m: unknown) => void; on
   const def = FILTER_BY_ID.get(props.id)!;
   const [params, setParams] = createSignal<FilterParams>(structuredClone(lastParams.get(props.id) ?? defaultsOf(def)));
   const [preview, setPreview] = createSignal(true);
-  const [zoom, setZoom] = createSignal(1);
-  const doc = () => store.doc();
-  // Centre of the box, in document pixels.
-  const [centre, setCentre] = createSignal({ x: (doc()?.width ?? 0) / 2, y: (doc()?.height ?? 0) / 2 });
-  const [showBefore, setShowBefore] = createSignal(false);
-  let canvas!: HTMLCanvasElement;
-  let seq = 0;
-  let latest: { before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number } } | null = null;
+  const canvasPreview = useCanvasPreview(props.send, () => props.id, params, preview);
 
-  const rect = () => {
-    const half = BOX / zoom() / 2;
-    const c = centre();
-    return { x0: c.x - half, y0: c.y - half, x1: c.x + half, y1: c.y + half };
-  };
-
-  let boxTimer = 0;
-  let canvasTimer = 0;
-  const request = () => {
-    const { fg, bg } = colours();
-    clearTimeout(boxTimer);
-    boxTimer = window.setTimeout(() => props.send({ t: 'filterBox', id: props.id, params: params(), fg, bg, rect: rect(), seq: ++seq }), 16);
-    clearTimeout(canvasTimer);
-    canvasTimer = window.setTimeout(() => props.send({ t: 'previewFilter', id: preview() ? props.id : null, params: preview() ? params() : null, fg, bg }), 60);
-  };
-
-  const draw = () => {
-    const ctx = canvas.getContext('2d')!;
-    ctx.fillStyle = '#808080';
-    ctx.fillRect(0, 0, BOX, BOX);
-    if (!latest) return;
-    const px = showBefore() ? latest.before : latest.after;
-    const img = new ImageData(new Uint8ClampedArray(px), latest.width, latest.height);
-    // Draw at the box's zoom; the returned rect may be clipped by the canvas edges.
-    const tmp = document.createElement('canvas');
-    tmp.width = latest.width;
-    tmp.height = latest.height;
-    tmp.getContext('2d')!.putImageData(img, 0, 0);
-    const r = rect();
-    ctx.imageSmoothingEnabled = zoom() < 1;
-    ctx.drawImage(tmp, (latest.rect.x0 - r.x0) * zoom(), (latest.rect.y0 - r.y0) * zoom(), latest.width * zoom(), latest.height * zoom());
-  };
-
-  onMount(() => {
-    const onBox = (e: Event) => {
-      const m = (e as CustomEvent).detail as { seq: number } & typeof latest;
-      if (!m || m.seq !== seq) return;
-      latest = m;
-      draw();
-    };
-    window.addEventListener('umbra:filter-box', onBox);
-    onCleanup(() => window.removeEventListener('umbra:filter-box', onBox));
-    request();
-  });
-  onCleanup(() => {
-    clearTimeout(boxTimer);
-    clearTimeout(canvasTimer);
-  });
-  createEffect(() => {
-    showBefore();
-    draw();
-  });
-
-  const set = (key: string, v: FilterParams[string]) => {
-    setParams({ ...params(), [key]: v });
-    request();
-  };
-
-  const pan = (e: PointerEvent) => {
-    e.preventDefault();
-    setShowBefore(true);
-    const start = { x: e.clientX, y: e.clientY, c: centre() };
-    const move = (ev: PointerEvent) => {
-      setCentre({ x: start.c.x - (ev.clientX - start.x) / zoom(), y: start.c.y - (ev.clientY - start.y) / zoom() });
-      draw();
-    };
-    const up = () => {
-      setShowBefore(false);
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      request();
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-
-  const close = () => {
-    props.send({ t: 'previewFilter', id: null, params: null, ...colours() });
-    props.onClose();
-  };
+  const set = (key: string, v: FilterParams[string]) => setParams({ ...params(), [key]: v });
 
   return (
     <Dialog
       title={def.label}
       width={300}
       onOk={() => {
-        clearTimeout(boxTimer);
-        clearTimeout(canvasTimer);
+        canvasPreview.cancel();
         lastParams.set(props.id, params());
         props.send({ t: 'applyFilter', id: props.id, params: params(), ...colours() });
         props.onClose();
       }}
-      onCancel={close}
-      onReset={() => {
-        setParams(defaultsOf(def));
-        request();
+      onCancel={() => {
+        canvasPreview.clear();
+        props.onClose();
       }}
-      footer={
-        <Checkbox
-          checked={preview()}
-          label="Preview"
-          onChange={(v) => {
-            setPreview(v);
-            request();
-          }}
-        />
-      }
+      onReset={() => setParams(defaultsOf(def))}
+      footer={<Checkbox checked={preview()} label="Preview" onChange={setPreview} />}
     >
       <div class="adjust-editor">
-        <canvas ref={canvas} class="filter-box" width={BOX} height={BOX} onPointerDown={pan} title="Drag to move the preview; hold to see the original" />
-        <div class="adjust-fields filter-zoom">
-          <Button width={28} onClick={() => { setZoom(ZOOMS[Math.max(0, ZOOMS.indexOf(zoom()) - 1)]!); request(); }}>
-            −
-          </Button>
-          <span>{Math.round(zoom() * 100)}%</span>
-          <Button width={28} onClick={() => { setZoom(ZOOMS[Math.min(ZOOMS.length - 1, ZOOMS.indexOf(zoom()) + 1)]!); request(); }}>
-            +
-          </Button>
-        </div>
+        <PreviewBox id={props.id} params={params()} width={BOX} height={BOX} send={props.send} />
         <For each={def.params}>{(spec) => <ParamControl spec={spec} value={params()[spec.key]!} onChange={(v) => set(spec.key, v)} />}</For>
       </div>
     </Dialog>
   );
 }
 
-function ParamControl(props: { spec: ParamSpec; value: FilterParams[string]; onChange: (v: FilterParams[string]) => void }) {
+/**
+ * The on-canvas preview of a filter dialog: the worker computes the filtered document
+ * (latest request wins); a short delay coalesces slider drags.
+ */
+export function useCanvasPreview(send: (m: unknown) => void, id: () => string, params: () => FilterParams, on: () => boolean) {
+  let timer = 0;
+  createEffect(() => {
+    const p = params();
+    const show = on();
+    const f = id();
+    clearTimeout(timer);
+    timer = window.setTimeout(() => send({ t: 'previewFilter', id: show ? f : null, params: show ? p : null, ...colours() }), 60);
+  });
+  const cancel = () => clearTimeout(timer);
+  onCleanup(cancel);
+  return {
+    cancel,
+    /** Cancel and take the preview off the canvas. */
+    clear: () => {
+      cancel();
+      send({ t: 'previewFilter', id: null, params: null, ...colours() });
+    },
+  };
+}
+
+export function ParamControl(props: { spec: ParamSpec; value: FilterParams[string]; onChange: (v: FilterParams[string]) => void }) {
   const s = props.spec;
   switch (s.type) {
     case 'number':

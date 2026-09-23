@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FILTERS, FILTER_BY_ID } from './index.js';
+import { FILTERS, FILTER_BY_ID, GALLERY_EFFECTS, GALLERY_BY_ID, parseStack } from './index.js';
 import { fromRgba8, toRgba8, makeRaster, type Raster } from './core.js';
 import { irisSpans } from './lensblur.js';
 import { defaultsOf, type FilterContext, type FilterDef, type FilterParams } from './types.js';
@@ -57,7 +57,7 @@ const ctx = (over: Partial<FilterContext> = {}): FilterContext => ({
 });
 
 /** Three parameter sets: the defaults, and two spread across each numeric range. */
-function paramSets(def: FilterDef): FilterParams[] {
+function paramSets(def: Pick<FilterDef, 'params'>): FilterParams[] {
   const sets = [defaultsOf(def)];
   for (const [t, pick] of [[0.2, 1], [0.55, 2]] as const) {
     const p = defaultsOf(def);
@@ -85,7 +85,7 @@ function checksum(r: Raster): string {
 }
 
 describe('every filter', () => {
-  for (const def of FILTERS) {
+  for (const def of [...FILTERS, ...GALLERY_EFFECTS]) {
     it(`${def.label}: three parameter sets, sane output, golden checksum`, () => {
       const sums: string[] = [];
       for (const p of paramSets(def)) {
@@ -352,5 +352,52 @@ describe('filter properties', () => {
 
   it('Find Edges turns a flat image white', () => {
     expect(px(run('stylize.findedges', {}, flat([0.3, 0.7, 0.1, 1])), 20, 14)).toEqual([255, 255, 255, 255]);
+  });
+
+});
+
+describe('Filter Gallery', () => {
+  const gallery = FILTER_BY_ID.get('filter.gallery')!;
+  const layer = (id: string, over: FilterParams = {}, visible = true) => ({ id, params: { ...defaultsOf(GALLERY_BY_ID.get(id)!), ...over }, visible });
+
+  it('has the 47 effects of spec 05 §B.10, in six folders', () => {
+    expect(GALLERY_EFFECTS.length).toBe(47);
+    const count = (c: string) => GALLERY_EFFECTS.filter((e) => e.category === c).length;
+    expect([count('Artistic'), count('Brush Strokes'), count('Distort'), count('Sketch'), count('Stylize'), count('Texture')]).toEqual([15, 8, 3, 14, 1, 6]);
+  });
+
+  it('runs the visible effect layers bottom to top, skipping hidden ones', () => {
+    const stack = [layer('gallery.cutout'), layer('gallery.grain', {}, false), layer('gallery.glowingEdges')];
+    const out = gallery.run(image(), { stack: JSON.stringify(stack) }, ctx());
+    const a = GALLERY_BY_ID.get('gallery.cutout')!.run(image(), stack[0]!.params, ctx());
+    const b = GALLERY_BY_ID.get('gallery.glowingEdges')!.run(a, stack[2]!.params, ctx());
+    expect(Array.from(toRgba8(out))).toEqual(Array.from(toRgba8(b)));
+    // The pad is the sum of the visible layers' pads.
+    const pad = (id: string, p: FilterParams) => GALLERY_BY_ID.get(id)!.pad(p) as number;
+    expect(gallery.pad({ stack: JSON.stringify(stack) })).toBe(pad('gallery.cutout', stack[0]!.params) + pad('gallery.glowingEdges', stack[2]!.params));
+  });
+
+  it('an empty stack is the identity; unknown effects and bad JSON are dropped', () => {
+    expect(Array.from(toRgba8(gallery.run(image(), { stack: '[]' }, ctx())))).toEqual(Array.from(toRgba8(image())));
+    expect(parseStack('not json')).toEqual([]);
+    const parsed = parseStack(JSON.stringify([{ id: 'gallery.nope', params: {}, visible: true }, { id: 'gallery.stamp', params: { balance: 10 } }]));
+    expect(parsed.map((l) => l.id)).toEqual(['gallery.stamp']);
+    expect(parsed[0]!.params.smoothness).toBe(5);
+    expect(parsed[0]!.visible).toBe(true);
+  });
+
+  it('Sketch effects draw only in the foreground and background colours', () => {
+    const fg: [number, number, number] = [0.8, 0.1, 0.1];
+    const bg: [number, number, number] = [0.1, 0.1, 0.8];
+    for (const id of ['gallery.stamp', 'gallery.graphicPen', 'gallery.halftonePattern', 'gallery.photocopy']) {
+      const e = GALLERY_BY_ID.get(id)!;
+      const out = toRgba8(e.run(image(), defaultsOf(e), ctx({ foreground: fg, background: bg })));
+      for (let i = 0; i < out.length; i += 4) {
+        if (out[i + 3]! < 255) continue;
+        // On the line from fg to bg: green stays at 0.1 and red + blue is constant.
+        expect(Math.abs(out[i + 1]! - 26), id).toBeLessThanOrEqual(1);
+        expect(Math.abs(out[i]! + out[i + 2]! - 230), id).toBeLessThanOrEqual(2);
+      }
+    }
   });
 });

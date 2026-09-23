@@ -330,7 +330,7 @@ describe('menu enablement matches the handlers', () => {
   );
 
   it('every filter menu item is enabled exactly when the registry implements it', () => {
-    const filterItems = COMMANDS.filter((c) => /^(blur|distort|noise|pixelate|render|sharpen|stylize|video|other)\./.test(c.cmd));
+    const filterItems = COMMANDS.filter((c) => /^(blur|distort|noise|pixelate|render|sharpen|stylize|video|other)\./.test(c.cmd) || c.cmd === 'filter.gallery');
     const wrong = filterItems.filter((c) => !!c.done !== FILTER_BY_ID.has(c.cmd)).map((c) => c.cmd);
     expect(wrong).toEqual([]);
     // And every registered filter has a menu item — a filter nobody can reach is dead code.

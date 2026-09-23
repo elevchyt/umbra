@@ -29,7 +29,9 @@ export type ParamSpec =
   /** A Randomize button: an integer seed. */
   | { key: string; label: string; type: 'seed'; default: number }
   /** Another layer of the document (Displace's map, Lens Blur's depth): its id, or -1 for none. */
-  | { key: string; label: string; type: 'layer'; default: number };
+  | { key: string; label: string; type: 'layer'; default: number }
+  /** The Filter Gallery's effect layers, as JSON: `GalleryLayer[]`. */
+  | { key: string; label: string; type: 'stack'; default: string };
 
 export type ParamValue = number | string | boolean | { x: number; y: number } | number[];
 export type FilterParams = Record<string, ParamValue>;
@@ -55,7 +57,22 @@ export interface FilterContext {
   bounds?: { x0: number; y0: number; x1: number; y1: number };
 }
 
-export type FilterCategory = 'Blur' | 'Distort' | 'Noise' | 'Pixelate' | 'Render' | 'Sharpen' | 'Stylize' | 'Video' | 'Other';
+export type FilterCategory = 'Blur' | 'Distort' | 'Noise' | 'Pixelate' | 'Render' | 'Sharpen' | 'Stylize' | 'Video' | 'Other' | 'Gallery';
+
+/** The Filter Gallery's folders — spec 05 §B.10. */
+export type GalleryCategory = 'Artistic' | 'Brush Strokes' | 'Distort' | 'Sketch' | 'Stylize' | 'Texture';
+
+/** One Filter Gallery effect: a filter that lives only inside the gallery. */
+export interface GalleryEffect extends Omit<FilterDef, 'category'> {
+  category: GalleryCategory;
+}
+
+/** One effect layer of the gallery's stack. */
+export interface GalleryLayer {
+  id: string;
+  params: FilterParams;
+  visible: boolean;
+}
 
 export interface FilterDef {
   /** The menu command id, e.g. 'blur.gaussianblur'. */
@@ -74,7 +91,7 @@ export interface FilterDef {
   model?: string;
 }
 
-export function defaultsOf(def: FilterDef): FilterParams {
+export function defaultsOf(def: Pick<FilterDef, 'params'>): FilterParams {
   const out: FilterParams = {};
   for (const p of def.params) out[p.key] = Array.isArray(p.default) ? [...p.default] : typeof p.default === 'object' ? { ...(p.default as object) } as never : p.default;
   return out;

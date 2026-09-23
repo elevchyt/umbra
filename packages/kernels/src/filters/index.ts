@@ -9,6 +9,7 @@ import { SHARPEN_FILTERS } from './sharpen.js';
 import { STYLIZE_FILTERS } from './stylize.js';
 import { VIDEO_FILTERS } from './video.js';
 import { OTHER_FILTERS } from './other.js';
+import { filterGallery } from './gallery/index.js';
 import type { FilterDef } from './types.js';
 
 export const FILTERS: FilterDef[] = [
@@ -22,9 +23,11 @@ export const FILTERS: FilterDef[] = [
   ...STYLIZE_FILTERS,
   ...VIDEO_FILTERS,
   ...OTHER_FILTERS,
+  filterGallery,
 ];
 
 export const FILTER_BY_ID = new Map(FILTERS.map((f) => [f.id, f]));
 
 export * from './types.js';
 export * from './core.js';
+export { GALLERY_EFFECTS, GALLERY_BY_ID, GALLERY_CATEGORIES, DEFAULT_STACK, parseStack } from './gallery/index.js';

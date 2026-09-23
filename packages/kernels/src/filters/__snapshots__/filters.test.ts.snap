@@ -1,5 +1,13 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`every filter > Accented Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "767ff8af",
+  "8b163e14",
+  "de6d8ec6",
+]
+`;
+
 exports[`every filter > Add Noise: three parameter sets, sane output, golden checksum 1`] = `
 [
   "9eda5737",
@@ -8,11 +16,27 @@ exports[`every filter > Add Noise: three parameter sets, sane output, golden che
 ]
 `;
 
+exports[`every filter > Angled Strokes: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "f70719eb",
+  "606ffe21",
+  "5625f187",
+]
+`;
+
 exports[`every filter > Average: three parameter sets, sane output, golden checksum 1`] = `
 [
   "72765a05",
   "72765a05",
   "72765a05",
+]
+`;
+
+exports[`every filter > Bas Relief: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "d3a0e3c4",
+  "a56ace53",
+  "854574d7",
 ]
 `;
 
@@ -40,6 +64,30 @@ exports[`every filter > Box Blur: three parameter sets, sane output, golden chec
 ]
 `;
 
+exports[`every filter > Chalk & Charcoal: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "959a27fd",
+  "ba12565d",
+  "41c7451d",
+]
+`;
+
+exports[`every filter > Charcoal: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "d8fc65d8",
+  "df11406f",
+  "2dffbd0",
+]
+`;
+
+exports[`every filter > Chrome: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e2c9fa0",
+  "512db88a",
+  "f5980ece",
+]
+`;
+
 exports[`every filter > Clouds: three parameter sets, sane output, golden checksum 1`] = `
 [
   "7edf627",
@@ -56,6 +104,38 @@ exports[`every filter > Color Halftone: three parameter sets, sane output, golde
 ]
 `;
 
+exports[`every filter > Colored Pencil: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "2f30c8c2",
+  "cd6797b6",
+  "1aa89500",
+]
+`;
+
+exports[`every filter > Conté Crayon: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "4e3661b4",
+  "f6cb7cb",
+  "d036f0c4",
+]
+`;
+
+exports[`every filter > Craquelure: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "aff6796",
+  "39e9f96",
+  "89be58c8",
+]
+`;
+
+exports[`every filter > Crosshatch: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1a2b25af",
+  "6c7adf68",
+  "e7364c50",
+]
+`;
+
 exports[`every filter > Crystallize: three parameter sets, sane output, golden checksum 1`] = `
 [
   "82c4dc34",
@@ -69,6 +149,22 @@ exports[`every filter > Custom: three parameter sets, sane output, golden checks
   "a2f741a3",
   "cdde5c05",
   "270ee2a5",
+]
+`;
+
+exports[`every filter > Cutout: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "16c371c",
+  "fc2d57f2",
+  "380e623c",
+]
+`;
+
+exports[`every filter > Dark Strokes: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e941858f",
+  "326fe50c",
+  "562d0456",
 ]
 `;
 
@@ -96,6 +192,14 @@ exports[`every filter > Difference Clouds: three parameter sets, sane output, go
 ]
 `;
 
+exports[`every filter > Diffuse Glow: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "ce49e782",
+  "5d26e47b",
+  "5e1b1c8e",
+]
+`;
+
 exports[`every filter > Diffuse: three parameter sets, sane output, golden checksum 1`] = `
 [
   "a6b0fdd7",
@@ -109,6 +213,14 @@ exports[`every filter > Displace: three parameter sets, sane output, golden chec
   "597ba834",
   "13853cc5",
   "8c502cd8",
+]
+`;
+
+exports[`every filter > Dry Brush: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1b30ab77",
+  "80c8e6f5",
+  "6ff6c89d",
 ]
 `;
 
@@ -152,6 +264,22 @@ exports[`every filter > Fibers: three parameter sets, sane output, golden checks
 ]
 `;
 
+exports[`every filter > Film Grain: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3db70da2",
+  "f104e2d6",
+  "b0fe7424",
+]
+`;
+
+exports[`every filter > Filter Gallery: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "16c371c",
+  "16c371c",
+  "16c371c",
+]
+`;
+
 exports[`every filter > Find Edges: three parameter sets, sane output, golden checksum 1`] = `
 [
   "cc068005",
@@ -168,11 +296,51 @@ exports[`every filter > Fragment: three parameter sets, sane output, golden chec
 ]
 `;
 
+exports[`every filter > Fresco: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "5f655074",
+  "eca08b6f",
+  "42ff0e04",
+]
+`;
+
 exports[`every filter > Gaussian Blur: three parameter sets, sane output, golden checksum 1`] = `
 [
   "ca1e8673",
   "3ca5e9ea",
   "dc3bbcc1",
+]
+`;
+
+exports[`every filter > Glass: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3c4791e3",
+  "b5c3061c",
+  "65dd252b",
+]
+`;
+
+exports[`every filter > Glowing Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "faffb3bf",
+  "af5a872f",
+  "4492c1d7",
+]
+`;
+
+exports[`every filter > Grain: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "613b7898",
+  "652138bb",
+  "eafe8361",
+]
+`;
+
+exports[`every filter > Graphic Pen: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "cc1f80e4",
+  "2e05efcc",
+  "29983b55",
 ]
 `;
 
@@ -184,11 +352,27 @@ exports[`every filter > HSB/HSL: three parameter sets, sane output, golden check
 ]
 `;
 
+exports[`every filter > Halftone Pattern: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "f6ab17f2",
+  "ff296faf",
+  "1e1bb94b",
+]
+`;
+
 exports[`every filter > High Pass: three parameter sets, sane output, golden checksum 1`] = `
 [
   "6f193955",
   "11378e8b",
   "6debfa83",
+]
+`;
+
+exports[`every filter > Ink Outlines: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "eee3724d",
+  "96ccc6a3",
+  "dfe2f3bb",
 ]
 `;
 
@@ -240,6 +424,14 @@ exports[`every filter > Minimum: three parameter sets, sane output, golden check
 ]
 `;
 
+exports[`every filter > Mosaic Tiles: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "7be4a3f",
+  "f90e20e1",
+  "f81bd2be",
+]
+`;
+
 exports[`every filter > Mosaic: three parameter sets, sane output, golden checksum 1`] = `
 [
   "b09185c5",
@@ -264,6 +456,30 @@ exports[`every filter > NTSC Colors: three parameter sets, sane output, golden c
 ]
 `;
 
+exports[`every filter > Neon Glow: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a9b0c753",
+  "b50a8ef0",
+  "d76d6037",
+]
+`;
+
+exports[`every filter > Note Paper: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "d9b91ed6",
+  "4097cd8b",
+  "c2890818",
+]
+`;
+
+exports[`every filter > Ocean Ripple: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "49b925fb",
+  "9a837f9b",
+  "b7c96f18",
+]
+`;
+
 exports[`every filter > Offset: three parameter sets, sane output, golden checksum 1`] = `
 [
   "1c5a691d",
@@ -280,11 +496,59 @@ exports[`every filter > Oil Paint: three parameter sets, sane output, golden che
 ]
 `;
 
+exports[`every filter > Paint Daubs: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "bae5a69",
+  "e5dae7fc",
+  "eb6c6678",
+]
+`;
+
+exports[`every filter > Palette Knife: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "63681f0",
+  "5cbe64d3",
+  "3ae94058",
+]
+`;
+
+exports[`every filter > Patchwork: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3a01b794",
+  "7c05d8b8",
+  "111f515c",
+]
+`;
+
+exports[`every filter > Photocopy: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "afea7958",
+  "42d6a387",
+  "69f239b9",
+]
+`;
+
 exports[`every filter > Pinch: three parameter sets, sane output, golden checksum 1`] = `
 [
   "30879365",
   "7caba4f5",
   "2ab84d65",
+]
+`;
+
+exports[`every filter > Plaster: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "917a9109",
+  "213675d5",
+  "5e968447",
+]
+`;
+
+exports[`every filter > Plastic Wrap: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "da94b6a5",
+  "14d02e47",
+  "367bd2f0",
 ]
 `;
 
@@ -304,6 +568,14 @@ exports[`every filter > Polar Coordinates: three parameter sets, sane output, go
 ]
 `;
 
+exports[`every filter > Poster Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "b1413a87",
+  "174b832a",
+  "29bfe4be",
+]
+`;
+
 exports[`every filter > Radial Blur: three parameter sets, sane output, golden checksum 1`] = `
 [
   "302ca257",
@@ -320,11 +592,27 @@ exports[`every filter > Reduce Noise: three parameter sets, sane output, golden 
 ]
 `;
 
+exports[`every filter > Reticulation: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a70b0b71",
+  "9d7f04e4",
+  "8548f6d7",
+]
+`;
+
 exports[`every filter > Ripple: three parameter sets, sane output, golden checksum 1`] = `
 [
   "716bbbb3",
   "83b841b4",
   "a22b065d",
+]
+`;
+
+exports[`every filter > Rough Pastels: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3b8f1b14",
+  "dda3fad5",
+  "2f360898",
 ]
 `;
 
@@ -384,11 +672,27 @@ exports[`every filter > Smart Sharpen: three parameter sets, sane output, golden
 ]
 `;
 
+exports[`every filter > Smudge Stick: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "32b79b1b",
+  "70031539",
+  "213d9aad",
+]
+`;
+
 exports[`every filter > Solarize: three parameter sets, sane output, golden checksum 1`] = `
 [
   "8aae09cc",
   "8aae09cc",
   "8aae09cc",
+]
+`;
+
+exports[`every filter > Spatter: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "2002ca29",
+  "12b6f032",
+  "5a3afb27",
 ]
 `;
 
@@ -400,6 +704,46 @@ exports[`every filter > Spherize: three parameter sets, sane output, golden chec
 ]
 `;
 
+exports[`every filter > Sponge: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "4d728163",
+  "3702cca9",
+  "8169c91f",
+]
+`;
+
+exports[`every filter > Sprayed Strokes: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "91e420e1",
+  "cd323e78",
+  "ab18a01e",
+]
+`;
+
+exports[`every filter > Stained Glass: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "8632bcb0",
+  "727bf6bf",
+  "5242ee3e",
+]
+`;
+
+exports[`every filter > Stamp: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "3a361673",
+  "270ee2a5",
+  "8cf6dd3c",
+]
+`;
+
+exports[`every filter > Sumi-e: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "71f650bc",
+  "1146cecf",
+  "ccea5b18",
+]
+`;
+
 exports[`every filter > Surface Blur: three parameter sets, sane output, golden checksum 1`] = `
 [
   "518ee428",
@@ -408,11 +752,27 @@ exports[`every filter > Surface Blur: three parameter sets, sane output, golden 
 ]
 `;
 
+exports[`every filter > Texturizer: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "4f6d6ec4",
+  "8c30e62b",
+  "14d54c17",
+]
+`;
+
 exports[`every filter > Tiles: three parameter sets, sane output, golden checksum 1`] = `
 [
   "1c5a691d",
   "1c5a691d",
   "b57b5db9",
+]
+`;
+
+exports[`every filter > Torn Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e5ff7daa",
+  "b1bf72e0",
+  "6d0dd5e6",
 ]
 `;
 
@@ -432,11 +792,35 @@ exports[`every filter > Twirl: three parameter sets, sane output, golden checksu
 ]
 `;
 
+exports[`every filter > Underpainting: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "303f1438",
+  "34ddf420",
+  "f4d0683",
+]
+`;
+
 exports[`every filter > Unsharp Mask: three parameter sets, sane output, golden checksum 1`] = `
 [
   "3d5c5d8f",
   "1c5a691d",
   "2eb0e706",
+]
+`;
+
+exports[`every filter > Water Paper: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "25fd1382",
+  "dd607574",
+  "1ab96bbb",
+]
+`;
+
+exports[`every filter > Watercolor: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "8ec6ab54",
+  "2e2e0961",
+  "b0210b49",
 ]
 `;
 

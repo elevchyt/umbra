@@ -35,7 +35,7 @@ export const mosaic: FilterDef = {
 };
 
 /** Nearest jittered-grid seed to a document point: [seedX, seedY] in document pixels. */
-function nearestSeed(x: number, y: number, size: number, seed: number): [number, number] {
+export function nearestSeed(x: number, y: number, size: number, seed: number): [number, number] {
   const cx = Math.floor(x / size);
   const cy = Math.floor(y / size);
   let best = Infinity;

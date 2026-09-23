@@ -163,7 +163,7 @@ the feature is complete.
 | Layer | 41 / 137 | layer styles (M6), smart objects (M5), align & distribute (M9), type & shapes (M7) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
-| Filter | 59 / 74 | Filter Gallery & smart filters (M5), Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
+| Filter | 60 / 74 | Convert for Smart Filters (M5), Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
 | Window | 32 / 56 | multi-document window arrangement (M11) |
 | Help | 4 / 5 | — |
@@ -182,6 +182,13 @@ implementation.
       the selection's bounds; Displace and Lens Blur take their map from a layer of the same
       document (a separate file waits on M11). Clouds' Alt-click for high contrast
       is not wired: Clouds runs at once with a fresh seed.
+- [x] **Filter ▸ Filter Gallery — all 47 effects** in six folders with thumbnails, a stack of
+      effect layers (eye, new, delete, reorder), the shared preview box, and on-canvas
+      preview. Every effect is `[fit]` — Photoshop publishes none of them — built from a
+      shared toolkit (`kernels/src/filters/gallery/kit.ts`) and judged by eye on a contact
+      sheet; spec 05's bar is "recognisably the same effect". Neon Glow's colour swatch is a
+      list of presets. Unlike Photoshop the gallery is not limited to 8-bit documents (Umbra
+      has only 8-bit so far).
 
 - [x] **Image ▸ Adjustments — all 22.** The per-pixel ones preview on the GPU (the adjustment
       drawn as a clipped layer); Shadows/Highlights, Replace Color, Match Color and HDR Toning

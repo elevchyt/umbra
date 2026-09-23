@@ -263,6 +263,7 @@ export type DialogId =
   | 'spatial'
   | 'applyImage'
   | 'filter'
+  | 'gallery'
   | 'fade'
   | 'calculations'
   | 'definePattern';

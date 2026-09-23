@@ -12,6 +12,7 @@ import { SpatialDialog } from '../adjust/spatial';
 import { ApplyImageDialog, CalculationsDialog } from '../adjust/applyimage';
 import { FilterDialog, colours as filterColours } from '../filters/FilterDialog';
 import { FadeDialog } from '../filters/FadeDialog';
+import { GalleryDialog } from '../filters/GalleryDialog';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -348,7 +349,8 @@ export function Workspace() {
       // Filters with no settings run at once, as Blur and Find Edges do in Photoshop; so do
       // Clouds and Difference Clouds, whose only settings are a seed (fresh every time) and
       // a flag.
-      if (filter.params.every((s) => s.type === 'seed' || s.type === 'bool')) {
+      if (cmd === 'filter.gallery') store.openDialog('gallery');
+      else if (filter.params.every((s) => s.type === 'seed' || s.type === 'bool')) {
         const params = defaultsOf(filter);
         for (const s of filter.params) if (s.type === 'seed') params[s.key] = Math.floor(Math.random() * 1e9);
         send({ t: 'applyFilter', id: cmd, params, ...filterColours() });
@@ -1351,6 +1353,9 @@ export function Workspace() {
       </Show>
       <Show when={store.dialog()?.id === 'filter'}>
         <FilterDialog id={store.dialog()!.payload as string} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'gallery'}>
+        <GalleryDialog send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'fade'}>
         <FadeDialog name={store.doc()?.fadeName ?? ''} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />

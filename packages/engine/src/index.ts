@@ -63,5 +63,5 @@ export {
   type ChannelPick,
   type ApplyBlend,
 } from '@umbra/kernels/applyimage';
-export { FILTERS, FILTER_BY_ID } from '@umbra/kernels/filters/index';
-export { defaultsOf, type FilterDef, type FilterParams, type ParamSpec, type ParamValue } from '@umbra/kernels/filters/types';
+export { FILTERS, FILTER_BY_ID, GALLERY_EFFECTS, GALLERY_BY_ID, GALLERY_CATEGORIES, DEFAULT_STACK, parseStack, fromRgba8, toRgba8 } from '@umbra/kernels/filters/index';
+export { defaultsOf, type FilterDef, type FilterParams, type ParamSpec, type ParamValue, type GalleryEffect, type GalleryLayer, type GalleryCategory } from '@umbra/kernels/filters/types';

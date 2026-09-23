@@ -608,7 +608,7 @@ export const MENUS: MenuDef[] = [
       sep,
       { label: 'Convert for Smart Filters', cmd: 'filter.convertForSmart' },
       sep,
-      { label: 'Filter Gallery…', cmd: 'filter.gallery' },
+      filterItem('Filter Gallery…', 'filter.gallery'),
       { label: 'Adaptive Wide Angle…', cmd: 'filter.adaptiveWideAngle', shortcut: 'Ctrl+Alt+Shift+A' },
       { label: 'Develop…', cmd: 'filter.develop', shortcut: 'Ctrl+Shift+A' },
       { label: 'Lens Correction…', cmd: 'filter.lensCorrection', shortcut: 'Ctrl+Shift+R' },
