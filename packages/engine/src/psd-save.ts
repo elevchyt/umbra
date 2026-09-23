@@ -24,7 +24,9 @@ import type { Doc, Layer } from './document.js';
 import type { Plane } from './tiles/plane.js';
 import { tilesInRect } from './tiles/plane.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
-import { toPsdAdjustment } from './psd-adjust.js';
+import { toPsdAdjustment, toPsdFill } from './psd-adjust.js';
+import { walkLayers } from './document.js';
+import type { PatternDef } from '@umbra/kernels/fill';
 
 /** Our mode ids → the names ag-psd writes. */
 const TO_PSD_MODE: Record<string, string> = Object.fromEntries(
@@ -166,6 +168,11 @@ function toAgLayer(layer: Layer, doc: Doc): AgLayer {
     return { ...common, left: 0, top: 0, right: 0, bottom: 0, adjustment: toPsdAdjustment(layer.adjustment, source) };
   }
 
+  if (layer.kind === 'fill') {
+    const source = (layer.psdExtra as { vectorFill?: unknown } | undefined)?.vectorFill;
+    return { ...common, left: 0, top: 0, right: 0, bottom: 0, vectorFill: toPsdFill(layer.content, source) as AgLayer['vectorFill'] };
+  }
+
   const rect = tightBounds(layer.plane.base);
   if (rectIsEmpty(rect)) {
     // An empty layer still has to exist in the file, just with no pixels.
@@ -217,6 +224,22 @@ export function savePsd(doc: Doc, opts: SavePsdOptions = {}): ArrayBuffer {
     colorMode: 3, // RGB
     children: doc.layers.map((l) => toAgLayer(l, doc)),
   };
+
+  // Pattern fill layers name their pattern by id; the pixels go in the file's pattern table.
+  const patterns = new Map<string, PatternDef>();
+  for (const { layer } of walkLayers(doc.layers)) {
+    if (layer.kind === 'fill' && layer.content.type === 'pattern') patterns.set(layer.content.pattern.id, layer.content.pattern);
+  }
+  if (patterns.size) {
+    (psd as { patterns?: unknown[] }).patterns = [...patterns.values()].map((p) => ({
+      name: p.name,
+      id: p.id,
+      x: 0,
+      y: 0,
+      bounds: { x: 0, y: 0, w: p.width, h: p.height },
+      data: p.data,
+    }));
+  }
 
   if (opts.maximizeCompatibility !== false && doc.layers.length > 0) {
     psd.imageData = renderComposite(doc) as unknown as ImageData;

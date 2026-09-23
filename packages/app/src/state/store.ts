@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, type DocSummary, type EngineStats } from '@umbra/engine';
+import { DEFAULT_BRUSH, type DocSummary, type EngineStats, type PatternSummary } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -145,6 +145,9 @@ export interface Histogram {
   b: Uint32Array;
   lum: Uint32Array;
 }
+/** The pattern library as the engine last reported it (thumbnails only; pixels stay there). */
+const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
+
 const [histograms, setHistograms] = createStore<Partial<Record<HistogramSource, Histogram>>>({});
 const histogram = (source: HistogramSource): Histogram | null => histograms[source] ?? null;
 const setHistogram = (h: Histogram) => setHistograms(h.source, h);
@@ -235,7 +238,9 @@ export type DialogId =
   | 'canvasSize'
   | 'fill'
   | 'stroke'
-  | 'adjustment';
+  | 'adjustment'
+  | 'fillLayer'
+  | 'definePattern';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {
@@ -305,6 +310,8 @@ export const store = {
   setStatusMessage,
   histogram,
   setHistogram,
+  patterns,
+  setPatterns,
   get engine() {
     return engine();
   },

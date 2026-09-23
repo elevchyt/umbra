@@ -188,7 +188,7 @@ export const MENUS: MenuDef[] = [
       { label: 'Sky Replacement…', cmd: 'edit.skyReplacement' },
       sep,
       { label: 'Define Brush Preset…', cmd: 'edit.defineBrush' },
-      { label: 'Define Pattern…', cmd: 'edit.definePattern' },
+      { label: 'Define Pattern…', cmd: 'edit.definePattern', done: true },
       { label: 'Define Custom Shape…', cmd: 'edit.defineShape' },
       sep,
       {
@@ -381,9 +381,9 @@ export const MENUS: MenuDef[] = [
       {
         label: 'New Fill Layer',
         items: [
-          { label: 'Solid Color…', cmd: 'fill.solid' },
-          { label: 'Gradient…', cmd: 'fill.gradient' },
-          { label: 'Pattern…', cmd: 'fill.pattern' },
+          { label: 'Solid Color…', cmd: 'fill.solid', done: true },
+          { label: 'Gradient…', cmd: 'fill.gradient', done: true },
+          { label: 'Pattern…', cmd: 'fill.pattern', done: true },
         ],
       },
       {

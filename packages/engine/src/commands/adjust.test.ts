@@ -184,16 +184,14 @@ describe('adjustment layers in PSD', () => {
     }
   });
 
-  it('keep what they do not model — Hue/Saturation colour ranges survive a round trip', () => {
-    const d = addAdjustmentLayer(doc(), SAMPLES[9]!);
+  it('keep what they do not model — a preset name survives a round trip', () => {
+    // Levels carries its preset name in a block we do not interpret.
+    const d = addAdjustmentLayer(doc(), SAMPLES.find((a) => a.kind === 'levels')!);
     const once = openPsd(savePsd(d)).doc;
     const layer = once.layers[1] as AdjustmentLayer;
-    const extra = layer.psdExtra as { adjustment: { reds: { a: number; hue: number } } };
-    // A range edited in Photoshop: our save must carry it back out unchanged.
-    extra.adjustment.reds = { ...extra.adjustment.reds, hue: 25 };
-    const twice = openPsd(savePsd(once));
-    const again = (twice.doc.layers[1] as AdjustmentLayer).psdExtra as typeof extra;
-    expect(again.adjustment.reds.hue).toBe(25);
-    expect(twice.warnings.some((w) => w.features.includes('Hue/Saturation colour ranges'))).toBe(true);
+    (layer.psdExtra as { adjustment: Record<string, unknown> }).adjustment.presetFileName = 'Mine';
+    const again = openPsd(savePsd(once)).doc.layers[1] as AdjustmentLayer;
+    expect((again.psdExtra as { adjustment: Record<string, unknown> }).adjustment.presetFileName).toBe('Mine');
   });
+
 });

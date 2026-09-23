@@ -18,6 +18,8 @@ import type { Rgb } from '@umbra/kernels/blend';
 import { applierToRgbFn, compile, ADJUSTMENT_LABEL, type Adjustment } from '@umbra/kernels/adjust';
 import { Program } from './gpu/program.js';
 import { toGpuAdjustment } from './render/adjust.glsl.js';
+import { FillRenderer } from './render/fill.glsl.js';
+import { builtinPatterns, fillSampler, type FillContent } from '@umbra/kernels/fill';
 import { ADJUSTMENT_SAMPLES } from './adjust-samples.js';
 import { LayerCompositor, type GpuLayer, type RenderTarget } from './render/compositor.js';
 import type { GpuCaps } from './gpu/caps.js';
@@ -81,6 +83,8 @@ interface CaseLayer {
   children?: CaseLayer[];
   /** Makes this an adjustment layer; `pattern` is then ignored. */
   adjustment?: Adjustment;
+  /** Makes this a fill layer; `pattern` is then ignored. */
+  fillContent?: FillContent;
   blendIf?: { channel: 'gray'; thisLayer: [number, number, number, number]; underlying: [number, number, number, number] }[];
 }
 
@@ -101,6 +105,7 @@ export interface ParityResult {
 
 export class ParityRunner {
   private compositor: LayerCompositor;
+  private fills: FillRenderer;
   private pattern: Program;
   private quad: WebGLBuffer;
   private vao: WebGLVertexArrayObject;
@@ -112,6 +117,7 @@ export class ParityRunner {
     this.compositor = new LayerCompositor(gl, caps);
     this.compositor.resize(PARITY_SIZE, PARITY_SIZE);
     this.pattern = new Program(gl, PATTERN_VERT, PATTERN_FRAG, 'parity.pattern');
+    this.fills = new FillRenderer(gl);
     this.quad = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -145,6 +151,24 @@ export class ParityRunner {
   private toGpuLayer(l: CaseLayer): GpuLayer {
     const color = l.color ?? [1, 1, 1];
     const alpha = l.alpha ?? 1;
+    if (l.fillContent) {
+      const content = l.fillContent;
+      // Document space is the 64×64 target itself, y up to match the patterns' row order.
+      const s = 2 / PARITY_SIZE;
+      const docToClip = new Float32Array([s, 0, 0, 0, s, 0, -1, -1, 1]);
+      const rect = { x0: 0, y0: 0, x1: PARITY_SIZE, y1: PARITY_SIZE };
+      return {
+        kind: 'pixel',
+        visible: l.visible ?? true,
+        opacity: l.opacity ?? 1,
+        fill: l.fill ?? 1,
+        blendMode: l.mode ?? 'normal',
+        clipped: l.clipped ?? false,
+        maskDensity: l.maskDensity ?? 1,
+        drawSource: () => this.fills.draw(content, docToClip, rect, { width: PARITY_SIZE, height: PARITY_SIZE }),
+        drawMask: l.maskPattern ? (_t: RenderTarget) => this.paint(l.maskPattern!, [1, 1, 1], 1) : undefined,
+      };
+    }
     if (l.adjustment) {
       return {
         kind: 'adjustment',
@@ -208,6 +232,9 @@ export class ParityRunner {
     if (l.adjustment) {
       return { ...base, kind: 'adjustment', sample: undefined, adjust: applierToRgbFn(compile(l.adjustment)), mask };
     }
+    if (l.fillContent) {
+      return { ...base, sample: fillSampler(l.fillContent, PARITY_SIZE, PARITY_SIZE), mask };
+    }
     if (l.children) {
       return {
         ...base,
@@ -268,6 +295,7 @@ export class ParityRunner {
 
   dispose(): void {
     this.compositor.dispose();
+    this.fills.dispose();
     this.pattern.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);
@@ -480,6 +508,48 @@ export function parityCases(): ParityCase[] {
           pattern: 'solid',
           mode: 'normal',
           children: [{ pattern: 'rampY', alpha: 0.5 }, { pattern: 'solid', adjustment: { kind: 'invert' } }],
+        },
+      ],
+    },
+  );
+
+  // Fill layers: each source over the full target, one masked and blended.
+  const ramp = {
+    colorStops: [
+      { at: 0, color: [0.1, 0.2, 0.9] as [number, number, number] },
+      { at: 0.6, color: [1, 0.8, 0.1] as [number, number, number], midpoint: 0.3 },
+      { at: 1, color: [0.9, 0.1, 0.2] as [number, number, number] },
+    ],
+    opacityStops: [
+      { at: 0, opacity: 1 },
+      { at: 1, opacity: 0.4 },
+    ],
+  };
+  const patterns = builtinPatterns();
+  cases.push(
+    { name: 'fill: solid colour', layers: [{ pattern: 'colors' }, { pattern: 'solid', fillContent: { type: 'solid', color: [0.3, 0.6, 0.2] }, opacity: 0.7 }] },
+    ...(['linear', 'radial', 'angle', 'reflected', 'diamond'] as const).map((style) => ({
+      name: `fill: ${style} gradient`,
+      layers: [
+        { pattern: 'colors' as const },
+        {
+          pattern: 'solid' as const,
+          fillContent: { type: 'gradient' as const, gradient: ramp, style, angle: 35, scale: 90, reverse: style === 'radial', offset: { x: 5, y: -10 } },
+        },
+      ],
+      // The ramp index is t rounded to 1/255; float32 against float64 can round a boundary
+      // pixel to the neighbouring entry, one level away on this gradient.
+      tolerance: 2,
+    })),
+    {
+      name: 'fill: pattern, scaled and offset, through a mask in Multiply',
+      layers: [
+        { pattern: 'colors' },
+        {
+          pattern: 'solid',
+          fillContent: { type: 'pattern', pattern: patterns.find((p) => p.id === 'umbra-bricks')!, scale: 150, phase: { x: 5, y: 3 } },
+          maskPattern: 'rampX',
+          mode: 'multiply',
         },
       ],
     },

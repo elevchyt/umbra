@@ -12,6 +12,9 @@ import {
   posterizeLut,
   rgbToHsl,
   type Adjustment,
+  hueBandWeight,
+  defaultHueBands,
+  type HueRange,
 } from './adjust.js';
 
 /** Every adjustment at its default parameters must leave a pixel alone. */
@@ -446,5 +449,33 @@ describe('selective color', () => {
     const a = sc(true, { blacks: { k: 50 } });
     expect(applyToRgb(a, 40, 50, 60)[0]).toBeLessThan(40);
     expect(applyToRgb(a, 200, 210, 220)).toEqual([200, 210, 220]);
+  });
+});
+
+describe('hue/saturation colour ranges', () => {
+  const base = defaultAdjustment('hueSaturation') as Extract<Adjustment, { kind: 'hueSaturation' }>;
+  const withBand = (name: 'reds' | 'blues', patch: Partial<HueRange>): Adjustment => ({
+    ...base,
+    bands: { ...defaultHueBands(), [name]: { ...defaultHueBands()[name], ...patch } },
+  });
+
+  it('a range acts on its own hues and leaves the rest', () => {
+    const a = withBand('reds', { saturation: -100 });
+    const [r, g, b] = applyToRgb(a, 220, 30, 30);
+    expect(r).toBe(g);
+    expect(g).toBe(b);
+    expect(applyToRgb(a, 30, 60, 220)).toEqual([30, 60, 220]);
+  });
+
+  it('weights ramp across the fall-off and wrap past 360°', () => {
+    expect(hueBandWeight(0, [315, 345, 15, 45])).toBe(1);
+    expect(hueBandWeight(330, [315, 345, 15, 45])).toBeCloseTo(0.5);
+    expect(hueBandWeight(30, [315, 345, 15, 45])).toBeCloseTo(0.5);
+    expect(hueBandWeight(90, [315, 345, 15, 45])).toBe(0);
+  });
+
+  it('greys have no hue for a range to act on, and master saturation leaves them grey', () => {
+    expect(applyToRgb(withBand('reds', { saturation: 100, hue: 90 }), 128, 128, 128)).toEqual([128, 128, 128]);
+    expect(applyToRgb({ ...base, master: { hue: 0, saturation: 100, lightness: 0 } }, 90, 90, 90)).toEqual([90, 90, 90]);
   });
 });

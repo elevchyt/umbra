@@ -155,7 +155,7 @@ function mapLayerTree(layer: Layer, fn: (p: Plane) => Plane): Layer {
   if (layer.kind === 'group') {
     return { ...layer, mask, children: layer.children.map((c) => mapLayerTree(c, fn)) };
   }
-  if (layer.kind === 'adjustment') return { ...layer, mask };
+  if (layer.kind === 'adjustment' || layer.kind === 'fill') return { ...layer, mask };
   return { ...layer, mask, plane: new MipPlane(fn(layer.plane.base)) };
 }
 

@@ -23,6 +23,9 @@ import {
   type LevelsChannel,
   type SelectiveRange,
   type CmykShift,
+  defaultHueBands,
+  type HueBand,
+  type HueBandName,
 } from '@umbra/engine';
 import { store, type Histogram, type HistogramSource } from '../state/store';
 
@@ -449,20 +452,54 @@ function Vibrance(props: { value: Of<'vibrance'>; onChange: Change }) {
 
 const HUE_TRACK = 'linear-gradient(to right, #0ff, #00f, #f0f, #f00, #ff0, #0f0, #0ff)';
 
+const HUE_EDIT_OPTIONS: { value: 'master' | HueBandName; label: string }[] = [
+  { value: 'master', label: 'Master' },
+  { value: 'reds', label: 'Reds' },
+  { value: 'yellows', label: 'Yellows' },
+  { value: 'greens', label: 'Greens' },
+  { value: 'cyans', label: 'Cyans' },
+  { value: 'blues', label: 'Blues' },
+  { value: 'magentas', label: 'Magentas' },
+];
+
 function HueSaturation(props: { value: Of<'hueSaturation'>; onChange: Change }) {
+  const [edit, setEdit] = createSignal<'master' | HueBandName>('master');
   const set = (patch: Partial<Of<'hueSaturation'>>, final: boolean) => props.onChange({ ...props.value, ...patch }, final);
   const master = (patch: Partial<Of<'hueSaturation'>['master']>, final: boolean) =>
     set({ master: { ...props.value.master, ...patch } }, final);
+  const bands = () => props.value.bands ?? defaultHueBands();
+  const band = (): HueBand | null => (edit() === 'master' ? null : bands()[edit() as HueBandName]);
+  const setBand = (patch: Partial<HueBand>, final: boolean) => {
+    const name = edit();
+    if (name === 'master') return;
+    set({ bands: { ...bands(), [name]: { ...bands()[name], ...patch } } }, final);
+  };
   return (
     <>
-      <div class="dim adjust-caption">Master</div>
       <Show
         when={props.value.colorize}
         fallback={
           <>
-            <Param label="Hue" value={props.value.master.hue} min={-180} max={180} track={HUE_TRACK} onChange={(v, f) => master({ hue: v }, f)} />
-            <Param label="Saturation" value={props.value.master.saturation} min={-100} max={100} onChange={(v, f) => master({ saturation: v }, f)} />
-            <Param label="Lightness" value={props.value.master.lightness} min={-100} max={100} onChange={(v, f) => master({ lightness: v }, f)} />
+            <Select value={edit()} options={HUE_EDIT_OPTIONS} label="Edit" width={100} onChange={setEdit} />
+            <Show
+              when={band()}
+              fallback={
+                <>
+                  <Param label="Hue" value={props.value.master.hue} min={-180} max={180} track={HUE_TRACK} onChange={(v, f) => master({ hue: v }, f)} />
+                  <Param label="Saturation" value={props.value.master.saturation} min={-100} max={100} onChange={(v, f) => master({ saturation: v }, f)} />
+                  <Param label="Lightness" value={props.value.master.lightness} min={-100} max={100} onChange={(v, f) => master({ lightness: v }, f)} />
+                </>
+              }
+            >
+              {(b) => (
+                <>
+                  <Param label="Hue" value={b().hue} min={-180} max={180} track={HUE_TRACK} onChange={(v, f) => setBand({ hue: v }, f)} />
+                  <Param label="Saturation" value={b().saturation} min={-100} max={100} onChange={(v, f) => setBand({ saturation: v }, f)} />
+                  <Param label="Lightness" value={b().lightness} min={-100} max={100} onChange={(v, f) => setBand({ lightness: v }, f)} />
+                  <HueRangeBar band={b()} onChange={(range, f) => setBand({ range }, f)} />
+                </>
+              )}
+            </Show>
           </>
         }
       >
@@ -472,6 +509,87 @@ function HueSaturation(props: { value: Of<'hueSaturation'>; onChange: Change }) 
       </Show>
       <Checkbox checked={props.value.colorize} label="Colorize" onChange={(v) => set({ colorize: v }, true)} />
     </>
+  );
+}
+
+const wrap = (v: number) => ((v % 360) + 360) % 360;
+const hueCss = (h: number) => `hsl(${wrap(h)}, 100%, 50%)`;
+
+/**
+ * The range bar under Hue/Saturation's sliders: the input hues on top, the output hues (after
+ * this range's Hue shift) beneath, and the range's four edges as handles — the inner pair
+ * bound the full-strength part, the outer pair the fall-offs. The bar is centred on the range,
+ * as Photoshop draws it, so a range that wraps past 360° is not split in two.
+ */
+function HueRangeBar(props: { band: HueBand; onChange: (range: HueBand['range'], final: boolean) => void }) {
+  const W = 256;
+  const centre = () => {
+    const [a, , , d] = props.band.range;
+    return wrap(a + wrap(d - a) / 2);
+  };
+  const origin = () => centre() - 180;
+  const x = (angle: number) => (wrap(angle - origin()) / 360) * W;
+  const ramp = (shift: number) => {
+    const stops: string[] = [];
+    for (let i = 0; i <= 12; i++) stops.push(`${hueCss(origin() + i * 30 + shift)} ${((i / 12) * 100).toFixed(1)}%`);
+    return `linear-gradient(to right, ${stops.join(',')})`;
+  };
+  let svg!: SVGSVGElement;
+  const drag = (k: number) => (e: PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const start = props.band.range;
+    const o = origin();
+    const apply = (ev: PointerEvent, final: boolean) => {
+      const r = svg.getBoundingClientRect();
+      const angle = Math.round(wrap(o + ((ev.clientX - r.left) / r.width) * 360));
+      const next = [...start] as HueBand['range'];
+      next[k] = angle;
+      // Keep the four edges in order around the circle, measured from the first.
+      const rel = next.map((v) => wrap(v - next[0]));
+      const ordered = rel[1]! <= rel[2]! && rel[2]! <= rel[3]!;
+      if (ordered) props.onChange(next, final);
+    };
+    const move = (ev: PointerEvent) => apply(ev, false);
+    const up = (ev: PointerEvent) => {
+      apply(ev, true);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  return (
+    <div class="hue-range">
+      <div class="hue-range-ramp" style={{ background: ramp(0) }} />
+      <svg ref={svg} class="hue-range-bar" viewBox={`0 0 ${W} 16`} preserveAspectRatio="none">
+        {(() => {
+          const [a, b, c, d] = props.band.range.map(x) as [number, number, number, number];
+          return (
+            <>
+              <polygon class="hue-range-shape" points={`${a},14 ${b},3 ${c},3 ${d},14`} />
+              <For each={[a, b, c, d]}>
+                {(px, i) => (
+                  <rect
+                    class="hue-range-handle"
+                    classList={{ inner: i() === 1 || i() === 2 }}
+                    x={px - 3}
+                    y={i() === 1 || i() === 2 ? 0 : 8}
+                    width="6"
+                    height="8"
+                    onPointerDown={drag(i())}
+                  />
+                )}
+              </For>
+            </>
+          );
+        })()}
+      </svg>
+      <div class="hue-range-ramp" style={{ background: ramp(props.band.hue) }} />
+      <div class="adjust-fields dim">
+        {props.band.range.map((v) => `${Math.round(v)}°`).join(' / ')}
+      </div>
+    </div>
   );
 }
 
@@ -714,7 +832,7 @@ const two = (a: [number, number, number], b: [number, number, number], name: str
   ],
 });
 
-function gradientPresets(): Gradient[] {
+export function gradientPresets(): Gradient[] {
   const fg = store.foreground();
   const bg = store.background();
   return [
@@ -760,7 +878,7 @@ function gradientPresets(): Gradient[] {
   ];
 }
 
-function gradientCss(g: Gradient, reverse: boolean): string {
+export function gradientCss(g: Gradient, reverse: boolean): string {
   const stops: string[] = [];
   for (let i = 0; i <= 16; i++) {
     const t = i / 16;

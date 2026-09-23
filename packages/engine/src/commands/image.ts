@@ -182,7 +182,7 @@ export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane): La
   return layers.map((l) => {
     const mask = l.mask ? { ...l.mask, plane: new MipPlane(fn(l.mask.plane.base)) } : l.mask;
     if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn) };
-    if (l.kind === 'adjustment') return { ...l, mask };
+    if (l.kind === 'adjustment' || l.kind === 'fill') return { ...l, mask };
     return { ...l, mask, plane: new MipPlane(fn(l.plane.base)) };
   });
 }

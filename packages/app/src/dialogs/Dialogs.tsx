@@ -703,3 +703,21 @@ export function StrokeDialog(props: { onApply: (r: StrokeRequest) => void; onCan
     </Dialog>
   );
 }
+
+/** A one-line name prompt — Edit ▸ Define Pattern's "Pattern Name", and the like. */
+export function NameDialog(props: { title: string; label: string; initial: string; onApply: (name: string) => void; onCancel: () => void }) {
+  const [value, setValue] = createSignal(props.initial);
+  let input!: HTMLInputElement;
+  onMount(() => {
+    input.focus();
+    input.select();
+  });
+  return (
+    <Dialog title={props.title} width={320} onOk={() => props.onApply(value().trim() || props.initial)} onCancel={props.onCancel}>
+      <label class="field">
+        <span class="field-label">{props.label}</span>
+        <input ref={input} class="text-input" type="text" value={value()} onInput={(e) => setValue(e.currentTarget.value)} />
+      </label>
+    </Dialog>
+  );
+}

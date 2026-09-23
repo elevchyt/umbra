@@ -32,6 +32,7 @@ import {
   updateLayer,
   findLayer,
   countLayers,
+  walkLayers,
   type Doc,
   type Layer,
   type PixelLayer,
@@ -67,6 +68,8 @@ import * as MaskCmd from './commands/masks.js';
 import * as AdjustCmd from './commands/adjust.js';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
+import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
+import type { FillSummary, PatternSummary } from './protocol.js';
 import {
   IDENTITY,
   about,
@@ -321,7 +324,8 @@ export class Engine {
   }
 
   openPsdBuffer(buffer: ArrayBuffer, name: string): void {
-    const { doc, warnings } = openPsd(buffer, name);
+    const { doc, warnings, patterns } = openPsd(buffer, name);
+    for (const p of patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
     this.warnings = warnings;
     this.doc = doc;
     this.history = new History(doc, 'Open');
@@ -926,6 +930,100 @@ export class Engine {
         : AdjustCmd.applyAdjustment(this.doc, id, mode === 'tone' ? autoTone(h) : mode === 'contrast' ? autoContrast(h) : autoColor(h));
     if (next === this.doc) return false;
     this.commit(next, { tone: 'Auto Tone', contrast: 'Auto Contrast', color: 'Auto Color', equalize: 'Equalize' }[mode]);
+    return true;
+  }
+
+  // ---- fill layers and patterns ---------------------------------------------------------
+
+  /**
+   * Patterns available to fill layers: the built-ins, anything made with Edit ▸ Define
+   * Pattern this session, and every pattern found in an opened PSD. Photoshop keeps this as a
+   * preset library; here it lives as long as the worker.
+   */
+  private patternLibrary: PatternDef[] = builtinPatterns();
+
+  private findPattern(id: string): PatternDef | null {
+    const lib = this.patternLibrary.find((p) => p.id === id);
+    if (lib) return lib;
+    for (const { layer } of walkLayers(this.doc.layers)) {
+      if (layer.kind === 'fill' && layer.content.type === 'pattern' && layer.content.pattern.id === id) return layer.content.pattern;
+    }
+    return null;
+  }
+
+  private fillFromSummary(s: FillSummary): FillContent | null {
+    if (s.type !== 'pattern') return s;
+    const pattern = this.findPattern(s.patternId);
+    return pattern ? { type: 'pattern', pattern, scale: s.scale, phase: s.phase } : null;
+  }
+
+  static fillToSummary(c: FillContent): FillSummary {
+    if (c.type !== 'pattern') return c;
+    return { type: 'pattern', patternId: c.pattern.id, patternName: c.pattern.name, scale: c.scale, phase: c.phase };
+  }
+
+  addFillLayer(content: FillSummary): boolean {
+    const c = this.fillFromSummary(content);
+    if (!c) return false;
+    this.commit(AdjustCmd.addFillLayer(this.doc, c), `New ${FILL_LABEL[c.type]} Layer`);
+    return true;
+  }
+
+  /**
+   * Like `setLayerAdjustment`: intermediate steps skip history, `final` records one step.
+   * `amend` folds the final content into the step that CREATED the layer instead — the New
+   * Fill Layer dialog creates the layer so it can preview, and OK should still be one step.
+   */
+  setFillContent(id: number, content: FillSummary, final: boolean, amend = false): boolean {
+    const c = this.fillFromSummary(content);
+    if (!c) return false;
+    const next = AdjustCmd.setFillContent(this.doc, id, c);
+    if (next === this.doc) return false;
+    if (final && amend) {
+      this.doc = next;
+      this.history.amend(`New ${FILL_LABEL[c.type]} Layer`, next);
+      this.compositeCache = null;
+    } else if (final) {
+      this.commit(next, `Modify ${FILL_LABEL[c.type]} Layer`);
+    } else {
+      this.doc = next;
+    }
+    return true;
+  }
+
+  patternSummaries(): PatternSummary[] {
+    return this.patternLibrary.map((p) => {
+      // Nearest-neighbour 32×32 preview, tiling small patterns so they read as patterns.
+      const thumb = new Uint8Array(32 * 32 * 4);
+      for (let y = 0; y < 32; y++) {
+        for (let x = 0; x < 32; x++) {
+          const sx = p.width >= 32 ? Math.floor((x * p.width) / 32) : x % p.width;
+          const sy = p.height >= 32 ? Math.floor((y * p.height) / 32) : y % p.height;
+          thumb.set(p.data.subarray((sy * p.width + sx) * 4, (sy * p.width + sx) * 4 + 4), (y * 32 + x) * 4);
+        }
+      }
+      return { id: p.id, name: p.name, width: p.width, height: p.height, thumb };
+    });
+  }
+
+  /**
+   * Edit ▸ Define Pattern: the visible image inside a rectangular selection (or the whole
+   * canvas) becomes a pattern. Photoshop takes the merged image too; its 4000 px cap on each
+   * side is kept.
+   */
+  definePattern(name: string): boolean {
+    const bounds = selectionBoundsOf(this.doc.selection) ?? { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+    const w = Math.min(4000, bounds.x1 - bounds.x0);
+    const h = Math.min(4000, bounds.y1 - bounds.y0);
+    if (w < 1 || h < 1) return false;
+    const { pixels, width } = this.renderer.renderToBuffer(this.doc, this.caps.maxTextureSize);
+    const data = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      const src = ((bounds.y0 + y) * width + bounds.x0) * 4;
+      data.set(pixels.subarray(src, src + w * 4), y * w * 4);
+    }
+    const id = `umbra-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e6).toString(36)}`;
+    this.patternLibrary.push({ id, name: name || `Pattern ${this.patternLibrary.length + 1}`, width: w, height: h, data });
     return true;
   }
 
@@ -1912,6 +2010,7 @@ export class Engine {
         name: layer.name,
         kind: layer.kind,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
+        fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,
         opacity: layer.opacity,
         fill: layer.fill,

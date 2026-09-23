@@ -2,6 +2,9 @@ import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMou
 import { ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment } from '@umbra/engine';
 import { AdjustmentEditor } from '../adjust/editors';
 import { ADJUSTMENT_ICON, initialAdjustment } from '../adjust/initial';
+import { FillEditor, PatternPicker, patternThumb } from '../adjust/fill';
+import { gradientCss } from '../adjust/editors';
+import { FILL_LABEL, type FillSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
@@ -49,6 +52,8 @@ export function renderPanel(id: string): JSX.Element {
       return <Placeholder name="Brushes" milestone="M3" what="brush presets and .abr import" />;
     case 'histogram':
       return <HistogramPanel />;
+    case 'patterns':
+      return <PatternsPanel />;
     default:
       return <Placeholder name={PANEL_META[id]?.title ?? id} milestone="later" what="" />;
   }
@@ -187,11 +192,11 @@ function LayersPanel() {
 
                 <div
                   class="layer-thumb"
-                  classList={{ group: l.kind === 'group', adjustment: l.kind === 'adjustment' }}
+                  classList={{ group: l.kind === 'group', adjustment: l.kind === 'adjustment', fill: l.kind === 'fill' }}
                   aria-hidden="true"
                   onDblClick={() => {
                     // Photoshop opens an adjustment layer's settings from its thumbnail.
-                    if (l.kind === 'adjustment') store.openPanel('properties');
+                    if (l.kind === 'adjustment' || l.kind === 'fill') store.openPanel('properties');
                   }}
                 >
                   <Show when={l.kind === 'group'}>
@@ -199,6 +204,9 @@ function LayersPanel() {
                   </Show>
                   <Show when={l.kind === 'adjustment' && l.adjustment}>
                     {(a) => <Icon name={ADJUSTMENT_ICON[a().kind]} size={15} />}
+                  </Show>
+                  <Show when={l.kind === 'fill' && l.fillContent}>
+                    {(c) => <span class="layer-fill-swatch" style={{ background: fillCss(c()) }} />}
                   </Show>
                 </div>
 
@@ -718,14 +726,15 @@ function PropertiesPanel() {
   const activeAdjustment = () => {
     const doc = d();
     const l = doc?.layers.find((r) => r.id === doc.activeLayerIds[0]);
-    return l && l.kind === 'adjustment' && l.adjustment ? l : null;
+    return l && ((l.kind === 'adjustment' && l.adjustment) || (l.kind === 'fill' && l.fillContent)) ? l : null;
   };
+  const activeKind = createMemo(() => activeAdjustment()?.kind);
   // Keyed on the layer ID, not the layer: every document summary is a new object, and keying
   // on it re-mounted the editor on each one — replacing the slider being dragged.
   const adjustmentId = createMemo(() => activeAdjustment()?.id);
   return (
     <Show when={adjustmentId()} keyed fallback={<DocumentProperties />}>
-      {(id) => <AdjustmentProperties id={id} />}
+      {(id) => (activeKind() === 'fill' ? <FillProperties id={id} /> : <AdjustmentProperties id={id} />)}
     </Show>
   );
 }
@@ -822,6 +831,81 @@ function AdjustmentProperties(props: { id: number }) {
           </>
         )}
       </Show>
+    </div>
+  );
+}
+
+/** CSS background standing in for a fill layer's content, for its Layers-panel thumbnail. */
+function fillCss(c: FillSummary): string {
+  if (c.type === 'solid') return `rgb(${c.color.map((v) => Math.round(v * 255)).join(',')})`;
+  if (c.type === 'gradient') return gradientCss(c.gradient, c.reverse);
+  const p = store.patterns().find((q) => q.id === c.patternId);
+  return p ? `url(${patternThumb(p)})` : 'var(--panel-sunken)';
+}
+
+/** A fill layer's settings in Properties — the same echo handling as an adjustment layer's. */
+function FillProperties(props: { id: number }) {
+  const send = (msg: unknown) => store.engine?.(msg);
+  const summary = () => store.doc()?.layers.find((l) => l.id === props.id)?.fillContent;
+  const [local, setLocal] = createSignal<FillSummary | undefined>(summary());
+  let awaiting: string | null = null;
+  createEffect(
+    on(summary, (s) => {
+      if (!s) return;
+      if (awaiting !== null) {
+        if (JSON.stringify(s) !== awaiting) return;
+        awaiting = null;
+      }
+      setLocal(s);
+    }),
+  );
+  onMount(() => send({ t: 'requestPatterns' }));
+  const change = (next: FillSummary, final: boolean) => {
+    awaiting = JSON.stringify(next);
+    setLocal(next);
+    send({ t: 'setFillContent', id: props.id, content: next, final });
+  };
+  return (
+    <div class="properties-panel">
+      <Show when={local()}>
+        {(c) => (
+          <>
+            <div class="properties-head adjust-head">
+              <span class="layer-fill-swatch small" style={{ background: fillCss(c()) }} />
+              <span>{FILL_LABEL[c().type]}</span>
+            </div>
+            <div class="properties-adjust">
+              <FillEditor value={c()} onChange={change} />
+            </div>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+// ---- Patterns ----------------------------------------------------------------------------
+
+function PatternsPanel() {
+  const [picked, setPicked] = createSignal<string | undefined>();
+  return (
+    <div class="patterns-panel">
+      <PatternPicker
+        selected={picked()}
+        onPick={(p) => {
+          setPicked(p.id);
+          // Clicking a pattern with a pattern fill layer active applies it, as dragging a
+          // swatch onto one does in Photoshop.
+          const d = store.doc();
+          const l = d?.layers.find((r) => r.id === d.activeLayerIds[0]);
+          if (l?.kind === 'fill' && l.fillContent?.type === 'pattern') {
+            store.engine?.({ t: 'setFillContent', id: l.id, content: { ...l.fillContent, patternId: p.id, patternName: p.name }, final: true });
+          }
+        }}
+      />
+      <div class="dim adjustments-note">
+        {store.patterns().find((p) => p.id === picked())?.name ?? 'Edit ▸ Define Pattern adds the selection (or the canvas) here.'}
+      </div>
     </div>
   );
 }

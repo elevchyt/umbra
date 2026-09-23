@@ -57,6 +57,8 @@ export interface PsdLayerInfo {
   unsupported?: string[];
   /** Adjustment layers: ag-psd's decoded record, for the engine to map (it owns the model). */
   adjustment?: unknown;
+  /** Fill layers: ag-psd's decoded `vectorFill`. */
+  vectorFill?: unknown;
 }
 
 export interface PsdDocInfo {
@@ -66,6 +68,8 @@ export interface PsdDocInfo {
   bitsPerChannel: number;
   colorMode: number;
   layers: PsdLayerInfo[];
+  /** Patterns stored in the file, which pattern fill layers refer to by id. */
+  patterns?: { id: string; name: string; bounds: { w: number; h: number }; data: Uint8Array }[];
 }
 
 export interface PsdReadCallbacks {
@@ -81,7 +85,9 @@ export interface PsdReadCallbacks {
 function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   const out: string[] = [];
   if (layer.text) out.push('type layer');
-  if (layer.vectorMask || layer.vectorFill) out.push('vector mask');
+  // A vector fill WITHOUT a vector mask is a fill layer, which the engine models; with one it
+  // is a shape layer, which it does not yet.
+  if (layer.vectorMask) out.push(layer.vectorFill ? 'shape layer' : 'vector mask');
   if (layer.effects) out.push('layer effects');
   if (layer.placedLayer) out.push('smart object');
   return out.length ? out : undefined;
@@ -145,6 +151,7 @@ export function readPsdDocument(
         unsupported: unsupportedFeatures(layer),
       };
       if (layer.adjustment) info.adjustment = layer.adjustment;
+      if (layer.vectorFill && !layer.vectorMask) info.vectorFill = layer.vectorFill;
 
       if (layer.children) {
         info.children = convert(layer.children);
@@ -188,6 +195,7 @@ export function readPsdDocument(
     bitsPerChannel: psd.bitsPerChannel ?? 8,
     colorMode: psd.colorMode ?? 3,
     layers: convert(psd.children),
+    patterns: (psd as { patterns?: PsdDocInfo['patterns'] }).patterns,
   };
 }
 

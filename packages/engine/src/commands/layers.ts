@@ -216,7 +216,9 @@ export function ungroup(doc: Doc, id: number): Doc {
 export function rasterize(layers: readonly Layer[], rect: Rect): Plane {
   const writer = Plane.empty(RGBA8).writer();
   if (rectIsEmpty(rect)) return writer.commit();
-  const composite = layers.map(toCompositeLayer);
+  // Fill layers are defined relative to the canvas, which is what `rect` is.
+  const size = { width: rect.x1, height: rect.y1 };
+  const composite = layers.map((l) => toCompositeLayer(l, size));
 
   for (let y = rect.y0; y < rect.y1; y++) {
     for (let x = rect.x0; x < rect.x1; x++) {

@@ -11,9 +11,11 @@ import {
   findLayer,
   insertLayer,
   makeAdjustmentLayer,
+  makeFillLayer,
   updateLayer,
   type Doc,
 } from '../document.js';
+import { FILL_LABEL, type FillContent } from '@umbra/kernels/fill';
 import { MipPlane } from '../tiles/mip.js';
 import { numberedName } from './layers.js';
 import { addMask } from './masks.js';
@@ -94,4 +96,24 @@ export function setAdjustment(doc: Doc, layerId: number, adj: Adjustment): Doc {
   const layer = findLayer(doc.layers, layerId);
   if (!layer || layer.kind !== 'adjustment') return doc;
   return { ...doc, layers: updateLayer(doc.layers, layerId, (l) => ({ ...l, adjustment: adj }) as typeof l) };
+}
+
+/**
+ * Layer ▸ New Fill Layer ▸ … — placed and masked exactly like a new adjustment layer, which is
+ * what Photoshop does: above the active layer, with the selection as its mask.
+ */
+export function addFillLayer(doc: Doc, content: FillContent): Doc {
+  const layer = makeFillLayer(numberedName(doc, FILL_LABEL[content.type]), content);
+  const next: Doc = {
+    ...doc,
+    layers: insertLayer(doc.layers, layer, doc.activeLayerIds[0]),
+    activeLayerIds: [layer.id],
+  };
+  return addMask(next, layer.id, doc.selection ? 'revealSelection' : 'revealAll');
+}
+
+export function setFillContent(doc: Doc, layerId: number, content: FillContent): Doc {
+  const layer = findLayer(doc.layers, layerId);
+  if (!layer || layer.kind !== 'fill') return doc;
+  return { ...doc, layers: updateLayer(doc.layers, layerId, (l) => ({ ...l, content }) as typeof l) };
 }

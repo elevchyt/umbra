@@ -4,9 +4,10 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
+import { FillLayerDialog } from '../adjust/fill';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -16,7 +17,7 @@ import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
 import { DocumentTabs, StatusBar } from './Chrome';
-import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
+import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, NameDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
@@ -113,6 +114,7 @@ export function Workspace() {
         onTransform: setTransforming,
         onThumbnail: store.setThumbnail,
         onHistogram: store.setHistogram,
+        onPatterns: store.setPatterns,
         onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
         onNoRecovery: () => startDefaultDocument(),
         onSampled: (color, toBackground) => {
@@ -612,6 +614,30 @@ export function Workspace() {
         send({ t: 'autoAdjust', mode });
         break;
       }
+      case 'fill.solid':
+      case 'fill.gradient':
+      case 'fill.pattern': {
+        const fg = store.foreground();
+        let initial: FillSummary;
+        if (cmd === 'fill.solid') initial = { type: 'solid', color: [fg.r, fg.g, fg.b] };
+        else if (cmd === 'fill.gradient') {
+          const g = initialAdjustment('gradientMap');
+          initial = {
+            type: 'gradient',
+            gradient: (g as Extract<Adjustment, { kind: 'gradientMap' }>).gradient,
+            style: 'linear',
+            angle: 90,
+            scale: 100,
+            reverse: false,
+            offset: { x: 0, y: 0 },
+          };
+        } else initial = { type: 'pattern', patternId: 'umbra-checker', patternName: 'Checkerboard', scale: 100, phase: { x: 0, y: 0 } };
+        store.openDialog('fillLayer', initial);
+        break;
+      }
+      case 'edit.definePattern':
+        store.openDialog('definePattern');
+        break;
       case 'layer.clippingMask':
         // Toggles, as Ctrl+Alt+G does in Photoshop: create when unclipped, release when clipped.
         send({ t: 'layerCommand', command: 'clip' });
@@ -1200,6 +1226,26 @@ export function Workspace() {
           initial={store.dialog()!.payload as Adjustment}
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'fillLayer'}>
+        <FillLayerDialog
+          initial={store.dialog()!.payload as FillSummary}
+          send={(m) => send(m as Parameters<typeof send>[0])}
+          onClose={store.closeDialog}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'definePattern'}>
+        <NameDialog
+          title="Pattern Name"
+          label="Name"
+          initial={`Pattern ${store.patterns().length + 1}`}
+          onCancel={store.closeDialog}
+          onApply={(name) => {
+            store.closeDialog();
+            send({ t: 'definePattern', name });
+            store.openPanel('patterns');
+          }}
         />
       </Show>
       <Show when={store.dialog()?.id === 'fill'}>

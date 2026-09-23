@@ -12,6 +12,7 @@ import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
 import type { Adjustment } from '@umbra/kernels/adjust';
+import type { FillContent } from '@umbra/kernels/fill';
 import type { Selection } from './selection.js';
 
 export type LabelColor =
@@ -98,7 +99,17 @@ export interface AdjustmentLayer extends LayerBase {
   readonly adjustment: Adjustment;
 }
 
-export type Layer = PixelLayer | GroupLayer | AdjustmentLayer;
+/**
+ * A fill layer: an infinite solid colour, gradient or pattern, shaped only by its mask
+ * (spec 02 §3, spec 06 §8). Unlike an adjustment it ADDS coverage, so it composites as a pixel
+ * layer whose pixels are computed rather than stored.
+ */
+export interface FillLayer extends LayerBase {
+  readonly kind: 'fill';
+  readonly content: FillContent;
+}
+
+export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer;
 
 /**
  * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
@@ -200,6 +211,25 @@ export function makeAdjustmentLayer(
     blending: DEFAULT_BLENDING_STATE,
     seed: 0,
     adjustment,
+    ...over,
+  };
+}
+
+export function makeFillLayer(name: string, content: FillContent, over: Partial<FillLayer> = {}): FillLayer {
+  return {
+    kind: 'fill',
+    id: nextLayerId(),
+    name,
+    visible: true,
+    opacity: 1,
+    fill: 1,
+    blendMode: 'normal',
+    clipped: false,
+    locks: NO_LOCKS,
+    color: 'none',
+    blending: DEFAULT_BLENDING_STATE,
+    seed: 0,
+    content,
     ...over,
   };
 }

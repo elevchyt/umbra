@@ -208,6 +208,18 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'autoAdjust':
         if (engine?.autoAdjust(msg.mode)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'addFillLayer':
+        if (engine?.addFillLayer(msg.content)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setFillContent':
+        if (engine?.setFillContent(msg.id, msg.content, msg.final, msg.amend)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestPatterns':
+        if (engine) post({ t: 'patterns', list: engine.patternSummaries() });
+        break;
+      case 'definePattern':
+        if (engine?.definePattern(msg.name)) post({ t: 'patterns', list: engine.patternSummaries() });
+        break;
       case 'addAdjustmentLayer':
         if (engine?.addAdjustmentLayer(msg.adjustment)) post({ t: 'doc', doc: engine.summary() });
         break;

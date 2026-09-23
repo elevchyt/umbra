@@ -11,6 +11,10 @@ import {
   defaultAdjustment,
   DEFAULT_LEVELS,
   SELECTIVE_RANGES,
+  HUE_BANDS,
+  DEFAULT_HUE_BAND_RANGES,
+  defaultHueBands,
+  type HueBandName,
   type CmykShift,
   type SelectiveRange,
   type Adjustment,
@@ -18,6 +22,8 @@ import {
   type LevelsChannel,
 } from '@umbra/kernels/adjust';
 import type { CurvePoint } from '@umbra/kernels/curve';
+import type { FillContent, PatternDef } from '@umbra/kernels/fill';
+import type { GradientStyle } from '@umbra/kernels/gradient';
 
 type Rgb = [number, number, number];
 
@@ -143,12 +149,21 @@ export function fromPsdAdjustment(raw: unknown): PsdAdjustmentRead | null {
       // ag-psd reads the block's colourise fields as the master "range" a…d: a is the
       // Colorize flag, b/c/d its hue, saturation and lightness.
       const m = a.master;
-      const ranges = [a.reds, a.yellows, a.greens, a.cyans, a.blues, a.magentas];
-      if (ranges.some((r) => r && (r.hue || r.saturation || r.lightness))) lost.push('Hue/Saturation colour ranges');
+      const bands = defaultHueBands();
+      let touched = false;
+      for (const name of HUE_BANDS) {
+        const r = a[name];
+        if (!r) continue;
+        bands[name] = { hue: r.hue ?? 0, saturation: r.saturation ?? 0, lightness: r.lightness ?? 0, range: [r.a, r.b, r.c, r.d] };
+        const def = DEFAULT_HUE_BAND_RANGES[name];
+        if (r.hue || r.saturation || r.lightness || [r.a, r.b, r.c, r.d].some((v, i) => v !== def[i])) touched = true;
+      }
       return {
         adjustment: {
           kind: 'hueSaturation',
           master: { hue: m?.hue ?? 0, saturation: m?.saturation ?? 0, lightness: m?.lightness ?? 0 },
+          // Untouched ranges read back as absent, which is what a new layer has.
+          ...(touched ? { bands } : {}),
           colorize: !!m?.a,
           colorizeHue: (((m?.b ?? 0) % 360) + 360) % 360,
           colorizeSaturation: m?.a ? (m?.c ?? 25) : 25,
@@ -252,16 +267,6 @@ const curveTo = (c: CurvePoint[]) => c.map((p) => ({ input: Math.round(p.x * 255
 
 const mixerTo = (c: ChannelMixerOutput) => ({ red: c.r, green: c.g, blue: c.b, constant: c.constant });
 
-/** Photoshop's default Hue/Saturation range edges (spec 05 §A), for records we create. */
-const HUE_RANGES = {
-  reds: [315, 345, 15, 45],
-  yellows: [15, 45, 75, 105],
-  greens: [75, 105, 135, 165],
-  cyans: [135, 165, 195, 225],
-  blues: [195, 225, 255, 285],
-  magentas: [255, 285, 315, 345],
-} as const;
-
 /**
  * `Adjustment` → ag-psd record. `source` is the record the layer was opened from, if any: it
  * is the base, so fields we do not model are written back as they were read.
@@ -280,11 +285,18 @@ export function toPsdAdjustment(adj: Adjustment, source?: unknown): AgAdjustment
     case 'vibrance':
       return { ...base, type: 'vibrance', vibrance: adj.vibrance, saturation: adj.saturation } as AgAdjustment;
     case 'hueSaturation': {
-      const range = (name: keyof typeof HUE_RANGES) => {
-        const prev = base[name] as Record<string, number> | undefined;
-        if (prev) return prev;
-        const [a, b, c, d] = HUE_RANGES[name];
-        return { a, b, c, d, hue: 0, saturation: 0, lightness: 0 };
+      const range = (name: HueBandName) => {
+        const band = adj.bands?.[name];
+        const [a, b, c, d] = band?.range ?? DEFAULT_HUE_BAND_RANGES[name];
+        return {
+          a: Math.round(a),
+          b: Math.round(b),
+          c: Math.round(c),
+          d: Math.round(d),
+          hue: Math.round(band?.hue ?? 0),
+          saturation: Math.round(band?.saturation ?? 0),
+          lightness: Math.round(band?.lightness ?? 0),
+        };
       };
       return {
         ...base,
@@ -355,5 +367,88 @@ export function toPsdAdjustment(adj: Adjustment, source?: unknown): AgAdjustment
     case 'desaturate':
       // Not a layer kind in Photoshop; the closest layer is a Hue/Saturation at −100.
       return { type: 'hue/saturation', master: { a: 0, b: 0, c: 0, d: 0, hue: 0, saturation: -100, lightness: 0 } } as AgAdjustment;
+  }
+}
+
+// ---- fill layers ---------------------------------------------------------------------------
+
+/**
+ * ag-psd's `vectorFill` → `FillContent`. Patterns are resolved against the file's own pattern
+ * table; a pattern the file refers to but does not contain comes back as null (with a note).
+ * Noise gradients are not modelled.
+ */
+export function fromPsdFill(
+  raw: unknown,
+  patterns: readonly PatternDef[],
+): { content: FillContent; lost: string[] } | null {
+  const v = raw as Record<string, unknown> & { type: string };
+  const lost: string[] = [];
+  if (v.type === 'color') return { content: { type: 'solid', color: colorFromPsd(v.color) }, lost };
+  if (v.type === 'solid') {
+    const g = v as unknown as {
+      name?: string;
+      colorStops: { color: unknown; location: number; midpoint: number }[];
+      opacityStops: { opacity: number; location: number; midpoint: number }[];
+      style?: GradientStyle;
+      angle?: number;
+      scale?: number;
+      reverse?: boolean;
+      offset?: { x: number; y: number };
+    };
+    const mid = (m: number | undefined) => (m === undefined || Math.abs(m - 0.5) < 1e-6 ? {} : { midpoint: m });
+    return {
+      content: {
+        type: 'gradient',
+        gradient: {
+          name: g.name,
+          colorStops: g.colorStops.map((s) => ({ at: s.location, color: colorFromPsd(s.color), ...mid(s.midpoint) })),
+          opacityStops: g.opacityStops.map((s) => ({ at: s.location, opacity: s.opacity, ...mid(s.midpoint) })),
+        },
+        style: g.style ?? 'linear',
+        angle: g.angle ?? 90,
+        scale: Math.round((g.scale ?? 1) * 100),
+        reverse: !!g.reverse,
+        offset: { x: Math.round((g.offset?.x ?? 0) * 100), y: Math.round((g.offset?.y ?? 0) * 100) },
+      },
+      lost,
+    };
+  }
+  if (v.type === 'pattern') {
+    const pattern = patterns.find((p) => p.id === v.id);
+    if (!pattern) return null;
+    const phase = (v.phase as { x: number; y: number } | undefined) ?? { x: 0, y: 0 };
+    return { content: { type: 'pattern', pattern, scale: 100, phase }, lost };
+  }
+  return null;
+}
+
+/** `FillContent` → ag-psd `vectorFill`, over the record the layer was opened from, if any. */
+export function toPsdFill(content: FillContent, source?: unknown): Record<string, unknown> {
+  const base = (source ?? {}) as Record<string, unknown>;
+  switch (content.type) {
+    case 'solid':
+      return { type: 'color', color: toPsdRgb(content.color) };
+    case 'gradient':
+      return {
+        ...(base.type === 'solid' ? base : {}),
+        type: 'solid',
+        name: content.gradient.name ?? 'Custom',
+        colorStops: content.gradient.colorStops.map((s) => ({ location: s.at, midpoint: s.midpoint ?? 0.5, color: toPsdRgb(s.color) })),
+        opacityStops: content.gradient.opacityStops.map((s) => ({ location: s.at, midpoint: s.midpoint ?? 0.5, opacity: s.opacity })),
+        style: content.style,
+        angle: content.angle,
+        scale: content.scale / 100,
+        reverse: content.reverse,
+        align: true,
+        offset: { x: content.offset.x / 100, y: content.offset.y / 100 },
+      };
+    case 'pattern':
+      return {
+        ...(base.type === 'pattern' ? base : {}),
+        type: 'pattern',
+        name: content.pattern.name,
+        id: content.pattern.id,
+        phase: content.phase,
+      };
   }
 }

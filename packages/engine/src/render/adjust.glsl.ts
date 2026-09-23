@@ -15,6 +15,7 @@ import {
   compile,
   rgbToHsl,
   SELECTIVE_RANGES,
+  HUE_BANDS,
   type Adjustment,
 } from '@umbra/kernels/adjust';
 import { sampleGradient } from '@umbra/kernels/gradient';
@@ -86,6 +87,19 @@ float applyLightness(float l, float amount) {
   return amount > 0.0 ? l + (1.0 - l) * (amount / 100.0) : l * (1.0 + amount / 100.0);
 }
 
+float wrap360(float v) { return mod(mod(v, 360.0) + 360.0, 360.0); }
+
+float hueBandWeight(float h, vec4 r) {
+  float db = wrap360(r.y - r.x);
+  float dc = wrap360(r.z - r.x);
+  float dd = wrap360(r.w - r.x);
+  float dh = wrap360(h - r.x);
+  if (dh <= db) return db == 0.0 ? 1.0 : dh / db;
+  if (dh <= dc) return 1.0;
+  if (dh <= dd) return dd == dc ? 1.0 : (dd - dh) / (dd - dc);
+  return 0.0;
+}
+
 float balanceWeight(float v, int band) {
   const float a = 0.25;
   const float b = 0.333;
@@ -119,11 +133,25 @@ vec3 adjustColor(vec3 c) {
       return hslToRgb(u_adj1.x, u_adj1.y, lifted);
     }
     vec3 hsl = rgbToHsl(c);
+    float hue = u_adj0.x;
     float sat = u_adj0.y;
-    float s2 = sat >= 0.0
-      ? clamp(hsl.y + (1.0 - hsl.y) * (sat / 100.0), 0.0, 1.0)
-      : clamp(hsl.y * (1.0 + sat / 100.0), 0.0, 1.0);
-    return hslToRgb(hsl.x + u_adj0.x, s2, applyLightness(hsl.z, u_adj0.z));
+    float light = u_adj0.z;
+    // Colour ranges: table texels 2i (the range angles) and 2i+1 (hue, sat, light) for the
+    // u_adj1.w bands in use. An achromatic pixel has no hue for them to act on.
+    if (hsl.y > 0.0) {
+      int n = int(u_adj1.w);
+      for (int i = 0; i < 6; i++) {
+        if (i >= n) break;
+        vec4 r = texelFetch(u_adjTable, ivec2(2 * i, 0), 0);
+        vec4 v = texelFetch(u_adjTable, ivec2(2 * i + 1, 0), 0);
+        float w = hueBandWeight(hsl.x, r);
+        hue += w * v.x;
+        sat += w * v.y;
+        light += w * v.z;
+      }
+    }
+    float s2 = clamp(hsl.y * (1.0 + clamp(sat, -100.0, 100.0) / 100.0), 0.0, 1.0);
+    return hslToRgb(hsl.x + hue, s2, applyLightness(hsl.z, clamp(light, -100.0, 100.0)));
   }
 
   if (u_adjKind == ADJ_VIBRANCE) {
@@ -131,8 +159,7 @@ vec3 adjustColor(vec3 c) {
     float skin = max(0.0, 1.0 - abs(hsl.x - 35.0) / 35.0);
     float weight = (1.0 - hsl.y) * (1.0 - 0.5 * skin);
     float s2 = hsl.y * (1.0 + u_adj0.x * weight);
-    float sat = u_adj0.y;
-    s2 = sat >= 0.0 ? s2 + (1.0 - s2) * sat : s2 * (1.0 + sat);
+    s2 = s2 * (1.0 + u_adj0.y);
     return hslToRgb(hsl.x, clamp(s2, 0.0, 1.0), hsl.z);
   }
 
@@ -255,10 +282,22 @@ export function toGpuAdjustment(adj: Adjustment): GpuAdjustment {
       rows.forEach((row, i) => set(i, row.r, row.g, row.b, row.constant));
       return { kind: ADJ_KIND.mixer, table: null, params };
     }
-    case 'hueSaturation':
+    case 'hueSaturation': {
+      const bands = adj.bands
+        ? HUE_BANDS.map((n) => adj.bands![n]).filter((b) => b.hue !== 0 || b.saturation !== 0 || b.lightness !== 0)
+        : [];
       set(0, adj.master.hue, adj.master.saturation, adj.master.lightness, adj.colorize ? 1 : 0);
-      set(1, adj.colorizeHue, Math.min(1, Math.max(0, adj.colorizeSaturation / 100)), adj.colorizeLightness);
-      return { kind: ADJ_KIND.hueSat, table: null, params };
+      set(1, adj.colorizeHue, Math.min(1, Math.max(0, adj.colorizeSaturation / 100)), adj.colorizeLightness, bands.length);
+      let table: Float32Array | null = null;
+      if (bands.length) {
+        table = new Float32Array(256 * 4);
+        bands.forEach((b, i) => {
+          table!.set(b.range, 8 * i);
+          table!.set([b.hue, b.saturation, b.lightness, 0], 8 * i + 4);
+        });
+      }
+      return { kind: ADJ_KIND.hueSat, table, params };
+    }
     case 'vibrance':
       set(0, adj.vibrance / 100, adj.saturation / 100);
       return { kind: ADJ_KIND.vibrance, table: null, params };

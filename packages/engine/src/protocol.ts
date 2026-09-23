@@ -2,15 +2,35 @@
 import type { BrushParams } from '@umbra/kernels/brush';
 import type { Gradient } from '@umbra/kernels/gradient';
 import type { Adjustment } from '@umbra/kernels/adjust';
+import type { FillContent } from '@umbra/kernels/fill';
+
+/**
+ * A fill layer's content as the UI sees it: the same as the model, except a pattern is named
+ * by id — its pixels stay in the worker and reach the UI only as a thumbnail.
+ */
+export type FillSummary =
+  | Exclude<FillContent, { type: 'pattern' }>
+  | { type: 'pattern'; patternId: string; patternName: string; scale: number; phase: { x: number; y: number } };
+
+export interface PatternSummary {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  /** 32×32 RGBA preview. */
+  thumb: Uint8Array;
+}
 import type { GpuCaps } from './gpu/caps.js';
 
 
 export interface LayerSummary {
   id: number;
   name: string;
-  kind: 'pixel' | 'group' | 'adjustment';
+  kind: 'pixel' | 'group' | 'adjustment' | 'fill';
   /** Adjustment layers: the parameters, for the Properties panel to edit. */
   adjustment?: Adjustment;
+  /** Fill layers: the content, for the thumbnail and the Properties panel. */
+  fillContent?: FillSummary;
   /** Indentation level in the Layers panel. */
   depth: number;
   opacity: number;
@@ -129,6 +149,10 @@ export type ToEngine =
   | { t: 'applyAdjustment'; adjustment: Adjustment }
   | { t: 'autoAdjust'; mode: 'tone' | 'contrast' | 'color' | 'equalize' }
   | { t: 'addAdjustmentLayer'; adjustment: Adjustment }
+  | { t: 'addFillLayer'; content: FillSummary }
+  | { t: 'setFillContent'; id: number; content: FillSummary; final: boolean; amend?: boolean }
+  | { t: 'requestPatterns' }
+  | { t: 'definePattern'; name: string }
   | { t: 'setLayerAdjustment'; id: number; adjustment: Adjustment; final: boolean }
   | { t: 'requestHistogram'; source: 'layer' | 'below' | 'composite'; id?: number }
   | { t: 'layerVia'; cut: boolean }
@@ -212,6 +236,7 @@ export type FromEngine =
   | { t: 'ready'; caps: GpuCaps }
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
+  | { t: 'patterns'; list: PatternSummary[] }
   | { t: 'histogram'; source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }
   | { t: 'contextLost' }
   | { t: 'contextRestored' }

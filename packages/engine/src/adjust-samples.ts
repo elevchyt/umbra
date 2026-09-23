@@ -1,4 +1,4 @@
-import { defaultAdjustment, type Adjustment } from '@umbra/kernels/adjust';
+import { defaultAdjustment, defaultHueBands, type Adjustment } from '@umbra/kernels/adjust';
 
 /**
  * A non-trivial setting of every adjustment kind, shared by the CPU tests (destructive ≡
@@ -49,5 +49,19 @@ export const ADJUSTMENT_SAMPLES: Adjustment[] = [
       greens: { c: -60, m: 30, y: 20, k: 10 },
       magentas: { c: 10, m: -50, y: 0, k: 30 },
     },
+  },
+  {
+    kind: 'hueSaturation',
+    master: { hue: 10, saturation: 15, lightness: 0 },
+    bands: {
+      ...defaultHueBands(),
+      reds: { hue: -20, saturation: 40, lightness: 10, range: [315, 345, 15, 45] },
+      greens: { hue: 30, saturation: -50, lightness: -20, range: [70, 100, 140, 170] },
+      blues: { hue: 0, saturation: 60, lightness: 0, range: [200, 220, 250, 290] },
+    },
+    colorize: false,
+    colorizeHue: 0,
+    colorizeSaturation: 25,
+    colorizeLightness: 0,
   },
 ];

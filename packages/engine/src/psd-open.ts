@@ -21,10 +21,12 @@ import {
 import { Plane, Tile } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
 import { RGBA8 } from './tiles/import.js';
-import { fromPsdAdjustment } from './psd-adjust.js';
+import { fromPsdAdjustment, fromPsdFill } from './psd-adjust.js';
+import type { PatternDef } from '@umbra/kernels/fill';
 import {
   emptyDoc,
   makeAdjustmentLayer,
+  makeFillLayer,
   makeGroup,
   makePixelLayer,
   DEFAULT_BLENDING_STATE,
@@ -115,6 +117,8 @@ export interface OpenPsdResult {
   doc: Doc;
   /** Layers carrying features we do not model yet, for an honest post-open report. */
   warnings: { layer: string; features: string[] }[];
+  /** Patterns stored in the file, for the pattern library. */
+  patterns: PatternDef[];
 }
 
 export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.psd'): OpenPsdResult {
@@ -139,6 +143,13 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
   });
 
   const warnings: { layer: string; features: string[] }[] = [];
+  const patterns: PatternDef[] = (info.patterns ?? []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    width: p.bounds.w,
+    height: p.bounds.h,
+    data: p.data,
+  }));
 
   const build = (items: PsdLayerInfo[]): Layer[] =>
     items.map((it) => {
@@ -148,6 +159,9 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         features.push(`${(it.adjustment as { type?: string }).type ?? 'unknown'} adjustment layer`);
       }
       if (adjusted) features.push(...adjusted.lost);
+      const filled = it.vectorFill ? fromPsdFill(it.vectorFill, patterns) : null;
+      if (it.vectorFill && !filled) features.push('fill layer (noise gradient or missing pattern)');
+      if (filled) features.push(...filled.lost);
       if (features.length) warnings.push({ layer: it.name, features });
 
       const common = {
@@ -189,6 +203,20 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
           psdExtra: { adjustment: it.adjustment },
         });
       }
+      if (filled) {
+        return makeFillLayer(it.name, filled.content, {
+          ...common,
+          mask: common.mask ?? {
+            plane: new MipPlane(Plane.empty(MASK_FORMAT, [255])),
+            enabled: true,
+            linked: true,
+            density: 1,
+            feather: 0,
+            defaultColor: 1,
+          },
+          psdExtra: { vectorFill: it.vectorFill },
+        });
+      }
       const plane = planes.get(it.index) ?? Plane.empty(RGBA8);
       return makePixelLayer(it.name, plane, common);
     });
@@ -199,7 +227,7 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
     layers,
     activeLayerIds: layers.length ? [layers[layers.length - 1]!.id] : [],
   };
-  return { doc, warnings };
+  return { doc, warnings, patterns };
 }
 
 export { Tile };

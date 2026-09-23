@@ -66,6 +66,53 @@ export interface HueRange {
 
 export const NO_HUE_CHANGE: HueRange = { hue: 0, saturation: 0, lightness: 0 };
 
+/** Hue/Saturation's six colour ranges, in Photoshop's Edit-menu (and PSD) order. */
+export const HUE_BANDS = ['reds', 'yellows', 'greens', 'cyans', 'blues', 'magentas'] as const;
+export type HueBandName = (typeof HUE_BANDS)[number];
+
+/**
+ * One colour range: its own Hue/Saturation/Lightness, and the four hue angles (degrees) of
+ * its range bar — fall-off start, full start, full end, fall-off end. The range may wrap past
+ * 360°, as Reds does.
+ */
+export interface HueBand extends HueRange {
+  range: [number, number, number, number];
+}
+
+/** Photoshop's default range edges (spec 05 §A). */
+export const DEFAULT_HUE_BAND_RANGES: Record<HueBandName, [number, number, number, number]> = {
+  reds: [315, 345, 15, 45],
+  yellows: [15, 45, 75, 105],
+  greens: [75, 105, 135, 165],
+  cyans: [135, 165, 195, 225],
+  blues: [195, 225, 255, 285],
+  magentas: [255, 285, 315, 345],
+};
+
+export function defaultHueBands(): Record<HueBandName, HueBand> {
+  return Object.fromEntries(
+    HUE_BANDS.map((b) => [b, { ...NO_HUE_CHANGE, range: [...DEFAULT_HUE_BAND_RANGES[b]] }]),
+  ) as Record<HueBandName, HueBand>;
+}
+
+const wrap360 = (v: number) => ((v % 360) + 360) % 360;
+
+/**
+ * How much a hue belongs to a range: 0 outside it, a linear ramp across each fall-off, 1 in
+ * the middle. Angles are measured from the range's start so a range that wraps past 360°
+ * needs no special case.
+ */
+export function hueBandWeight(h: number, [a, b, c, d]: readonly [number, number, number, number]): number {
+  const db = wrap360(b - a);
+  const dc = wrap360(c - a);
+  const dd = wrap360(d - a);
+  const dh = wrap360(h - a);
+  if (dh <= db) return db === 0 ? 1 : dh / db;
+  if (dh <= dc) return 1;
+  if (dh <= dd) return dd === dc ? 1 : (dd - dh) / (dd - dc);
+  return 0;
+}
+
 export interface ChannelMixerOutput {
   /** Source weights as percentages, −200…200. */
   r: number;
@@ -109,7 +156,16 @@ export type Adjustment =
   | { kind: 'threshold'; level: number }
   | { kind: 'desaturate' }
   | { kind: 'channelMixer'; r: ChannelMixerOutput; g: ChannelMixerOutput; b: ChannelMixerOutput; monochrome: boolean }
-  | { kind: 'hueSaturation'; master: HueRange; colorize: boolean; colorizeHue: number; colorizeSaturation: number; colorizeLightness: number }
+  | {
+      kind: 'hueSaturation';
+      master: HueRange;
+      /** The six colour ranges; absent means all at zero with the default edges. */
+      bands?: Record<HueBandName, HueBand>;
+      colorize: boolean;
+      colorizeHue: number;
+      colorizeSaturation: number;
+      colorizeLightness: number;
+    }
   | { kind: 'vibrance'; vibrance: number; saturation: number }
   | { kind: 'colorBalance'; shadows: ColorBalanceBand; midtones: ColorBalanceBand; highlights: ColorBalanceBand; preserveLuminosity: boolean }
   | { kind: 'blackWhite'; reds: number; yellows: number; greens: number; cyans: number; blues: number; magentas: number; tint: [number, number, number] | null }
@@ -454,14 +510,22 @@ export function hslToRgb(h: number, s: number, l: number): [number, number, numb
 /**
  * Hue/Saturation — `[fit]`.
  *
- * Photoshop's own space is a variant of HSL whose exact saturation response is not published.
- * This implements the best-known model recorded in spec 05 §A: rotate hue, scale saturation
- * about the HSL lightness, then apply lightness last as a lerp toward white or black. The
- * per-colour-range sliders (Reds…Magentas with their draggable band edges) are not here yet —
- * the master sliders are, and a range is the same maths behind a hue-angle weight.
+ * Photoshop's own space is a variant of HSL whose exact response is not published. The model:
+ *
+ *  - every slider value is the master's plus each colour range's, weighted by how much the
+ *    pixel's hue belongs to that range (its range bar: ramps across the fall-offs, 1 inside);
+ *  - hue rotates; saturation SCALES (`s·(1 + v)`), so a grey stays grey at any setting and
+ *    −100 is a neutral; lightness lerps toward white or black, last;
+ *  - an achromatic pixel has no hue, so the colour ranges do not touch it.
+ *
+ * The multiplicative saturation replaces an earlier `s + (1 − s)·v`, which tinted greys red —
+ * their hue reads as 0° — and pushed every faintly coloured pixel to full saturation at +100.
  */
 function hueSaturation(adj: Extract<Adjustment, { kind: 'hueSaturation' }>): PixelApplier {
   const { master, colorize } = adj;
+  const bands = adj.bands
+    ? HUE_BANDS.map((n) => adj.bands![n]).filter((b) => b.hue !== 0 || b.saturation !== 0 || b.lightness !== 0)
+    : [];
   return {
     shape: 'pixel',
     apply: (rgb) => {
@@ -477,15 +541,21 @@ function hueSaturation(adj: Extract<Adjustment, { kind: 'hueSaturation' }>): Pix
       }
 
       const [h, s, l] = rgbToHsl(rgb[0]!, rgb[1]!, rgb[2]!);
-      const h2 = h + master.hue;
-      // Above zero the slider approaches full saturation asymptotically rather than scaling
-      // linearly, which is why +100 does not posterise into pure primaries.
-      const s2 =
-        master.saturation >= 0
-          ? clamp01(s + (1 - s) * (master.saturation / 100))
-          : clamp01(s * (1 + master.saturation / 100));
-      const l2 = applyLightness(l, master.lightness);
-      const [r, g, b] = hslToRgb(h2, s2, l2);
+      let hue = master.hue;
+      let sat = master.saturation;
+      let light = master.lightness;
+      if (s > 0) {
+        for (const band of bands) {
+          const w = hueBandWeight(h, band.range);
+          if (w <= 0) continue;
+          hue += w * band.hue;
+          sat += w * band.saturation;
+          light += w * band.lightness;
+        }
+      }
+      const s2 = clamp01(s * (1 + Math.min(100, Math.max(-100, sat)) / 100));
+      const l2 = applyLightness(l, Math.min(100, Math.max(-100, light)));
+      const [r, g, b] = hslToRgb(h + hue, s2, l2);
       rgb[0] = r;
       rgb[1] = g;
       rgb[2] = b;
@@ -519,8 +589,9 @@ function vibrance(vibranceAmount: number, saturationAmount: number): PixelApplie
       const skin = Math.max(0, 1 - Math.abs(h - 35) / 35);
       const weight = (1 - s) * (1 - 0.5 * skin);
       let s2 = s * (1 + k * weight);
-      // The plain Saturation slider on the same dialog is linear, unlike Vibrance.
-      s2 = sat >= 0 ? s2 + (1 - s2) * sat : s2 * (1 + sat);
+      // The plain Saturation slider on the same dialog scales, as Hue/Saturation's does, so
+      // a grey stays grey.
+      s2 = s2 * (1 + sat);
       const [r, g, b] = hslToRgb(h, clamp01(s2), l);
       rgb[0] = r;
       rgb[1] = g;

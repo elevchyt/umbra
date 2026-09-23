@@ -29,9 +29,14 @@ export {
   type ChannelMixerOutput,
   type ColorBalanceBand,
   type HueRange,
+  HUE_BANDS,
+  defaultHueBands,
+  type HueBand,
+  type HueBandName,
   type LevelsChannel,
   SELECTIVE_RANGES,
   type SelectiveRange,
   type CmykShift,
 } from '@umbra/kernels/adjust';
 export { evaluateCurve, normaliseCurve, type CurvePoint } from '@umbra/kernels/curve';
+export { FILL_LABEL, type FillType } from '@umbra/kernels/fill';

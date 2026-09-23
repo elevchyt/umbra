@@ -22,6 +22,7 @@ import { MipPlane } from '../tiles/mip.js';
 import type { Doc, Layer } from '../document.js';
 import type { Adjustment } from '@umbra/kernels/adjust';
 import { toGpuAdjustment, type GpuAdjustment } from './adjust.glsl.js';
+import { FillRenderer } from './fill.glsl.js';
 
 const QUAD_VERT = /* glsl */ `#version 300 es
 precision highp float;
@@ -107,6 +108,7 @@ export class DocumentRenderer {
   readonly ants: AntsRenderer;
   readonly quickMask: QuickMaskRenderer;
   readonly handles: HandlesRenderer;
+  readonly fills: FillRenderer;
   private present: Program;
   private checker: Program;
   private channel: Program;
@@ -124,6 +126,7 @@ export class DocumentRenderer {
     this.ants = new AntsRenderer(gl);
     this.quickMask = new QuickMaskRenderer(gl);
     this.handles = new HandlesRenderer(gl);
+    this.fills = new FillRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
     this.checker = new Program(gl, CANVAS_MASK_VERT, CHECKER_FRAG, 'checker');
     this.channel = new Program(gl, CANVAS_MASK_VERT, CHANNEL_FRAG, 'channel-view');
@@ -255,7 +258,7 @@ export class DocumentRenderer {
 
   private toGpuLayer(layer: Layer, view: ViewState, clip: Rect): GpuLayer {
     const out: GpuLayer = {
-      kind: layer.kind,
+      kind: layer.kind === 'fill' ? 'pixel' : layer.kind,
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
@@ -297,6 +300,12 @@ export class DocumentRenderer {
       out.children = this.toGpuLayers(layer.children, view, clip);
     } else if (layer.kind === 'adjustment') {
       out.adjustment = this.gpuAdjustment(layer.adjustment);
+    } else if (layer.kind === 'fill') {
+      const content = layer.content;
+      out.drawSource = () => {
+        this.stats.layerPasses++;
+        this.fills.draw(content, docToClip(view), clip, { width: clip.x1, height: clip.y1 });
+      };
     } else {
       const plane = layer.plane;
       out.drawSource = (_t: RenderTarget) => {
@@ -499,6 +508,7 @@ export class DocumentRenderer {
     this.channel.dispose();
     this.quickMask.dispose();
     this.handles.dispose();
+    this.fills.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);
   }

@@ -9,6 +9,7 @@ import type { CompositeLayer, Sample } from '@umbra/kernels/composite';
 import { DEFAULT_BLENDING } from '@umbra/kernels/composite';
 import type { Rgb } from '@umbra/kernels/blend';
 import { applierToRgbFn, compile } from '@umbra/kernels/adjust';
+import { fillSampler } from '@umbra/kernels/fill';
 import type { Doc, Layer } from '../document.js';
 import type { Plane } from '../tiles/plane.js';
 
@@ -38,9 +39,13 @@ function sampleMask(plane: Plane, x: number, y: number): number {
   return tile.data[ly * TILE_SIZE + lx]! / max;
 }
 
-export function toCompositeLayer(layer: Layer): CompositeLayer {
+/**
+ * `size` is the canvas, which a gradient fill layer needs: its geometry is defined relative
+ * to the canvas, not to any stored pixels.
+ */
+export function toCompositeLayer(layer: Layer, size: { width: number; height: number } = { width: 0, height: 0 }): CompositeLayer {
   const base: CompositeLayer = {
-    kind: layer.kind,
+    kind: layer.kind === 'fill' ? 'pixel' : layer.kind,
     name: layer.name,
     visible: layer.visible,
     opacity: layer.opacity,
@@ -61,9 +66,12 @@ export function toCompositeLayer(layer: Layer): CompositeLayer {
   }
 
   if (layer.kind === 'group') {
-    base.children = layer.children.map(toCompositeLayer);
+    base.children = layer.children.map((c) => toCompositeLayer(c, size));
   } else if (layer.kind === 'adjustment') {
     base.adjust = applierToRgbFn(compile(layer.adjustment));
+  } else if (layer.kind === 'fill') {
+    base.kind = 'pixel';
+    base.sample = fillSampler(layer.content, size.width, size.height);
   } else {
     const plane = layer.plane.base;
     base.sample = (x, y) => samplePlane(plane, x, y);
@@ -72,5 +80,5 @@ export function toCompositeLayer(layer: Layer): CompositeLayer {
 }
 
 export function toCompositeLayers(doc: Doc): CompositeLayer[] {
-  return doc.layers.map(toCompositeLayer);
+  return doc.layers.map((l) => toCompositeLayer(l, doc));
 }
