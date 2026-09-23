@@ -389,7 +389,7 @@ export function OptionsBar(props: OptionsBarProps) {
           <IconButton icon="pen" title="Make a Work Path from the selection" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 } as never)} />
         </Match>
 
-        <Match when={[...RETOUCH_TOOLS, 'magicEraser'].includes(store.activeTool() as never)}>
+        <Match when={[...RETOUCH_TOOLS, 'magicEraser', 'patch', 'contentAwareMove', 'redEye'].includes(store.activeTool() as never)}>
           <RetouchToolOptions />
         </Match>
 

@@ -403,6 +403,12 @@ export class EngineClient {
         }
         return;
       }
+      if (this.dragAction && e.button === 0) {
+        const p = toLocal(e);
+        this.dragDown = true;
+        this.send(this.dragAction('down', p.x, p.y) as never);
+        return;
+      }
       if (this.clickAction && e.button === 0) {
         const p = toLocal(e);
         this.send(this.clickAction(p.x, p.y) as never);
@@ -450,6 +456,11 @@ export class EngineClient {
         });
         return;
       }
+      if (this.dragDown && this.dragAction) {
+        const p = toLocal(e);
+        this.send(this.dragAction('move', p.x, p.y) as never);
+        return;
+      }
       if (this.typeDown) {
         const p = toLocal(e);
         this.send({ t: 'typePointer', phase: 'move', x: p.x, y: p.y, shift: e.shiftKey, clicks: 0 });
@@ -487,6 +498,11 @@ export class EngineClient {
       // race the ring: messages are delivered immediately, but ring samples are only drained on
       // the next tick, so the stroke would end before its own samples had been consumed and the
       // tail of the stroke would be silently dropped.
+      if (this.dragDown) {
+        this.dragDown = false;
+        const p = toLocal(e);
+        if (this.dragAction) this.send(this.dragAction('up', p.x, p.y) as never);
+      }
       if (this.typeDown) {
         this.typeDown = false;
         const p = toLocal(e);
@@ -551,6 +567,9 @@ export class EngineClient {
   altSamples = false;
   /** A tool that acts on a click (Magic Eraser): its message, given the click point. */
   clickAction: ((x: number, y: number) => unknown) | null = null;
+  /** A tool whose whole drag goes to the engine as one message per phase (Patch, CA Move). */
+  dragAction: ((phase: 'down' | 'move' | 'up', x: number, y: number) => unknown) | null = null;
+  private dragDown = false;
   brush: BrushParams = { ...DEFAULT_BRUSH };
   /** Paint blend mode, which unlike a layer's may also be 'behind' or 'clear'. */
   paintBlendMode = 'normal';

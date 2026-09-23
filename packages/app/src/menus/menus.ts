@@ -157,7 +157,7 @@ export const MENUS: MenuDef[] = [
       { label: 'Fill…', cmd: 'edit.fill', shortcut: 'Shift+F5', dialog: true, done: true },
       { label: 'Stroke…', cmd: 'edit.stroke', dialog: true, done: true },
       sep,
-      { label: 'Content-Aware Fill…', cmd: 'edit.contentAwareFill' },
+      { label: 'Content-Aware Fill…', cmd: 'edit.contentAwareFill', done: true },
       { label: 'Content-Aware Scale', cmd: 'edit.contentAwareScale', shortcut: 'Ctrl+Alt+Shift+C' },
       { label: 'Puppet Warp', cmd: 'edit.puppetWarp' },
       { label: 'Perspective Warp', cmd: 'edit.perspectiveWarp' },

@@ -330,6 +330,21 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'replaceFonts':
         if (engine?.replaceFonts(msg.map)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'patchPointer':
+        if (engine?.patchPointer(msg, msg.options) && msg.phase !== 'move') post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'contentAwareFill':
+        if (engine) {
+          engine.contentAwareFill(msg);
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
+      case 'redEye':
+        if (engine) {
+          engine.redEye(msg.x, msg.y, msg.pupilSize, msg.darken);
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
       case 'magicErase':
         if (engine?.magicErase(msg.x, msg.y, msg)) post({ t: 'doc', doc: engine.summary() });
         break;

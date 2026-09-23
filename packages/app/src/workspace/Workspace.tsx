@@ -5,6 +5,7 @@ import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
+import { ContentAwareFillDialog } from '../brush/ContentAwareFill';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -437,6 +438,12 @@ export function Workspace() {
     client.clickAction =
       tool === 'magicEraser'
         ? (x, y) => ({ t: 'magicErase', x, y, tolerance: ro.tolerance, contiguous: ro.limits !== 'discontiguous', antiAlias: ro.antiAlias, sampleAll: ro.sampleAll, opacity: b.opacity })
+        : tool === 'redEye'
+          ? (x, y) => ({ t: 'redEye', x, y, pupilSize: ro.pupilSize, darken: ro.darken })
+          : null;
+    client.dragAction =
+      tool === 'patch' || tool === 'contentAwareMove'
+        ? (phase, x, y) => ({ t: 'patchPointer', phase, x, y, options: { tool, patchMode: ro.patchMode, patchDirection: ro.patchDirection, moveMode: ro.moveMode } })
         : null;
     // The Eraser is the Clear paint mode with the brush's own settings.
     client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
@@ -1047,6 +1054,10 @@ export function Workspace() {
         break;
       case 'edit.defineShape':
         store.openDialog('defineShape');
+        break;
+      case 'edit.contentAwareFill':
+        if (!store.doc()?.hasSelection) store.setStatusMessage('Content-Aware Fill needs a selection.');
+        else store.openDialog('contentAwareFill');
         break;
       case 'edit.defineBrush':
         store.openDialog('defineBrush');
@@ -1823,6 +1834,9 @@ export function Workspace() {
       </Show>
       <Show when={store.dialog()?.id === 'warpText'}>
         <WarpDialog onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'contentAwareFill'}>
+        <ContentAwareFillDialog send={(m) => send(m as never)} onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'defineBrush'}>
         <NameDialog

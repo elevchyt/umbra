@@ -89,12 +89,12 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'retouch',
     key: 'j',
     tools: [
-      { id: 'spotHealing', name: 'Spot Healing Brush Tool', icon: 'spotHealing', key: 'j' },
-      { id: 'removeTool', name: 'Remove Tool', icon: 'removeTool', key: 'j' },
+      { id: 'spotHealing', name: 'Spot Healing Brush Tool', icon: 'spotHealing', key: 'j', implemented: true, hint: 'Paint over a blemish: on release it is filled from its surroundings.' },
+      { id: 'removeTool', name: 'Remove Tool', icon: 'removeTool', key: 'j', implemented: true, hint: 'Paint over an object: on release it is removed and the area filled content-aware.' },
       { id: 'healingBrush', name: 'Healing Brush Tool', icon: 'healingBrush', key: 'j', implemented: true, hint: 'Alt-click a source, then paint: the source is cloned and blended into the destination.' },
-      { id: 'patch', name: 'Patch Tool', icon: 'patch', key: 'j' },
-      { id: 'contentAwareMove', name: 'Content-Aware Move Tool', icon: 'contentAwareMove', key: 'j' },
-      { id: 'redEye', name: 'Red Eye Tool', icon: 'redEye', key: 'j' },
+      { id: 'patch', name: 'Patch Tool', icon: 'patch', key: 'j', implemented: true, hint: 'Draw around an area, then drag the selection to where the patch should come from (Source) or go (Destination).' },
+      { id: 'contentAwareMove', name: 'Content-Aware Move Tool', icon: 'contentAwareMove', key: 'j', implemented: true, hint: 'Draw around an object, then drag it: it is blended in where dropped and the hole filled.' },
+      { id: 'redEye', name: 'Red Eye Tool', icon: 'redEye', key: 'j', implemented: true, hint: 'Click a red pupil.' },
     ],
   },
   {
@@ -256,6 +256,7 @@ export const PAINT_TOOLS = new Set([
   'burnTool',
   'spongeTool',
   'spotHealing',
+  'removeTool',
   'healingBrush',
   'selectionBrush',
 ]);

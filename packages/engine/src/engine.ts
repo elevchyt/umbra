@@ -108,7 +108,8 @@ import {
   type ApplyImageOptions,
   type CalculationsOptions,
 } from '@umbra/kernels/applyimage';
-import { bitmapFromPlane } from './psd-save.js';
+import { bitmapFromPlane, tightBounds } from './psd-save.js';
+import { planeFromBitmap } from './psd-open.js';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
@@ -152,7 +153,9 @@ import {
   type BrushPreset,
 } from '@umbra/kernels/brush';
 import { readAbrFile, writeAbrFile } from './abr.js';
-import { RetouchStroke, readPixel, type RetouchOptions, type RetouchToolId, type Rgba } from './retouch.js';
+import { DEFAULT_RETOUCH, RetouchStroke, readPixel, type RetouchOptions, type RetouchToolId, type Rgba } from './retouch.js';
+import * as HealCmd from './heal-tools.js';
+import { heal } from '@umbra/kernels/heal';
 import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
@@ -196,6 +199,8 @@ export const RETOUCH_NAMES: Record<RetouchToolId, string> = {
   cloneStamp: 'Clone Stamp',
   patternStamp: 'Pattern Stamp',
   historyBrush: 'History Brush',
+  spotHealing: 'Spot Healing Brush',
+  removeTool: 'Remove Tool',
   artHistoryBrush: 'Art History Brush',
   colorReplacement: 'Color Replacement',
   backgroundEraser: 'Background Eraser',
@@ -208,6 +213,13 @@ export const RETOUCH_NAMES: Record<RetouchToolId, string> = {
   mixerBrush: 'Mixer Brush',
   healingBrush: 'Healing Brush',
 };
+
+export interface PatchOptions {
+  tool: 'patch' | 'contentAwareMove';
+  patchMode: 'normal' | 'contentAware';
+  patchDirection: 'source' | 'destination';
+  moveMode: 'move' | 'extend';
+}
 
 export type BrushLibraryOp =
   | { op: 'newPreset'; name: string; params: BrushPreset['params']; group?: string }
@@ -957,6 +969,8 @@ export class Engine {
     const trail = this.vector.trail;
     const drawn = this.dragShape();
     const extra = drawn ? overlayOutline(drawn.path) : [];
+    const patchBox = this.patchOverlay();
+    if (patchBox) return { outlines: [], anchors: [], handles: [], rubber: null, marquee: patchBox, trail: null };
     const type = this.typeOverlay();
     if (type) return { anchors: [], handles: [], rubber: null, trail: null, ...type, outlines: [...extra, ...(type.outlines ?? [])], marquee: type.marquee ?? null };
     if (!p) return trail || drawn ? { outlines: extra, anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
@@ -4004,6 +4018,14 @@ export class Engine {
   /** Set up a retouching stroke on the pixel layer being painted. */
   private beginRetouch(tool: RetouchToolId, options: RetouchOptions, target: PixelLayer, fg: [number, number, number], bg: [number, number, number], seed: number): void {
     const orig = target.plane.base;
+    if (tool === 'spotHealing' || tool === 'removeTool') {
+      // The stroke marks the area (drawn as a dim overlay); the fill happens when it ends.
+      this.retouchTool = tool;
+      this.regionOptions = options;
+      this.strokeColor = [0.1, 0.1, 0.1];
+      this.brush = { ...this.brush, opacity: 0.5 };
+      return;
+    }
     const W = this.doc.width;
     const H = this.doc.height;
     const clampRead = (plane: Plane) => (x: number, y: number, out: Rgba) => readPixel(plane, Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), out);
@@ -4094,6 +4116,9 @@ export class Engine {
     if (!direct) this.paintMode = this.retouch.mode === 'clear' ? 'clear' : this.paintMode === 'clear' ? 'normal' : this.paintMode;
   }
 
+  /** Spot Healing / Remove: the options their region fill uses when the stroke ends. */
+  private regionOptions: RetouchOptions | null = null;
+
   /** The document before a direct retouch stroke swapped its working plane in. */
   private docBeforeRetouch: Doc | null = null;
 
@@ -4108,6 +4133,227 @@ export class Engine {
     this.strokeLayerId = null;
     this.painting = false;
     this.lastDab = null;
+  }
+
+  // ---- Patch, Content-Aware Move, Content-Aware Fill, Red Eye ------------------------------
+
+  private patchDrag: { start: { x: number; y: number }; now: { x: number; y: number } } | null = null;
+  private patchLasso = false;
+
+  /**
+   * The Patch and Content-Aware Move tools: outside the selection a drag draws one (a lasso);
+   * inside it, the drag moves it, and on release the patch or move is made.
+   */
+  patchPointer(e: { phase: 'down' | 'move' | 'up'; x: number; y: number }, opts: PatchOptions): boolean {
+    const p = docPointAtScreen(this.view, e.x, e.y);
+    if (e.phase === 'down') {
+      const sel = this.doc.selection;
+      const inside = sel && p.x >= 0 && p.y >= 0 && p.x < sel.width && p.y < sel.height && sel.mask[Math.floor(p.y) * sel.width + Math.floor(p.x)]! > 127;
+      if (inside) this.patchDrag = { start: p, now: p };
+      else {
+        this.patchLasso = true;
+        this.beginSelect('lasso', e.x, e.y, 'new');
+      }
+      return true;
+    }
+    if (this.patchLasso) {
+      if (e.phase === 'move') this.updateSelect(e.x, e.y);
+      else {
+        this.patchLasso = false;
+        this.endSelect(e.x, e.y);
+      }
+      return true;
+    }
+    const drag = this.patchDrag;
+    if (!drag) return false;
+    drag.now = p;
+    if (e.phase === 'move') return true;
+    this.patchDrag = null;
+    const d = { x: Math.round(drag.now.x - drag.start.x), y: Math.round(drag.now.y - drag.start.y) };
+    if (d.x === 0 && d.y === 0) return true;
+    return opts.tool === 'patch' ? this.applyPatch(d, opts) : this.applyContentAwareMove(d, opts);
+  }
+
+  /** The live Patch / Content-Aware Move drag: the selection's box where it would land. */
+  private patchOverlay(): PathOverlay['marquee'] {
+    const drag = this.patchDrag;
+    const b = drag ? selectionBoundsOf(this.doc.selection) : null;
+    if (!drag || !b) return null;
+    const dx = drag.now.x - drag.start.x;
+    const dy = drag.now.y - drag.start.y;
+    return { x0: b.x0 + dx, y0: b.y0 + dy, x1: b.x1 + dx, y1: b.y1 + dy };
+  }
+
+  /** The selection's coverage (0…1) over a rectangle, shifted by `d`. */
+  private selectionOver(r: HealCmd.IRect, d = { x: 0, y: 0 }): Float32Array {
+    const sel = this.doc.selection!;
+    const w = r.x1 - r.x0;
+    const out = new Float32Array(w * (r.y1 - r.y0));
+    for (let y = r.y0; y < r.y1; y++)
+      for (let x = r.x0; x < r.x1; x++) {
+        const sx = x - d.x;
+        const sy = y - d.y;
+        if (sx < 0 || sy < 0 || sx >= sel.width || sy >= sel.height) continue;
+        out[(y - r.y0) * w + (x - r.x0)] = sel.mask[sy * sel.width + sx]! / 255;
+      }
+    return out;
+  }
+
+  private shiftSelection(d: { x: number; y: number }): Selection | null {
+    const sel = this.doc.selection;
+    if (!sel) return null;
+    const mask = createMask(sel.width, sel.height);
+    for (let y = 0; y < sel.height; y++)
+      for (let x = 0; x < sel.width; x++) {
+        const sx = x - d.x;
+        const sy = y - d.y;
+        if (sx >= 0 && sy >= 0 && sx < sel.width && sy < sel.height) mask[y * sel.width + x] = sel.mask[sy * sel.width + sx]!;
+      }
+    return makeSelection(sel.width, sel.height, mask);
+  }
+
+  private applyPatch(d: { x: number; y: number }, opts: PatchOptions): boolean {
+    const layer = this.activePixelLayer();
+    const b = selectionBoundsOf(this.doc.selection);
+    if (!layer || !b) return false;
+    // Source: the selected area takes the pixels from where it was dragged to. Destination:
+    // the selected pixels go where it was dragged to.
+    const dest = opts.patchDirection === 'source' ? { x: 0, y: 0 } : d;
+    const from = opts.patchDirection === 'source' ? d : { x: -d.x, y: -d.y };
+    const both = { x0: Math.min(b.x0, b.x0 + d.x), y0: Math.min(b.y0, b.y0 + d.y), x1: Math.max(b.x1, b.x1 + d.x), y1: Math.max(b.y1, b.y1 + d.y) };
+    const r = HealCmd.grow(both, 16, this.doc.width, this.doc.height);
+    const mask = this.selectionOver(r, dest);
+    const { rgb, weight } = HealCmd.patchArea(layer.plane.base, r, mask, { dx: from.x, dy: from.y }, opts.patchMode === 'contentAware');
+    const plane = HealCmd.writeRect(layer.plane.base, r, rgb, weight);
+    const selection = opts.patchDirection === 'destination' ? this.shiftSelection(d) : this.doc.selection;
+    this.commit({ ...this.doc, selection, layers: updateLayer(this.doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) }, 'Patch Tool');
+    return true;
+  }
+
+  private applyContentAwareMove(d: { x: number; y: number }, opts: PatchOptions): boolean {
+    const layer = this.activePixelLayer();
+    const b = selectionBoundsOf(this.doc.selection);
+    if (!layer || !b) return false;
+    const both = { x0: Math.min(b.x0, b.x0 + d.x), y0: Math.min(b.y0, b.y0 + d.y), x1: Math.max(b.x1, b.x1 + d.x), y1: Math.max(b.y1, b.y1 + d.y) };
+    const r = HealCmd.grow(both, Math.max(24, Math.max(b.x1 - b.x0, b.y1 - b.y0)), this.doc.width, this.doc.height);
+    let plane = layer.plane.base;
+    // 1. What was selected, placed where it was dropped and healed into its new surroundings.
+    const at = this.selectionOver(r, d);
+    const placed = HealCmd.patchArea(plane, r, at, { dx: -d.x, dy: -d.y }, false);
+    // Healing (Structure) keeps the moved pixels' detail; colour meets the new boundary.
+    plane = HealCmd.writeRect(plane, r, placed.rgb, placed.weight);
+    // 2. Move (not Extend): the hole it left, filled from the surroundings.
+    if (opts.moveMode === 'move') {
+      const was = this.selectionOver(r);
+      const hole = new Float32Array(was.length);
+      for (let i = 0; i < hole.length; i++) hole[i] = Math.max(0, was[i]! - at[i]!);
+      const filled = HealCmd.spotHeal(plane, r, hole, 'contentAware');
+      plane = HealCmd.writeRect(plane, r, filled.rgb, filled.weight);
+    }
+    this.commit({ ...this.doc, selection: this.shiftSelection(d), layers: updateLayer(this.doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) }, 'Content-Aware Move');
+    return true;
+  }
+
+  /** Edit ▸ Content-Aware Fill: the selection filled from the sampling area. */
+  contentAwareFill(opts: { sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }): boolean {
+    const layer = this.activePixelLayer();
+    const b = selectionBoundsOf(this.doc.selection);
+    if (!layer || !b) {
+      this.statusNote = 'Content-Aware Fill needs a selection on a pixel layer.';
+      return false;
+    }
+    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0);
+    const r = opts.sampling === 'all' ? { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height } : HealCmd.grow(b, opts.sampling === 'rectangular' ? Math.round(size / 2) : size, this.doc.width, this.doc.height);
+    const cover = this.selectionOver(r);
+    const { rgb, weight } = HealCmd.spotHeal(layer.plane.base, r, cover, 'contentAware');
+    let out = rgb;
+    if (opts.colorAdaptation) {
+      // Colour adaptation: the fill's tone meets the surroundings (a Poisson pass over it).
+      const w = r.x1 - r.x0;
+      const h = r.y1 - r.y0;
+      const hole = new Uint8Array(w * h);
+      for (let i = 0; i < hole.length; i++) hole[i] = weight[i]! > 0 ? 1 : 0;
+      out = heal(rgb, HealCmd.readRect(layer.plane.base, r).rgb, hole, w, h, 5);
+    }
+    let doc = this.doc;
+    if (opts.output === 'current') {
+      const plane = HealCmd.writeRect(layer.plane.base, r, out, weight);
+      doc = { ...doc, layers: updateLayer(doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) };
+    } else {
+      const base = opts.output === 'duplicate' ? layer.plane.base : Plane.empty(RGBA8);
+      const plane = HealCmd.writeRect(base, r, out, weight, opts.output === 'new');
+      const added = makePixelLayer(opts.output === 'new' ? 'Content-Aware Fill' : `${layer.name} copy`, plane);
+      doc = { ...doc, layers: insertLayer(doc.layers, added, layer.id), activeLayerIds: [added.id] };
+    }
+    this.commit(doc, 'Content-Aware Fill');
+    return true;
+  }
+
+  /** The Red Eye tool: a click on a red pupil. */
+  redEye(x: number, y: number, pupilSize: number, darken: number): boolean {
+    const layer = this.activePixelLayer();
+    if (!layer) return false;
+    const p = docPointAtScreen(this.view, x, y);
+    const plane = HealCmd.redEye(layer.plane.base, p.x, p.y, this.doc.width, this.doc.height, pupilSize, darken);
+    if (!plane) {
+      this.statusNote = 'Red Eye: no red pupil under the click.';
+      return false;
+    }
+    this.commit({ ...this.doc, layers: updateLayer(this.doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) }, 'Red Eye Tool');
+    return true;
+  }
+
+  /** Healing Brush: the cloned stroke's colours healed into the layer (its coverage kept). */
+  private healStrokePlane(stroke: Plane): Plane {
+    const layer = findLayer(this.doc.layers, this.strokeLayerId!);
+    if (layer?.kind !== 'pixel') return stroke;
+    const b = tightBounds(stroke);
+    if (rectIsEmpty(b)) return stroke;
+    const r = HealCmd.grow(b, 3, this.doc.width, this.doc.height);
+    const st = HealCmd.readRect(stroke, r);
+    const healed = HealCmd.healStroke(layer.plane.base, st.rgb, st.alpha, r, this.retouch?.s.options.diffusion ?? 5);
+    // Keep the stroke's coverage; replace its colour.
+    const w = stroke.writer();
+    const rw = r.x1 - r.x0;
+    for (let y = r.y0; y < r.y1; y++)
+      for (let x = r.x0; x < r.x1; x++) {
+        const i = (y - r.y0) * rw + (x - r.x0);
+        if (st.alpha[i]! <= 0) continue;
+        const d = w.mutable(x >> TILE_SHIFT, y >> TILE_SHIFT);
+        const o = ((y & (TILE_SIZE - 1)) * TILE_SIZE + (x & (TILE_SIZE - 1))) * 4;
+        for (let c = 0; c < 3; c++) d[o + c] = Math.round(Math.max(0, Math.min(1, healed[i * 3 + c]!)) * 255);
+      }
+    return w.commit();
+  }
+
+  /** Spot Healing / Remove: the painted area, filled when the stroke ends. */
+  private finishRegionStroke(): void {
+    const tool = this.retouchTool!;
+    const id = this.strokeLayerId!;
+    const stroke = this.strokeWriter!.commit();
+    const opts = this.regionOptions ?? DEFAULT_RETOUCH;
+    const layer = findLayer(this.doc.layers, id);
+    const b = tightBounds(stroke);
+    if (layer?.kind === 'pixel' && !rectIsEmpty(b)) {
+      // Room around the area to sample from: about its own size again.
+      const margin = Math.max(24, Math.round(Math.max(b.x1 - b.x0, b.y1 - b.y0) * (tool === 'removeTool' ? 1.5 : 1)));
+      const r = HealCmd.grow(b, margin, this.doc.width, this.doc.height);
+      const cover = HealCmd.readRect(stroke, r).alpha;
+      const src = opts.sampleAll ? this.compositePlane() : layer.plane.base;
+      const type = tool === 'removeTool' ? 'contentAware' : opts.spotType;
+      const { rgb, weight } = HealCmd.spotHeal(src, r, cover, type, (this.brush.seed ?? 1) & 0xffff);
+      const plane = HealCmd.writeRect(layer.plane.base, r, rgb, weight, opts.sampleAll);
+      this.commit({ ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) }, RETOUCH_NAMES[tool]);
+    }
+    this.regionOptions = null;
+    this.brush = { ...this.brush, opacity: 1 };
+    this.finishRetouch();
+  }
+
+  /** The document composited into a plane (Sample All Layers). */
+  private compositePlane(): Plane {
+    const { pixels, width, height } = this.renderer.renderToBuffer(this.doc, this.caps.maxTextureSize);
+    return planeFromBitmap({ data: pixels, width, height, left: 0, top: 0 });
   }
 
   /** Clone Stamp / Healing: an aligned stroke's first dab fixes the offset. */
@@ -4231,7 +4477,12 @@ export class Engine {
       this.finishRetouch();
       return;
     }
-    const strokePlane = this.strokeWriter.commit();
+    if (this.retouchTool === 'spotHealing' || this.retouchTool === 'removeTool') {
+      this.finishRegionStroke();
+      return;
+    }
+    let strokePlane = this.strokeWriter.commit();
+    if (this.retouchTool === 'healingBrush' && this.strokeLayerId !== null) strokePlane = this.healStrokePlane(strokePlane);
     const id = this.strokeLayerId;
     const before = this.doc;
     const intoMask = this.strokeIntoMask;

@@ -39,7 +39,7 @@ export {
   type BrushGroup,
   type BrushPreset,
 } from '@umbra/kernels/brush';
-export type { BrushLibraryOp } from './engine.js';
+export type { BrushLibraryOp, PatchOptions } from './engine.js';
 export {
   FOREGROUND_TO_BACKGROUND,
   FOREGROUND_TO_TRANSPARENT,

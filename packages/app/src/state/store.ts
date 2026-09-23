@@ -309,7 +309,8 @@ export type DialogId =
   | 'defineShape'
   | 'warpText'
   | 'resolveFonts'
-  | 'defineBrush';
+  | 'defineBrush'
+  | 'contentAwareFill';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {

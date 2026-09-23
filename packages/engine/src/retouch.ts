@@ -33,9 +33,11 @@ export type RetouchToolId =
   | 'sharpenTool'
   | 'smudgeTool'
   | 'mixerBrush'
-  | 'healingBrush';
+  | 'healingBrush'
+  | 'spotHealing'
+  | 'removeTool';
 
-export const RETOUCH_TOOLS: readonly RetouchToolId[] = ['cloneStamp', 'patternStamp', 'historyBrush', 'artHistoryBrush', 'colorReplacement', 'backgroundEraser', 'dodgeTool', 'burnTool', 'spongeTool', 'blurTool', 'sharpenTool', 'smudgeTool', 'mixerBrush', 'healingBrush'];
+export const RETOUCH_TOOLS: readonly RetouchToolId[] = ['cloneStamp', 'patternStamp', 'historyBrush', 'artHistoryBrush', 'colorReplacement', 'backgroundEraser', 'dodgeTool', 'burnTool', 'spongeTool', 'blurTool', 'sharpenTool', 'smudgeTool', 'mixerBrush', 'healingBrush', 'spotHealing', 'removeTool'];
 
 export type Sampling = 'continuous' | 'once' | 'backgroundSwatch';
 export type Limits = 'discontiguous' | 'contiguous' | 'findEdges';
@@ -48,6 +50,8 @@ export interface RetouchOptions {
   impressionist: boolean;
   healSource: 'sampled' | 'pattern';
   diffusion: number;
+  /** Spot Healing's Type. */
+  spotType: 'contentAware' | 'createTexture' | 'proximityMatch';
   // Dodge / Burn / Sponge
   range: 'shadows' | 'midtones' | 'highlights';
   /** 0…1 */
@@ -77,6 +81,14 @@ export interface RetouchOptions {
   artStyle: 'tightShort' | 'tightMedium' | 'tightLong' | 'looseMedium' | 'looseLong' | 'dab' | 'tightCurl' | 'tightCurlLong' | 'looseCurl' | 'looseCurlLong';
   area: number;
   artTolerance: number;
+  // Patch / Content-Aware Move / Red Eye
+  patchMode: 'normal' | 'contentAware';
+  patchDirection: 'source' | 'destination';
+  moveMode: 'move' | 'extend';
+  /** 0…1 */
+  pupilSize: number;
+  /** 0…1 */
+  darken: number;
   /** Pattern Stamp / Healing's pattern source. */
   patternId?: string;
   /** The Clone Source panel's transform of the source (scale %, angle °, flips). */
@@ -89,6 +101,7 @@ export const DEFAULT_RETOUCH: RetouchOptions = {
   impressionist: false,
   healSource: 'sampled',
   diffusion: 5,
+  spotType: 'contentAware',
   range: 'midtones',
   exposure: 0.5,
   protectTones: true,
@@ -111,6 +124,11 @@ export const DEFAULT_RETOUCH: RetouchOptions = {
   artStyle: 'tightShort',
   area: 50,
   artTolerance: 0,
+  patchMode: 'normal',
+  patchDirection: 'source',
+  moveMode: 'move',
+  pupilSize: 0.5,
+  darken: 0.5,
 };
 
 export type Rgba = Float32Array;

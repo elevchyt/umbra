@@ -71,12 +71,15 @@ function Tolerance() {
   );
 }
 
+/** The retouching tools that take no brush: a click or a selection drag. */
+const NO_BRUSH = new Set(['magicEraser', 'patch', 'contentAwareMove', 'redEye']);
+
 export function RetouchToolOptions() {
   const o = () => store.retouchOptions();
   const tool = () => store.activeTool();
   return (
     <>
-      <Show when={tool() !== 'magicEraser'}>
+      <Show when={!NO_BRUSH.has(tool())}>
         <BrushPicker />
         <NumberField label="Size" value={store.brush.size} onChange={(v) => store.setBrush('size', v)} min={1} max={5000} suffix="px" width={44} />
         <Separator />
@@ -99,6 +102,35 @@ export function RetouchToolOptions() {
           </Show>
           <IconButton icon="cloneStamp" title="Clone Source panel" onClick={() => store.openPanel('cloneSource')} />
           <span class="dim options-hint">{store.doc()?.cloneSource ? '' : 'Alt-click to set the source'}</span>
+        </Match>
+        <Match when={tool() === 'spotHealing'}>
+          <Select
+            label="Type"
+            value={o().spotType}
+            width={120}
+            options={[
+              { value: 'contentAware', label: 'Content-Aware' },
+              { value: 'createTexture', label: 'Create Texture' },
+              { value: 'proximityMatch', label: 'Proximity Match' },
+            ]}
+            onChange={(v) => set({ spotType: v as RetouchOptions['spotType'] })}
+          />
+          <Checkbox checked={o().sampleAll} label="Sample All Layers" onChange={(v) => set({ sampleAll: v })} />
+        </Match>
+        <Match when={tool() === 'removeTool'}>
+          <Checkbox checked={o().sampleAll} label="Sample All Layers" onChange={(v) => set({ sampleAll: v })} />
+          <span class="dim options-hint">Paint over what to remove; it is filled on release.</span>
+        </Match>
+        <Match when={tool() === 'patch'}>
+          <Select label="Patch" value={o().patchMode} width={110} options={[{ value: 'normal', label: 'Normal' }, { value: 'contentAware', label: 'Content-Aware' }]} onChange={(v) => set({ patchMode: v as RetouchOptions['patchMode'] })} />
+          <Select label="" value={o().patchDirection} width={100} options={[{ value: 'source', label: 'Source' }, { value: 'destination', label: 'Destination' }]} onChange={(v) => set({ patchDirection: v as RetouchOptions['patchDirection'] })} />
+        </Match>
+        <Match when={tool() === 'contentAwareMove'}>
+          <Select label="Mode" value={o().moveMode} width={80} options={[{ value: 'move', label: 'Move' }, { value: 'extend', label: 'Extend' }]} onChange={(v) => set({ moveMode: v as RetouchOptions['moveMode'] })} />
+        </Match>
+        <Match when={tool() === 'redEye'}>
+          <NumberField label="Pupil Size" value={pct(o().pupilSize)} min={1} max={100} suffix="%" width={38} onChange={(v) => set({ pupilSize: v / 100 })} />
+          <NumberField label="Darken Amount" value={pct(o().darken)} min={1} max={100} suffix="%" width={38} onChange={(v) => set({ darken: v / 100 })} />
         </Match>
         <Match when={tool() === 'patternStamp'}>
           <Opacity />
