@@ -198,12 +198,12 @@ function LayersPanel() {
                     adjustment: l.kind === 'adjustment',
                     fill: l.kind === 'fill',
                     smart: l.kind === 'smart',
-                    targeted: active().includes(l.id) && (l.kind === 'pixel' || l.kind === 'smart') && store.doc()?.maskTarget !== l.id,
+                    targeted: active().includes(l.id) && (l.kind === 'pixel' || l.kind === 'smart') && store.doc()?.maskTarget !== l.id && store.doc()?.filterMaskTarget !== l.id,
                   }}
                   aria-hidden="true"
                   onClick={() => {
                     // Clicking the layer thumbnail makes the pixels the edit target again.
-                    if (l.hasMask && (l.kind === 'pixel' || l.kind === 'smart')) store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
+                    if ((l.hasMask && l.kind === 'pixel') || l.kind === 'smart') store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
                   }}
                   onDblClick={() => {
                     // Photoshop opens an adjustment layer's settings from its thumbnail, and a
@@ -1273,13 +1273,13 @@ function SmartFilterRows(props: { layerId: number; depth: number; smart: SmartSu
         <Show when={props.smart.hasFilterMask}>
           <div
             class="layer-mask-thumb"
-            classList={{ disabled: !props.smart.filterMaskEnabled }}
-            title={props.smart.filterMaskEnabled ? 'Filter mask — Shift-click to disable' : 'Filter mask — disabled (Shift-click to enable)'}
+            classList={{ disabled: !props.smart.filterMaskEnabled, targeted: store.doc()?.filterMaskTarget === props.layerId }}
+            title={props.smart.filterMaskEnabled ? 'Filter mask — click to paint into it, Shift-click to disable' : 'Filter mask — disabled (Shift-click to enable)'}
             onClick={(e) => {
-              if (!e.shiftKey) return;
               e.stopPropagation();
               select();
-              send({ t: 'smartCommand', cmd: 'toggleFilterMask' });
+              if (e.shiftKey) send({ t: 'smartCommand', cmd: 'toggleFilterMask' });
+              else send({ t: 'setMaskTarget', id: props.layerId, mask: true, filter: true });
             }}
           />
         </Show>

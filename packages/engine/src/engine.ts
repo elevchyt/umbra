@@ -29,6 +29,7 @@ import {
   makePixelLayer,
   makeAdjustmentLayer,
   insertLayer,
+  replaceLayer,
   panelRows,
   totalTiles,
   updateLayer,
@@ -1055,7 +1056,7 @@ export class Engine {
     if (this.activeSmart()) return this.smartFilterDoc(run, smartIndex);
     const target = this.paintTarget();
     if (!target) return null;
-    const next = FilterCmd.applyFilter(this.doc, target.id, target.mask, run, this.filterMap(run));
+    const next = this.onTarget(target, (d) => FilterCmd.applyFilter(d, target.id, target.mask, run, this.filterMap(run)));
     return next === this.doc ? null : next;
   }
 
@@ -1063,7 +1064,7 @@ export class Engine {
   private activeSmart(): SmartObjectLayer | null {
     const id = this.doc.activeLayerIds[0];
     const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
-    return layer && layer.kind === 'smart' && this.maskTarget !== layer.id ? layer : null;
+    return layer && layer.kind === 'smart' && this.maskTarget !== layer.id && this.filterMaskTarget !== layer.id ? layer : null;
   }
 
   /** A smart filter's 'layer' parameter, resolved in this document. */
@@ -1114,7 +1115,8 @@ export class Engine {
     const target = this.paintTarget()!;
     this.commit(next, run.def.label);
     this.lastFilterRun = { id, params };
-    this.fadeState = { before, after: next, name: run.def.label, layerId: target.id, mask: target.mask };
+    // Fade reads the layer mask; a filter mask's step is not offered.
+    this.fadeState = target.filter ? null : { before, after: next, name: run.def.label, layerId: target.id, mask: target.mask };
     return true;
   }
 
@@ -1159,7 +1161,8 @@ export class Engine {
     };
     if (r.x1 <= r.x0 || r.y1 <= r.y0) return null;
     const canvasRect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
-    const plane = smart ? this.smartBase(smart, smartIndex) : target.mask ? layer.mask?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
+    const maskOf = target.mask && 'filter' in target && target.filter && layer.kind === 'smart' ? layer.filterMask : layer.mask;
+    const plane = smart ? this.smartBase(smart, smartIndex) : target.mask ? maskOf?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
     if (!plane) return null;
     const canvas = bitmapFromPlane(plane, canvasRect).data;
     // A smart filter sees no selection (it becomes the filter mask) and centres on the object.
@@ -1484,12 +1487,15 @@ export class Engine {
     const coverage = this.doc.selection?.mask;
     const rect = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
     if (target.mask) {
-      if (!layer.mask) return null;
-      const raster = bitmapFromPlane(layer.mask.plane.base, rect).data;
-      applyImage(raster, src, o, coverage);
-      const grey = new Uint8Array(raster.length / 4);
-      for (let i = 0; i < grey.length; i++) grey[i] = Math.round(0.3 * raster[i * 4]! + 0.59 * raster[i * 4 + 1]! + 0.11 * raster[i * 4 + 2]!);
-      return MaskPaint.setMaskFromGrey(this.doc, target.id, grey);
+      return this.onTarget(target, (d) => {
+        const l = findLayer(d.layers, target.id);
+        if (!l?.mask) return d;
+        const raster = bitmapFromPlane(l.mask.plane.base, rect).data;
+        applyImage(raster, src, o, coverage);
+        const grey = new Uint8Array(raster.length / 4);
+        for (let i = 0; i < grey.length; i++) grey[i] = Math.round(0.3 * raster[i * 4]! + 0.59 * raster[i * 4 + 1]! + 0.11 * raster[i * 4 + 2]!);
+        return MaskPaint.setMaskFromGrey(d, target.id, grey);
+      });
     }
     if (layer.kind !== 'pixel' || layer.locks.pixels || layer.locks.all) return null;
     const raster = SpatialCmd.layerRaster(this.doc, layer);
@@ -2036,7 +2042,7 @@ export class Engine {
     const b = docPointAtScreen(this.view, opts.to.x, opts.to.y);
     const target = this.paintTarget();
     if (target?.mask) {
-      const next = MaskPaint.gradientMask(this.doc, target.id, {
+      const next = this.onTarget(target, (d) => MaskPaint.gradientMask(d, target.id, {
         gradient: opts.gradient,
         style: opts.style,
         x0: a.x,
@@ -2048,7 +2054,7 @@ export class Engine {
         mode: 'normal',
         opacity: opts.opacity,
         preserveTransparency: false,
-      });
+      }));
       if (next !== this.doc) this.commit(next, 'Gradient');
       return;
     }
@@ -2307,7 +2313,7 @@ export class Engine {
     const target = this.paintTarget();
     if (target?.mask) {
       // Fill with Transparent (and Delete) on a mask reveals, as the background colour would.
-      const next = MaskPaint.fillMask(this.doc, target.id, opts.clear ? [1, 1, 1] : opts.color, opts.opacity);
+      const next = this.onTarget(target, (d) => MaskPaint.fillMask(d, target.id, opts.clear ? [1, 1, 1] : opts.color, opts.opacity));
       if (next !== this.doc) this.commit(next, opts.clear ? 'Clear' : 'Fill');
       return;
     }
@@ -2356,6 +2362,7 @@ export class Engine {
       const g = mode === 'clear' ? 1 : MaskPaint.lumOf(color);
       this.strokeParams = { size: params.size, hardness: params.hardness, color: [g, g, g, 1] };
       this.strokeIntoMask = true;
+      this.strokeIntoFilterMask = !!paint.filter;
       this.strokeLayerId = paint.id;
       this.strokeWriter = Plane.empty(RGBA8).writer();
       this.painting = true;
@@ -2384,20 +2391,45 @@ export class Engine {
    */
   private maskTarget: number | null = null;
   private strokeIntoMask = false;
+  /** The mask stroke goes into a smart object's filter mask: no live overlay, the result lands at the end. */
+  private strokeIntoFilterMask = false;
 
-  setMaskTarget(id: number, mask: boolean): boolean {
+  /** The smart object whose filter mask is the target (clicked in the Smart Filters row). */
+  private filterMaskTarget: number | null = null;
+
+  setMaskTarget(id: number, mask: boolean, filter = false): boolean {
     const layer = findLayer(this.doc.layers, id);
-    const next = mask && layer?.mask ? id : null;
-    if (next === this.maskTarget) return false;
+    const nextFilter = mask && filter && layer?.kind === 'smart' && layer.filterMask ? id : null;
+    const next = mask && !filter && layer?.mask ? id : null;
+    if (next === this.maskTarget && nextFilter === this.filterMaskTarget) return false;
     this.maskTarget = next;
+    this.filterMaskTarget = nextFilter;
     return true;
   }
 
+  /**
+   * Run a mask edit on a smart object's filter mask: the mask is lent to the layer's `mask`
+   * slot, so every mask operation (brush, fill, gradient, filters, Apply Image) works on it
+   * unchanged, then handed back and the object re-rendered. Any other target runs as is.
+   */
+  private onTarget(target: { id: number; filter?: boolean }, op: (doc: Doc) => Doc): Doc {
+    if (!target.filter) return op(this.doc);
+    const layer = findLayer(this.doc.layers, target.id);
+    if (!layer || layer.kind !== 'smart' || !layer.filterMask) return this.doc;
+    const lent: Doc = { ...this.doc, layers: updateLayer(this.doc.layers, target.id, (l) => ({ ...l, mask: layer.filterMask })) };
+    const out = op(lent);
+    if (out === lent) return this.doc;
+    const after = findLayer(out.layers, target.id) as SmartObjectLayer;
+    const back = Smart.rendered({ ...after, mask: layer.mask, filterMask: after.mask }, out, this.smartMap);
+    return { ...out, layers: replaceLayer(out.layers, target.id, back) };
+  }
+
   /** What painting acts on: the active layer's pixels or its mask; null when neither. */
-  private paintTarget(): { id: number; mask: boolean } | null {
+  private paintTarget(): { id: number; mask: boolean; filter?: boolean } | null {
     const id = this.doc.activeLayerIds[0];
     const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
     if (!layer) return null;
+    if (layer.kind === 'smart' && this.filterMaskTarget === layer.id && layer.filterMask) return { id: layer.id, mask: true, filter: true };
     if (layer.kind === 'adjustment' || layer.kind === 'fill') return layer.mask ? { id: layer.id, mask: true } : null;
     if (this.maskTarget === layer.id && layer.mask) return { id: layer.id, mask: true };
     return layer.kind === 'pixel' ? { id: layer.id, mask: false } : null;
@@ -2450,14 +2482,16 @@ export class Engine {
     const id = this.strokeLayerId;
     const before = this.doc;
     const intoMask = this.strokeIntoMask;
+    const intoFilterMask = this.strokeIntoFilterMask;
     this.commit(
       this.strokeIntoMask
-        ? MaskPaint.compositeStrokeIntoMask(this.doc, id, strokePlane, this.brush.opacity)
+        ? this.onTarget({ id, filter: intoFilterMask }, (d) => MaskPaint.compositeStrokeIntoMask(d, id, strokePlane, this.brush.opacity))
         : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode),
       this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
-    this.fadeState = { before, after: this.doc, name: this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
+    this.fadeState = intoFilterMask ? null : { before, after: this.doc, name: this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
     this.strokeIntoMask = false;
+    this.strokeIntoFilterMask = false;
     this.strokeWriter = null;
     this.strokeState = null;
     this.strokeLayerId = null;
@@ -2617,7 +2651,7 @@ export class Engine {
     // stroke buffer would be a frame behind the dabs the GPU is still laying down.
     const live = this.strokeWriter && this.strokeLayerId !== null;
     this.renderer.setMaskStrokeOverlay(
-      live && this.strokeIntoMask
+      live && this.strokeIntoMask && !this.strokeIntoFilterMask
         ? { plane: new MipPlane(this.strokeWriter!.preview(), 0), layerId: this.strokeLayerId!, opacity: this.brush.opacity }
         : null,
     );
@@ -2717,8 +2751,9 @@ export class Engine {
       width: this.doc.width,
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
-      maskTarget: this.paintTarget()?.mask ? this.doc.activeLayerIds[0] ?? null : null,
+      maskTarget: this.paintTarget()?.mask && !this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       editingContents: this.editingContents,
+      filterMaskTarget: this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
       fadeName: this.fadeName,
       hasSelection: !!this.doc.selection,

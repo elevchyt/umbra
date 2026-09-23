@@ -198,14 +198,15 @@ implementation.
       Transform afterwards as Photoshop does.
 - [x] **Smart objects in PSD**: they open and save as smart objects (placed layer + embedded
       contents, PSB or the original PNG/JPEG), instances share contents, they nest, and the
-      crash journal keeps them. 53 filters map to Photoshop's smart-filter descriptors both
+      crash journal keeps them. 50 filters map to Photoshop's smart-filter descriptors both
       ways; a filter Photoshop lacks (the Filter Gallery stack, Lens Blur, Oil Paint…) is left
       out of the file, and one Umbra lacks is reported on open — the stored pixels show it
       either way until the object is edited.
 - [ ] **Smart-filter masks are not read from or written to PSD**, and perspective or warped
       placements keep only their affine part; opening says so.
-- [ ] **Painting on a smart filter's mask is not built.** The mask renders, disables and
-      deletes, and comes from the selection, but brushes do not target it yet.
+- [x] **The smart-filter mask is paintable**: click its thumbnail in the Smart Filters row,
+      then brush, fill, gradient, filter or Apply Image into it. Unlike a layer mask a stroke
+      shows when it ends, not while it is drawn (the object re-renders on the CPU).
 - [ ] **Smart objects render on the CPU**: each edit re-renders the object (≈2 s for a
       canvas-sized object with a Gaussian Blur on a 2400×1600 document). Fine for editing,
       too slow to drag a smart filter's slider with live canvas preview on a big document —

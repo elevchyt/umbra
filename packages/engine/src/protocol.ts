@@ -98,6 +98,8 @@ export interface DocSummary {
   activeLayerIds: number[];
   /** The active layer when its MASK is the edit target (always so for adjustment/fill layers). */
   maskTarget: number | null;
+  /** The smart object whose FILTER mask is the edit target. */
+  filterMaskTarget: number | null;
   /** Set while a smart object's contents are open: the documents above them, and whether they changed since saved. */
   editingContents: { path: string[]; dirty: boolean } | null;
   /** Filter ▸ Last Filter's filter, once one has been applied. */
@@ -197,7 +199,8 @@ export type ToEngine =
   | { t: 'setCentre'; x: number; y: number }
   | { t: 'setLayerLocks'; id: number; locks: Partial<{ transparency: boolean; pixels: boolean; position: boolean; all: boolean }> }
   | { t: 'maskCommand'; command: string; id?: number }
-  | { t: 'setMaskTarget'; id: number; mask: boolean }
+  /** `filter`: the smart object's filter mask rather than its layer mask. */
+  | { t: 'setMaskTarget'; id: number; mask: boolean; filter?: boolean }
   | { t: 'previewAdjustment'; adjustment: Adjustment | null }
   | { t: 'applyAdjustment'; adjustment: Adjustment }
   | { t: 'autoAdjust'; mode: 'tone' | 'contrast' | 'color' | 'equalize' }

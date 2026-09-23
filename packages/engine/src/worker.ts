@@ -365,7 +365,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         break;
       }
       case 'setMaskTarget':
-        if (engine?.setMaskTarget(msg.id, msg.mask)) post({ t: 'doc', doc: engine.summary() });
+        if (engine?.setMaskTarget(msg.id, msg.mask, msg.filter)) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'maskCommand':
         if (engine?.maskCommand(msg.command, msg.id)) post({ t: 'doc', doc: engine.summary() });
