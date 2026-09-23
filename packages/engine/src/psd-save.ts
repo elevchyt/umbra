@@ -32,6 +32,7 @@ import { toPsdAdjustment, toPsdFill } from './psd-adjust.js';
 import { walkLayers } from './document.js';
 import type { FillContent, PatternDef } from '@umbra/kernels/fill';
 import { liveToPsd, strokeToPsd, vectorMaskToPsd } from './psd-vector.js';
+import { typeToPsd } from './psd-type.js';
 
 /** Our mode ids → the names ag-psd writes. */
 const TO_PSD_MODE: Record<string, string> = Object.fromEntries(
@@ -225,6 +226,10 @@ function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
     common.vectorMask = vectorMaskToPsd({ path: layer.path, enabled: true }) as AgLayer['vectorMask'];
     const origination = liveToPsd(layer.live);
     if (origination) common.vectorOrigination = origination as AgLayer['vectorOrigination'];
+  }
+
+  if (layer.kind === 'type') {
+    common.text = typeToPsd(layer, (layer.psdExtra as { text?: unknown } | undefined)?.text) as unknown as AgLayer['text'];
   }
 
   if (layer.kind === 'smart') {

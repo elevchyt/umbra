@@ -290,7 +290,9 @@ export type DialogId =
   | 'fade'
   | 'calculations'
   | 'definePattern'
-  | 'defineShape';
+  | 'defineShape'
+  | 'warpText'
+  | 'resolveFonts';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {

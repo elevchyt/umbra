@@ -13,6 +13,8 @@ import { mergeDown } from './commands/layers.js';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import { makePixelLayer } from './document.js';
+import { savePsd } from './psd-save.js';
+import { openPsd } from './psd-open.js';
 
 beforeAll(async () => {
   const hb = await loadHarfBuzz();
@@ -74,5 +76,36 @@ describe('type layers', () => {
   it('names from the first line', () => {
     expect(typeLayerName('  Hello world\nmore')).toBe('Hello world');
     expect(typeLayerName('')).toBe('Layer');
+  });
+
+  it('round-trips through a PSD: text, runs, paragraphs, box, transform', () => {
+    const bold = { ...DEFAULT_CHAR, size: 30, fauxBold: true, tracking: 50, color: [0, 0.5, 1] as [number, number, number], font: 'NotoSans-Bold', fontStyle: 'Bold' };
+    const t: TextSpec = {
+      kind: 'paragraph',
+      orientation: 'horizontal',
+      box: { width: 150, height: 80 },
+      runs: [
+        { text: 'Big ', style: bold },
+        { text: 'small\nnext\u2028line', style: { ...DEFAULT_CHAR, size: 12, underline: true, kerning: -20, allCaps: true } },
+      ],
+      paragraphs: [{ ...DEFAULT_PARA, align: 'center', spaceAfter: 6 }, { ...DEFAULT_PARA, align: 'justifyAll', indentLeft: 4 }],
+      warp: { style: 'flag', bend: 40, hDistort: -20, vDistort: 5, orientation: 'vertical' },
+    };
+    const l = makeTypeLayer('Text', t, rotate(0.1), 'crisp', { width: W, height: H });
+    const back = openPsd(savePsd(docOf([l])));
+    const r = back.doc.layers[0] as TypeLayer;
+    expect(r.kind).toBe('type');
+    expect(back.warnings).toEqual([]);
+    expect(r.antiAlias).toBe('crisp');
+    expect(r.text.kind).toBe('paragraph');
+    expect(r.text.box).toEqual({ width: 150, height: 80 });
+    expect(r.text.runs.map((x) => x.text)).toEqual(['Big ', 'small\nnext\u2028line']);
+    expect(r.text.runs[0]!.style).toMatchObject({ font: 'NotoSans-Bold', family: 'Noto Sans', fontStyle: 'Bold', size: 30, fauxBold: true, tracking: 50 });
+    expect(r.text.runs[0]!.style.color.map((v) => Math.round(v * 255))).toEqual([0, 128, 255]);
+    expect(r.text.runs[1]!.style).toMatchObject({ size: 12, underline: true, kerning: -20, allCaps: true });
+    expect(r.text.paragraphs.map((p) => p.align)).toEqual(['center', 'justifyAll']);
+    expect(r.text.paragraphs[1]!.indentLeft).toBe(4);
+    expect(r.transform.b).toBeCloseTo(Math.sin(0.1), 5);
+    expect(r.text.warp).toEqual({ style: 'flag', bend: 40, hDistort: -20, vDistort: 5, orientation: 'vertical' });
   });
 });

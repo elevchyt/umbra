@@ -7,3 +7,4 @@ export * from './outline.js';
 export * from './caret.js';
 export * from './bundled.js';
 export * from './edit.js';
+export * from './warp.js';

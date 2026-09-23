@@ -4,14 +4,14 @@
  */
 import { VectorTool, arrangeSubpaths, mergeComponents, overlayOutline, type PathArrange, type VectorOptions, type VectorToolId } from './vector-tool.js';
 import type { PathOverlay } from './render/path-overlay.js';
-import { flattenSubpath, type Path } from '@umbra/kernels/vector/path';
+import { flattenSubpath, transformPath, type Path } from '@umbra/kernels/vector/path';
 import { rasterizePath } from '@umbra/kernels/vector/raster';
 import { coverageToPath } from '@umbra/kernels/vector/trace';
 import { BUILTIN_SHAPES, readCsh, type CustomShape } from '@umbra/kernels/vector/custom';
 import { DEFAULT_SHAPE_OPTIONS, SHAPE_NAMES, SHAPE_TOOLS, shapeFromDrag, type ShapeOptions, type ShapeToolId } from './shape-tool.js';
 import { liveAfterEdit, makeShapeLayer, reshaped, VectorMaskCache, withLive } from './shape-layers.js';
 import { ensureText, fontRegistry, layoutOf, makeTypeLayer, retyped, textReady, typeBounds, typeLayerName, typePath } from './type-layers.js';
-import { caretAt, hitTest, lineRangeAt, paragraphAt, replaceText, restyleAll, restyleParagraphs, restyleRange, selectionRects, stepCaret, styleAt, textOf, wordAt, type AntiAlias, type CharStyle, type ParaStyle, type TextSpec } from '@umbra/text';
+import { alongInverse, alongPoint, trackOf, caretAt, hitTest, lineRangeAt, paragraphAt, replaceText, restyleAll, restyleParagraphs, restyleRange, selectionRects, stepCaret, styleAt, textOf, wordAt, type AntiAlias, type CharStyle, type ParaStyle, type TextSpec, type WarpSpec } from '@umbra/text';
 import type { LiveShape } from '@umbra/kernels/vector/shapes';
 import { layerPathName } from './shape-tool.js';
 import { combine as combineMask, createMask } from '@umbra/kernels/selection';
@@ -904,7 +904,7 @@ export class Engine {
     const drawn = this.dragShape();
     const extra = drawn ? overlayOutline(drawn.path) : [];
     const type = this.typeOverlay();
-    if (type) return { outlines: extra, anchors: [], handles: [], rubber: null, marquee: type.marquee ?? null, trail: null, ...type };
+    if (type) return { anchors: [], handles: [], rubber: null, trail: null, ...type, outlines: [...extra, ...(type.outlines ?? [])], marquee: type.marquee ?? null };
     if (!p) return trail || drawn ? { outlines: extra, anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
     const tools = this.vectorToolActive;
     const selected = new Set(this.vector.selected.map((r) => `${r.s}:${r.k}`));
@@ -1199,7 +1199,16 @@ export class Engine {
   /** The layer-space point of a document point, for the edited layer. */
   private toLayout(l: TypeLayer, p: { x: number; y: number }): { x: number; y: number } {
     const inv = invertMat(l.transform);
-    return inv ? applyMat(inv, p) : p;
+    const q = inv ? applyMat(inv, p) : p;
+    // Type on a path: back from the page to the position along the line.
+    const track = layoutOf(l.text)?.path;
+    return track ? alongInverse(track, q) : q;
+  }
+
+  /** The page point of a point on a type layer's line (through its path, then its transform). */
+  private fromLayout(l: TypeLayer, x: number, y: number): { x: number; y: number } {
+    const track = layoutOf(l.text)?.path;
+    return applyMat(l.transform, track ? alongPoint(track, x, y) : { x, y });
   }
 
   /** The topmost visible type layer under a document point. */
@@ -1239,14 +1248,28 @@ export class Engine {
     const l = this.typeLayer();
     const layout = l && layoutOf(l.text);
     if (!e || !l || !layout) return null;
-    const m = l.transform;
-    const T = (x: number, y: number) => applyMat(m, { x, y });
+    const T = (x: number, y: number) => this.fromLayout(l, x, y);
     const c = caretAt(layout, e.caret);
     const caret: [{ x: number; y: number }, { x: number; y: number }] = layout.vertical ? [T(c.from, c.at), T(c.to, c.at)] : [T(c.at, c.from), T(c.at, c.to)];
-    const highlight = e.caret === e.anchor ? [] : selectionRects(layout, e.caret, e.anchor).map((r) => [T(r.x0, r.y0), T(r.x1, r.y0), T(r.x1, r.y1), T(r.x0, r.y1)]);
     const bx = l.text.kind === 'paragraph' ? l.text.box : undefined;
     const box = bx ? [T(0, 0), T(bx.width, 0), T(bx.width, bx.height), T(0, bx.height)] : null;
-    return { caret: e.caret === e.anchor ? caret : null, highlight, box };
+    // Path and area type show the path they follow.
+    const guide = l.text.kind === 'onPath' ? l.text.path : l.text.kind === 'inShape' ? l.text.shape : undefined;
+    const outlines = guide ? overlayOutline(transformPath(guide, l.transform)) : [];
+    // A selection on a path is drawn as a band along it: sample each rectangle's long edges.
+    const along = (r: { x0: number; y0: number; x1: number; y1: number }) => {
+      if (!layout.path) return [[T(r.x0, r.y0), T(r.x1, r.y0), T(r.x1, r.y1), T(r.x0, r.y1)]];
+      const n = Math.max(1, Math.ceil((r.x1 - r.x0) / 4));
+      const quads: { x: number; y: number }[][] = [];
+      for (let i = 0; i < n; i++) {
+        const a = r.x0 + ((r.x1 - r.x0) * i) / n;
+        const b = r.x0 + ((r.x1 - r.x0) * (i + 1)) / n;
+        quads.push([T(a, r.y0), T(b, r.y0), T(b, r.y1), T(a, r.y1)]);
+      }
+      return quads;
+    };
+    const bands = e.caret === e.anchor ? [] : selectionRects(layout, e.caret, e.anchor).flatMap(along);
+    return { caret: e.caret === e.anchor ? caret : null, highlight: bands, box, outlines };
   }
 
   /** Type tool pointer events, in screen coordinates. */
@@ -1315,6 +1338,23 @@ export class Engine {
         paragraphs: [t.para],
       };
       const origin = box ? { x: Math.min(drag.start.x, drag.now.x), y: Math.min(drag.start.y, drag.now.y) } : drag.start;
+      // A click on a path puts type on it; a click inside a closed path fills it with type.
+      const guide = !box && !t.vertical ? this.editPath() : null;
+      if (guide) {
+        const track = trackOf(guide, 0);
+        const on = alongInverse(track, drag.start);
+        const near = Math.abs(on.y) * this.view.zoom < 6;
+        const inside = !near && guide.subpaths.some((sp) => sp.closed) && rasterizePath(guide, { x0: Math.floor(drag.start.x), y0: Math.floor(drag.start.y), x1: Math.floor(drag.start.x) + 1, y1: Math.floor(drag.start.y) + 1 })[0]! > 0.5;
+        if (near || inside) {
+          const guided: TextSpec = near ? { ...spec, kind: 'onPath', path: guide, pathStart: on.x } : { ...spec, kind: 'inShape', shape: guide };
+          const layer = makeTypeLayer(t.mask ? 'Type Mask' : 'Layer', guided, IDENTITY, t.antiAlias, this.doc);
+          const before = this.doc;
+          this.doc = { ...this.doc, layers: insertLayer(this.doc.layers, layer, this.doc.activeLayerIds[0]), activeLayerIds: [layer.id] };
+          this.activePathId = null;
+          this.beginTypeEdit(layer, 0, true, before);
+          return true;
+        }
+      }
       const layer = makeTypeLayer(t.mask ? 'Type Mask' : 'Layer', spec, translateMat(origin.x, origin.y), t.antiAlias, this.doc);
       const before = this.doc;
       const above = this.doc.activeLayerIds[0];
@@ -1665,6 +1705,62 @@ export class Engine {
         return put(retyped({ ...l, antiAlias: aa }, this.doc), 'Anti Alias');
       }
     }
+  }
+
+  /** Type ▸ Warp Text: previews while the dialog is open (not final), one step on OK. */
+  setTypeWarp(warp: WarpSpec | null, final: boolean): boolean {
+    if (!textReady()) return false;
+    this.typeCommit();
+    const id = this.doc.activeLayerIds[0];
+    const l = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (l?.kind !== 'type') return false;
+    const { warp: _w, ...rest } = l.text;
+    const text: TextSpec = warp ? { ...rest, warp } : rest;
+    const doc = { ...this.doc, layers: replaceLayer(this.doc.layers, l.id, retyped({ ...l, text }, this.doc)) };
+    if (final) this.commit(doc, 'Warp Text');
+    else {
+      this.doc = doc;
+      this.compositeCache = null;
+    }
+    return true;
+  }
+
+  /**
+   * The Glyphs panel: the characters a face maps, with each glyph's outline as SVG path data
+   * in font units (y up), a page at a time.
+   */
+  glyphPage(font: string, from: number, count: number): { upem: number; total: number; glyphs: { cp: number; d: string; adv: number }[] } | null {
+    const reg = fontRegistry();
+    const face = reg?.byPostscript(font) ?? reg?.fallbacks[0];
+    if (!face) return null;
+    const cps = [...face.hb.face.collectUnicodes()].filter((cp) => cp > 0x20 && !(cp >= 0x7f && cp < 0xa0)).sort((a, b) => a - b);
+    const glyphs = cps.slice(from, from + count).map((cp) => {
+      const gid = face.hb.nominalGlyph(cp) ?? 0;
+      return { cp, d: face.hb.glyphToPath(gid), adv: face.hb.glyphHAdvance(gid) };
+    });
+    return { upem: face.metrics.upem, total: cps.length, glyphs };
+  }
+
+  /** Type ▸ Resolve Missing Fonts: each missing font replaced by an installed one, everywhere. */
+  replaceFonts(map: Record<string, string>): boolean {
+    const reg = fontRegistry();
+    if (!reg) return false;
+    this.typeCommit();
+    let layers = this.doc.layers;
+    let changed = false;
+    for (const { layer } of walkLayers(this.doc.layers)) {
+      if (layer.kind !== 'type') continue;
+      const uses = layer.text.runs.some((r) => map[r.style.font]);
+      if (!uses && !layer.missingFonts?.some((f) => map[f])) continue;
+      const runs = layer.text.runs.map((r) => {
+        const to = map[r.style.font] ? reg.byPostscript(map[r.style.font]!) : undefined;
+        return to ? { ...r, style: { ...r.style, font: to.postscriptName, family: to.family, fontStyle: to.style } } : r;
+      });
+      layers = replaceLayer(layers, layer.id, retyped({ ...layer, text: { ...layer.text, runs } }, this.doc));
+      changed = true;
+    }
+    if (changed) this.commit({ ...this.doc, layers }, 'Replace Fonts');
+    return changed;
   }
 
   /** Fonts for the menus: families with their styles and PostScript names. */

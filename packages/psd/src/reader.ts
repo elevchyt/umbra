@@ -59,6 +59,8 @@ export interface PsdLayerInfo {
   adjustment?: unknown;
   /** Fill and shape layers: ag-psd's decoded `vectorFill`. */
   vectorFill?: unknown;
+  /** Type layers: ag-psd's decoded `text` (TySh). */
+  text?: unknown;
   /** Shape layers and vector masks: ag-psd's `vectorMask`, `vectorStroke` and `vectorOrigination`. */
   vectorMask?: unknown;
   vectorStroke?: unknown;
@@ -98,7 +100,6 @@ export interface PsdReadCallbacks {
 /** Features ag-psd surfaces that we do not model yet; recorded so the UI can warn honestly. */
 function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   const out: string[] = [];
-  if (layer.text) out.push('type layer');
   // Smart objects are modelled; only what they cannot carry is reported, by the engine.
   return out.length ? out : undefined;
 }
@@ -162,6 +163,7 @@ export function readPsdDocument(
         unsupported: unsupportedFeatures(layer),
       };
       if (layer.adjustment) info.adjustment = layer.adjustment;
+      if (layer.text) info.text = layer.text;
       if (layer.vectorFill) info.vectorFill = layer.vectorFill;
       if (layer.vectorMask) info.vectorMask = layer.vectorMask;
       if (layer.vectorStroke) info.vectorStroke = layer.vectorStroke;

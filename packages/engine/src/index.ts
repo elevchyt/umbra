@@ -80,3 +80,4 @@ export type { Path } from '@umbra/kernels/vector/path';
 export { transformPath, pathBounds } from '@umbra/kernels/vector/path';
 export type { TypeCommand } from './engine.js';
 export { DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type CharStyle, type ParaStyle, type TextSpec } from '@umbra/text/style';
+export { WARP_STYLES, type WarpSpec, type WarpStyle } from '@umbra/text/warp';

@@ -26,6 +26,8 @@ import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from 
 import { OptionsBar } from './OptionsBar';
 import { TypeInput } from './TypeInput';
 import { applyChar, currentChar } from '../type/TypePanels';
+import { WarpDialog } from '../type/WarpDialog';
+import { ResolveFontsDialog } from '../type/GlyphsPanel';
 import { Button } from '@umbra/ui/widgets/controls';
 import { DocumentTabs, StatusBar } from './Chrome';
 import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, NameDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
@@ -964,6 +966,18 @@ export function Workspace() {
         applyChar({ features: { ...f, [tag]: !f[tag] } });
         break;
       }
+      case 'type.warp': {
+        const d = store.doc();
+        const l = d?.layers.find((x) => x.id === d.activeLayerIds[0]);
+        if (l?.kind === 'type') {
+          send({ t: 'typeCommit' });
+          store.openDialog('warpText');
+        } else store.setStatusMessage('Warp Text needs a type layer.');
+        break;
+      }
+      case 'type.resolveMissing':
+        store.openDialog('resolveFonts');
+        break;
       case 'type.createWorkPath':
         send({ t: 'typeCommand', cmd: 'workPath' });
         break;
@@ -1753,6 +1767,12 @@ export function Workspace() {
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
         />
+      </Show>
+      <Show when={store.dialog()?.id === 'resolveFonts'}>
+        <ResolveFontsDialog onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'warpText'}>
+        <WarpDialog onClose={store.closeDialog} />
       </Show>
       <Show when={store.dialog()?.id === 'defineShape'}>
         <NameDialog

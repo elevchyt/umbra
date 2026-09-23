@@ -11,6 +11,8 @@ import { rasterizeShapes, type Shape } from '@umbra/kernels/vector/raster';
 import { DEFAULT_STROKE, strokeShapes } from '@umbra/kernels/vector/stroke';
 import type { AntiAlias, Rgb } from './style.js';
 import type { PlacedGlyph, TextLayout } from './layout.js';
+import { splitCubic } from '@umbra/kernels/vector/path';
+import { warpMap, type WarpSpec } from './warp.js';
 
 /** An affine map (x' = a·x + c·y + e, y' = b·x + d·y + f) from layout space to the page. */
 export interface Affine {
@@ -26,13 +28,31 @@ const apply = (m: Affine | undefined, p: Pt): Pt => (m ? { x: m.a * p.x + m.c * 
 
 /** A glyph's contours as sub-paths in document px (through `m` when given). */
 export function glyphSubpaths(g: PlacedGlyph, m?: Affine): Subpath[] {
+  return glyphSubpathsIn(g, (p) => apply(m, p));
+}
+
+/** The point map a layout draws through: its warp (if any), then `m`. */
+function pointMap(layout: TextLayout, m?: Affine): ((p: Pt) => Pt) | null {
+  const w = layout.warp;
+  if (!w) return m ? (p) => apply(m, p) : null;
+  const f = warpMap(w, layout.bounds);
+  return (p) => apply(m, f(p));
+}
+
+function glyphSubpathsIn(g: PlacedGlyph, post: (p: Pt) => Pt): Subpath[] {
   const o = g.face.outline(g.gid);
   const k = g.scale;
   const map = (fx: number, fy: number): Pt => {
     // Font units (y up) → local px (y down), scaled, slanted.
     const lx = fx * k * g.sx + g.skew * fy * k * g.sy;
     const ly = -fy * k * g.sy;
-    return apply(m, g.rotate ? { x: g.x - ly, y: g.y + lx } : { x: g.x + lx, y: g.y + ly });
+    const X = g.rotate ? g.x - ly : g.x + lx;
+    const Y = g.rotate ? g.y + lx : g.y + ly;
+    const a = g.along;
+    if (!a) return post({ x: X, y: Y });
+    // Type on a path: the glyph turns with the path about its centre on the baseline.
+    const d = X - a.c;
+    return post({ x: a.x + d * a.cos - Y * a.sin, y: a.y + d * a.sin + Y * a.cos });
   };
   return o.contours.map((c) => {
     const knots: Knot[] = [];
@@ -61,13 +81,20 @@ export function glyphSubpaths(g: PlacedGlyph, m?: Affine): Subpath[] {
  * contours real glyphs have — and each glyph adds to what came before.
  */
 export function layoutToPath(layout: TextLayout, m?: Affine): Path {
+  const map = pointMap(layout, m) ?? ((p: Pt) => p);
+  const warped = !!layout.warp;
   const subpaths: Subpath[] = [];
   for (const g of layout.glyphs) {
-    glyphSubpaths(g, m).forEach((sp, i) => subpaths.push(i === 0 ? sp : { ...sp, op: 'exclude' }));
+    // A warp bends each segment, so segments are split first to follow it closely.
+    const sps = glyphSubpathsIn(g, (p) => p).map((sp) => (warped ? subdivide(sp, 4) : sp));
+    sps.forEach((sp, i) => {
+      const mapped: Subpath = { ...sp, knots: sp.knots.map((k) => ({ ...k, anchor: map(k.anchor), in: map(k.in), out: map(k.out) })) };
+      subpaths.push(i === 0 ? mapped : { ...mapped, op: 'exclude' });
+    });
   }
   for (const d of layout.decorations) {
     const c = (x: number, y: number): Knot => {
-      const p = apply(m, { x, y });
+      const p = map({ x, y });
       return { anchor: p, in: p, out: p, smooth: false };
     };
     subpaths.push({ closed: true, op: 'add', knots: [c(d.x0, d.y0), c(d.x1, d.y0), c(d.x1, d.y1), c(d.x0, d.y1)] });
@@ -75,14 +102,33 @@ export function layoutToPath(layout: TextLayout, m?: Affine): Path {
   return { subpaths };
 }
 
-function glyphShapes(g: PlacedGlyph, m?: Affine): Shape[] {
-  const sps = glyphSubpaths(g, m);
+/** Split every segment of a closed sub-path into `n` (de Casteljau), for warping. */
+function subdivide(sp: Subpath, n: number): Subpath {
+  const ks = sp.knots;
+  const pieces: [Pt, Pt, Pt, Pt][] = [];
+  for (let i = 0; i < ks.length; i++) {
+    const a = ks[i]!;
+    const b = ks[(i + 1) % ks.length]!;
+    let seg: [Pt, Pt, Pt, Pt] = [a.anchor, a.out, b.in, b.anchor];
+    for (let k = n; k > 1; k--) {
+      const [l, r] = splitCubic(seg, 1 / k);
+      pieces.push(l);
+      seg = r;
+    }
+    pieces.push(seg);
+  }
+  // Knot j starts piece j; its in-handle ends the piece before it (cyclically).
+  const knots: Knot[] = pieces.map((c, j) => ({ anchor: c[0], out: c[1], in: pieces[(j - 1 + pieces.length) % pieces.length]![2], smooth: false }));
+  return { ...sp, knots };
+}
+
+function glyphShapes(g: PlacedGlyph, map: ((p: Pt) => Pt) | null): Shape[] {
+  const sps = glyphSubpathsIn(g, (p) => p);
   const fill: Shape = { polys: sps.map((sp) => flattenSubpath(sp, 0.05)), op: 'add', rule: 'nonzero' };
-  if (!g.bold) return [fill];
+  const shapes: Shape[] = [fill];
   // Faux bold: the outline stroked, centred, twice the growth wide, united with the fill.
-  const k = m ? Math.sqrt(Math.abs(m.a * m.d - m.b * m.c)) : 1;
-  const stroked = strokeShapes({ subpaths: sps }, { ...DEFAULT_STROKE, width: g.bold * 2 * k, join: 'round' }).map((s) => ({ ...s, op: 'add' as const }));
-  return [fill, ...stroked];
+  if (g.bold) shapes.push(...strokeShapes({ subpaths: sps }, { ...DEFAULT_STROKE, width: g.bold * 2, join: 'round' }).map((s) => ({ ...s, op: 'add' as const })));
+  return map ? shapes.map((s) => ({ ...s, polys: s.polys.map((poly) => poly.map(map)) })) : shapes;
 }
 
 function glyphBox(shapes: Shape[]): { x0: number; y0: number; x1: number; y1: number } | null {
@@ -154,8 +200,9 @@ export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number;
       }
     }
   };
-  for (const g of layout.glyphs) paint(glyphShapes(g, m), g.color);
-  for (const d of layout.decorations) paint([{ polys: [decorationPoly(d, m)], op: 'add' }], d.color);
+  const map = pointMap(layout, m);
+  for (const g of layout.glyphs) paint(glyphShapes(g, map), g.color);
+  for (const d of layout.decorations) paint([{ polys: [decorationPoly(d, map)], op: 'add' }], d.color);
   const data = new Uint8Array(w * h * 4);
   for (let i = 0; i < w * h; i++) {
     const a = acc[i * 4 + 3]!;
@@ -168,13 +215,18 @@ export function renderLayout(layout: TextLayout, rect: { x0: number; y0: number;
   return { data, width: w, height: h, left: rect.x0, top: rect.y0 };
 }
 
-function decorationPoly(d: { x0: number; y0: number; x1: number; y1: number }, m?: Affine): Pt[] {
-  return [
-    { x: d.x0, y: d.y0 },
-    { x: d.x1, y: d.y0 },
-    { x: d.x1, y: d.y1 },
-    { x: d.x0, y: d.y1 },
-  ].map((p) => apply(m, p));
+function decorationPoly(d: { x0: number; y0: number; x1: number; y1: number }, map: ((p: Pt) => Pt) | null): Pt[] {
+  // Under a warp the bar bends too: its edges are sampled along their length.
+  const n = map ? 16 : 1;
+  const top: Pt[] = [];
+  const bottom: Pt[] = [];
+  for (let i = 0; i <= n; i++) {
+    const x = d.x0 + ((d.x1 - d.x0) * i) / n;
+    top.push({ x, y: d.y0 });
+    bottom.push({ x, y: d.y1 });
+  }
+  const poly = [...top, ...bottom.reverse()];
+  return map ? poly.map(map) : poly;
 }
 
 /** The ink bounds of a layout (glyph outlines and decorations), document px. */
@@ -184,7 +236,8 @@ export function inkBounds(layout: TextLayout, m?: Affine): { x0: number; y0: num
     if (!b) return;
     box = box ? { x0: Math.min(box.x0, b.x0), y0: Math.min(box.y0, b.y0), x1: Math.max(box.x1, b.x1), y1: Math.max(box.y1, b.y1) } : b;
   };
-  for (const g of layout.glyphs) grow(glyphBox(glyphShapes(g, m)));
-  for (const d of layout.decorations) grow(glyphBox([{ polys: [decorationPoly(d, m)], op: 'add' }]));
+  const map = pointMap(layout, m);
+  for (const g of layout.glyphs) grow(glyphBox(glyphShapes(g, map)));
+  for (const d of layout.decorations) grow(glyphBox([{ polys: [decorationPoly(d, map)], op: 'add' }]));
   return box;
 }

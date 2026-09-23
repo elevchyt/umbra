@@ -308,3 +308,90 @@ describe('outlines and pixels', () => {
     }
   });
 });
+
+describe('warp text', () => {
+  it('no bend and no distortion leaves every style unchanged', async () => {
+    const { warpMap, WARP_STYLES } = await import('./warp.js');
+    const box = { x0: 0, y0: -30, x1: 200, y1: 10 };
+    for (const { value } of WARP_STYLES) {
+      const f = warpMap({ style: value, bend: 0, hDistort: 0, vDistort: 0, orientation: 'horizontal' }, box);
+      for (const p of [{ x: 10, y: -5 }, { x: 150, y: 8 }, { x: 100, y: -10 }]) {
+        const q = f(p);
+        expect(q.x).toBeCloseTo(p.x, 6);
+        expect(q.y).toBeCloseTo(p.y, 6);
+      }
+    }
+  });
+
+  it('Arc lifts the ends below the middle; the warped path fills what is drawn', async () => {
+    const { warpMap } = await import('./warp.js');
+    const box = { x0: 0, y0: -30, x1: 200, y1: 10 };
+    const f = warpMap({ style: 'arc', bend: 50, hDistort: 0, vDistort: 0, orientation: 'horizontal' }, box);
+    const mid = f({ x: 100, y: -10 });
+    const end = f({ x: 0, y: -10 });
+    expect(mid.x).toBeCloseTo(100, 6);
+    expect(mid.y).toBeCloseTo(-10, 6);
+    expect(end.y).toBeGreaterThan(mid.y + 10);
+    const s = spec('Warped words', { size: 40 });
+    s.warp = { style: 'arc', bend: 50, hDistort: 10, vDistort: -10, orientation: 'horizontal' };
+    const l = lay(s);
+    const b = inkBounds(l)!;
+    const r = { x0: Math.floor(b.x0) - 2, y0: Math.floor(b.y0) - 2, x1: Math.ceil(b.x1) + 2, y1: Math.ceil(b.y1) + 2 };
+    let drawn = 0;
+    const bmp = renderLayout(l, r, 'smooth');
+    for (let i = 3; i < bmp.data.length; i += 4) drawn += bmp.data[i]! / 255;
+    const cov = rasterizePath(layoutToPath(l), r).reduce((a, v) => a + v, 0);
+    expect(Math.abs(drawn - cov) / drawn).toBeLessThan(0.01);
+    // The bend shows in the ink: the arc's ends reach well below the flat text's.
+    expect(b.y1 - b.y0).toBeGreaterThan((inkBounds(lay(spec('Warped words', { size: 40 })))!.y1 - inkBounds(lay(spec('Warped words', { size: 40 })))!.y0) * 1.5);
+  });
+});
+
+describe('type on a path and in a shape', () => {
+  const circle = (cx: number, cy: number, r: number) => {
+    const k = 0.5522847498 * r;
+    const K = (x: number, y: number, ix: number, iy: number, ox: number, oy: number) => ({ anchor: { x, y }, in: { x: ix, y: iy }, out: { x: ox, y: oy }, smooth: true });
+    return {
+      subpaths: [
+        {
+          closed: true,
+          op: 'add' as const,
+          knots: [K(cx, cy - r, cx - k, cy - r, cx + k, cy - r), K(cx + r, cy, cx + r, cy - k, cx + r, cy + k), K(cx, cy + r, cx + k, cy + r, cx - k, cy + r), K(cx - r, cy, cx - r, cy + k, cx - r, cy - k)],
+        },
+      ],
+    };
+  };
+
+  it('area type fits every line inside the shape', () => {
+    const text = 'Words flow inside the circle and wrap to its edge on every line until it is full of text';
+    const s = spec(text, { size: 14 }, { align: 'center' }, { kind: 'inShape', shape: circle(100, 100, 80) });
+    const l = lay(s);
+    expect(l.lines.length).toBeGreaterThan(4);
+    for (const line of l.lines) {
+      const y0 = line.baseline - line.ascent;
+      const y1 = line.baseline + line.descent;
+      for (const y of [y0, y1]) {
+        const half = Math.sqrt(Math.max(0, 80 * 80 - (y - 100) ** 2));
+        if (line.a1 > line.a0) {
+          expect(line.a0).toBeGreaterThanOrEqual(100 - half - 0.5);
+          expect(line.a1).toBeLessThanOrEqual(100 + half + 0.5);
+        }
+      }
+    }
+    // The first line starts just inside the top of the circle.
+    expect(l.lines[0]!.baseline - l.lines[0]!.ascent).toBeGreaterThanOrEqual(20);
+  });
+
+  it('type on a path follows it, turned to the tangent; what does not fit is dropped', () => {
+    const arc = { subpaths: [{ closed: false, op: 'add' as const, knots: [{ anchor: { x: 0, y: 100 }, in: { x: 0, y: 100 }, out: { x: 0, y: 45 }, smooth: false }, { anchor: { x: 100, y: 0 }, in: { x: 45, y: 0 }, out: { x: 100, y: 0 }, smooth: false }] }] };
+    const l = lay(spec('Along the curve and beyond its end', { size: 12 }, {}, { kind: 'onPath', path: arc, pathStart: 5 }));
+    expect(l.path).toBeDefined();
+    expect(l.overflow).toBe(true);
+    const g = l.glyphs;
+    // Early glyphs climb the left side (tangent pointing up), later ones run right.
+    expect(g[0]!.along!.sin).toBeLessThan(-0.5);
+    expect(g[g.length - 1]!.along!.cos).toBeGreaterThan(0.5);
+    // Every glyph centre is on the curve's quarter circle (radius ≈ 100 about (100, 100)).
+    for (const x of g) expect(Math.abs(Math.hypot(x.along!.x - 100, x.along!.y - 100) - 100)).toBeLessThan(6);
+  });
+});

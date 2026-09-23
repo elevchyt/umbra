@@ -2,6 +2,9 @@
  * The text model — spec 02 §6. Sizes are document pixels: the engine works at 72 ppi, where a
  * point is a pixel, as a new Photoshop document is.
  */
+import type { WarpSpec } from './warp.js';
+import type { Path } from '@umbra/kernels/vector/path';
+
 export type AntiAlias = 'none' | 'sharp' | 'crisp' | 'strong' | 'smooth';
 export type Rgb = [number, number, number];
 
@@ -60,12 +63,22 @@ export interface TextRun {
 }
 
 export interface TextSpec {
-  /** Point type grows from its origin; paragraph type wraps in its box. */
-  kind: 'point' | 'paragraph';
+  /**
+   * Point type grows from its origin; paragraph type wraps in its box; type on a path runs
+   * along `path`; area type wraps inside `shape` (both in the layer's own space).
+   */
+  kind: 'point' | 'paragraph' | 'onPath' | 'inShape';
   orientation: 'horizontal' | 'vertical';
   /** Paragraph type: the box's size (its origin is the layout origin). */
   box?: { width: number; height: number };
+  /** Type on a path: the path, and where along it the text starts (px). */
+  path?: Path;
+  pathStart?: number;
+  /** Area type: the shape the lines are fitted into. */
+  shape?: Path;
   runs: TextRun[];
+  /** Warp Text, applied to the outlines over the text's bounds. */
+  warp?: WarpSpec;
   /** One per paragraph (text separated by \n), in order; missing ones take the defaults. */
   paragraphs: ParaStyle[];
 }

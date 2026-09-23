@@ -1184,3 +1184,13 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .type-toggle.on { background: var(--row-selected); border-color: var(--accent); }
 .layer-type-thumb { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; background: var(--panel-sunken); color: var(--text); font: 600 15px/1 serif; }
 .layer-type-thumb.missing { color: #e8b93a; }
+.glyphs-panel { display: flex; flex-direction: column; height: 100%; }
+.glyphs-panel > .type-row { padding: 6px; }
+.glyph-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(30px, 1fr)); gap: 1px; overflow-y: auto; flex: 1; padding: 0 6px; }
+.glyph-cell { height: 32px; display: flex; align-items: center; justify-content: center; background: var(--panel-sunken); border: 1px solid transparent; color: var(--text); cursor: pointer; padding: 0; }
+.glyph-cell:hover { border-color: var(--accent); }
+.glyph-cell svg path { fill: currentColor; }
+.glyph-foot { justify-content: center; gap: 8px; }
+.styles-list-panel { display: flex; flex-direction: column; height: 100%; }
+.resolve-font-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.resolve-font-select { width: 200px; background: var(--panel-sunken); color: var(--text); border: 1px solid var(--border-dark); }

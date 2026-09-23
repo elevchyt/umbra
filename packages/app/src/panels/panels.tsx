@@ -10,6 +10,7 @@ import { StylesPanel } from '../fx/StylesPanel';
 import { PathsPanel } from '../paths/PathsPanel';
 import { pathSvg } from '../workspace/ShapeOptions';
 import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
+import { CharacterStylesPanel, GlyphsPanel, ParagraphStylesPanel } from '../type/GlyphsPanel';
 import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
@@ -54,6 +55,12 @@ export function renderPanel(id: string): JSX.Element {
       return <CharacterPanel />;
     case 'paragraph':
       return <ParagraphPanel />;
+    case 'glyphs':
+      return <GlyphsPanel />;
+    case 'characterStyles':
+      return <CharacterStylesPanel />;
+    case 'paragraphStyles':
+      return <ParagraphStylesPanel />;
     case 'adjustments':
       return <AdjustmentsPanel />;
     case 'brushSettings':

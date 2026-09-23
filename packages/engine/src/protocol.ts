@@ -15,6 +15,7 @@ import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js'
 import type { ShapeOptions, ShapeToolId } from './shape-tool.js';
 import type { Path } from '@umbra/kernels/vector/path';
 import type { AntiAlias, CharStyle, ParaStyle, TextSpec } from '@umbra/text/style';
+import type { WarpSpec } from '@umbra/text/warp';
 import type { LiveShape } from '@umbra/kernels/vector/shapes';
 import type { StrokeStyle } from '@umbra/kernels/vector/stroke';
 
@@ -285,7 +286,11 @@ export type ToEngine =
   | { t: 'setTypeStyle'; patch: Partial<CharStyle> }
   | { t: 'setTypePara'; patch: Partial<ParaStyle> }
   | { t: 'typeCommand'; cmd: TypeCommand }
+  | { t: 'setTypeWarp'; warp: WarpSpec | null; final: boolean }
   | { t: 'requestFonts' }
+  /** The Glyphs panel's page of a face's characters (answered with `glyphs`). */
+  | { t: 'requestGlyphs'; font: string; from: number; count: number }
+  | { t: 'replaceFonts'; map: Record<string, string> }
   | { t: 'addFonts'; buffers: ArrayBuffer[] }
   | { t: 'vectorMaskCommand'; cmd: VectorMaskCommand }
   /** Properties for a shape layer; non-final edits show without a history step. */
@@ -412,6 +417,7 @@ export type FromEngine =
   | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }
   | { t: 'fonts'; list: { family: string; styles: { style: string; postscript: string }[] }[]; added?: number }
   | { t: 'typeSelection'; text: string }
+  | { t: 'glyphs'; font: string; from: number; upem: number; total: number; glyphs: { cp: number; d: string; adv: number }[] }
   | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }

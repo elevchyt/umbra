@@ -316,6 +316,20 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         });
         break;
       }
+      case 'setTypeWarp':
+        if (engine?.setTypeWarp(msg.warp, msg.final)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestGlyphs': {
+        const eng = engine;
+        void ensureText().then(() => {
+          const page = eng?.glyphPage(msg.font, msg.from, msg.count);
+          if (page) post({ t: 'glyphs', font: msg.font, from: msg.from, ...page });
+        });
+        break;
+      }
+      case 'replaceFonts':
+        if (engine?.replaceFonts(msg.map)) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'requestFonts': {
         const eng = engine;
         void ensureText().then(() => eng && post({ t: 'fonts', list: eng.fontList() }));

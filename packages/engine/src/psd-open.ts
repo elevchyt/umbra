@@ -24,6 +24,8 @@ import { RGBA8 } from './tiles/import.js';
 import { fromPsdAdjustment, fromPsdFill } from './psd-adjust.js';
 import { liveFromPsd, strokeFromPsd, vectorMaskFromPsd } from './psd-vector.js';
 import { makeShapeLayer } from './shape-layers.js';
+import { fontRegistry, makeTypeLayer, missingFonts, textReady } from './type-layers.js';
+import { typeFromPsd } from './psd-type.js';
 import type { PatternDef } from '@umbra/kernels/fill';
 import {
   emptyDoc,
@@ -334,6 +336,15 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         });
       }
       const plane = planes.get(it.index) ?? Plane.empty(RGBA8);
+      if (it.text) {
+        // Photoshop's own rendering is kept until the layer is edited; fonts we lack are noted.
+        const t = typeFromPsd(it.text, fontRegistry());
+        features.push(...t.lost);
+        const missing = textReady() ? missingFonts(t.text) : [];
+        if (missing.length) features.push(`missing fonts: ${missing.join(', ')}`);
+        if (features.length && !warnings.some((w) => w.layer === it.name)) warnings.push({ layer: it.name, features });
+        return makeTypeLayer(it.name, t.text, t.transform, t.antiAlias, info, { ...common, plane: new MipPlane(plane), psdExtra: { text: it.text }, ...(missing.length ? { missingFonts: missing } : {}) });
+      }
       if (it.placed) {
         const smart = smartLayer(it, plane, common, features);
         if (features.length && !warnings.some((w) => w.layer === it.name)) warnings.push({ layer: it.name, features });

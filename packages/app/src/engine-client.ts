@@ -148,6 +148,9 @@ export class EngineClient {
       case 'fonts':
         this.events.onFonts?.(msg.list, msg.added);
         break;
+      case 'glyphs':
+        window.dispatchEvent(new CustomEvent('umbra:glyphs', { detail: msg }));
+        break;
       case 'typeSelection':
         this.events.onTypeSelection?.(msg.text);
         break;

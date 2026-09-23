@@ -225,6 +225,9 @@ export function TypeToolOptions() {
       <Separator />
       <Swatch value={c().color} title="Text colour" onChange={(color) => applyChar({ color })} />
       <Separator />
+      <button type="button" class="dialog-button" title="Warp Text" onClick={() => window.dispatchEvent(new CustomEvent('umbra:command', { detail: 'type.warp' }))}>
+        Warp
+      </button>
       <IconButton icon="panelMenu" title="Character and Paragraph panels" onClick={() => {
         store.openPanel('character');
         store.openPanel('paragraph');
