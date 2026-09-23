@@ -55,6 +55,8 @@ export interface PsdLayerInfo {
   children?: PsdLayerInfo[];
   /** True when ag-psd reported features we do not model yet. */
   unsupported?: string[];
+  /** Adjustment layers: ag-psd's decoded record, for the engine to map (it owns the model). */
+  adjustment?: unknown;
 }
 
 export interface PsdDocInfo {
@@ -81,7 +83,6 @@ function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   if (layer.text) out.push('type layer');
   if (layer.vectorMask || layer.vectorFill) out.push('vector mask');
   if (layer.effects) out.push('layer effects');
-  if (layer.adjustment) out.push('adjustment layer');
   if (layer.placedLayer) out.push('smart object');
   return out.length ? out : undefined;
 }
@@ -143,6 +144,7 @@ export function readPsdDocument(
         bottom: layer.bottom ?? 0,
         unsupported: unsupportedFeatures(layer),
       };
+      if (layer.adjustment) info.adjustment = layer.adjustment;
 
       if (layer.children) {
         info.children = convert(layer.children);

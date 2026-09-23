@@ -133,6 +133,23 @@ const [contextLost, setContextLost] = createSignal(false);
 const [statusMessage, setStatusMessage] = createSignal<string | null>(null);
 
 /**
+ * The last histogram of each kind the engine sent: `layer` for the adjustment dialogs,
+ * `below` for an adjustment layer in Properties, `composite` for the Histogram panel. Kept
+ * apart so an open dialog and the panel do not overwrite each other's.
+ */
+export type HistogramSource = 'layer' | 'below' | 'composite';
+export interface Histogram {
+  source: HistogramSource;
+  r: Uint32Array;
+  g: Uint32Array;
+  b: Uint32Array;
+  lum: Uint32Array;
+}
+const [histograms, setHistograms] = createStore<Partial<Record<HistogramSource, Histogram>>>({});
+const histogram = (source: HistogramSource): Histogram | null => histograms[source] ?? null;
+const setHistogram = (h: Histogram) => setHistograms(h.source, h);
+
+/**
  * Panels dispatch engine commands through here. The UI never imports the engine directly
  * (spec 03 §3): the Workspace installs this once the worker is up.
  */
@@ -217,7 +234,8 @@ export type DialogId =
   | 'imageSize'
   | 'canvasSize'
   | 'fill'
-  | 'stroke';
+  | 'stroke'
+  | 'adjustment';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {
@@ -285,6 +303,8 @@ export const store = {
   setContextLost,
   statusMessage,
   setStatusMessage,
+  histogram,
+  setHistogram,
   get engine() {
     return engine();
   },

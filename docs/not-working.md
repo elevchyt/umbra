@@ -13,10 +13,11 @@ looks like it does. Tick things off as they land.
   where they expect it. They should be *disabled* rather than silently inert, which is itself
   an entry in §1.
 
-First audited 2026-09-21; §1 cleared and recounted 2026-09-23. Of 505 menu commands, **98 are
-wired**, 34 are panel toggles generated from the panel registry, and **373 are not built** —
-greyed out, correctly. Regenerate with the script at the bottom; `shell.test.ts` now fails if a
-menu item's `done:` flag and its handler ever disagree.
+First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted again after M4's
+adjustments landed the same day. Of 505 menu commands, **134 are wired**, 34 are panel toggles
+generated from the panel registry, and **337 are not built** — greyed out, correctly. Regenerate
+with the script at the bottom; `shell.test.ts` fails if a menu item's `done:` flag and its
+handler ever disagree.
 
 ---
 
@@ -98,7 +99,23 @@ by tests — which is itself the recurring lesson of this project.
 - [ ] **Gradient presets are the three built-ins.** No stop editor; the preset dropdown cannot
       be extended.
 - [ ] **Hue/Saturation has master sliders only** — the six per-colour ranges (Reds…Magentas)
-      with their draggable band edges are not there.
+      with their draggable band edges are not there. A PSD's ranges are *kept* on save (the
+      layer carries the original record), and the open report says they do not render.
+- [ ] **Painting on an adjustment layer does nothing.** Photoshop paints its mask; that needs
+      mask targeting (clicking the mask thumbnail to edit the mask), which does not exist for
+      any layer yet. Until then the brush, fill and copy *refuse* on a group or adjustment layer
+      — they used to fall back silently to the topmost pixel layer, which was worse.
+- [ ] **Adjustment dialogs start from defaults every time.** Photoshop remembers the last-used
+      settings per dialog (and Ctrl+Alt+L etc. reopen with them); there are no presets either.
+- [ ] **Levels and Curves have no eyedroppers, no Auto button, no Options.** Curves has no
+      pencil mode and no on-image tool; Channel Mixer and Black & White have no presets.
+- [ ] **Gradient Map offers six preset gradients**, not the gradient editor — the same gap as
+      the Gradient tool's (above).
+- [ ] **Applying a non-table adjustment to a big layer blocks the worker** for about 200 ms on
+      a 2400×1600 layer (Hue/Saturation, Vibrance, Color Balance, …; the table-shaped ones are
+      ~20 ms). The dialog's preview is a GPU pass and does not pay this; only OK does.
+- [ ] **Auto Color's "Snap Neutral Midtones" is a stand-in** (per-channel gamma toward the mean
+      colour); Photoshop searches for near-neutral pixels. Tagged `[fit]` in `kernels/auto.ts`.
 - [ ] **PSD unknown-block pass-through is not implemented.** ag-psd discards blocks it does not
       model, so saving a PSD opened from Photoshop loses anything Umbra does not understand.
 
@@ -111,8 +128,8 @@ the feature is complete.
 |---|---|---|
 | File | 8 / 50 | export & automation (M11), place/linked (M5) |
 | Edit | 25 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
-| Image | 10 / 56 | **all 22 adjustments (M4, in progress)**, colour modes (M10) |
-| Layer | 21 / 137 | layer styles (M6), smart objects (M5), adjustment/fill layers (M4), align & distribute (M9) |
+| Image | 30 / 56 | Color Lookup, Shadows/Highlights, HDR Toning, Match/Replace Color (M4), colour modes (M10) |
+| Layer | 37 / 137 | layer styles (M6), smart objects (M5), fill layers and Color Lookup layers (M4), align & distribute (M9) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
 | Filter | 0 / 8 | all filters (M5) |
@@ -126,12 +143,25 @@ implementation.
 
 ### Specifically, in the menus you are most likely to reach for
 
-- [ ] **Image ▸ Adjustments — the whole 22-item submenu is dead.** M4 is in progress; the
-      kernel exists and is tested, nothing is wired to the UI yet. *This is almost certainly
-      what "all image options don't work" meant.*
+- [x] **Image ▸ Adjustments — 17 of 22.** Brightness/Contrast, Levels, Curves, Exposure,
+      Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Channel Mixer,
+      Invert, Posterize, Threshold, Gradient Map, Selective Color, Desaturate and Equalize.
+      Each dialog has a live Preview and Alt = Reset; the preview is the GPU drawing the
+      adjustment as a clipped layer, so it costs nothing on the pixels until OK.
+- [ ] **Image ▸ Adjustments — the other 5:** Color Lookup (needs .cube/.3dl loading and a 3-D
+      LUT texture), Shadows/Highlights, HDR Toning, Match Color, Replace Color (all spatial or
+      multi-image; none is a per-pixel function).
+- [x] **Layer ▸ New Adjustment Layer — 15 of 16** (all but Color Lookup), plus the
+      Adjustments panel and editing in Properties. They open from and save to PSD with their
+      parameters, render on the GPU through GLSL mirrors of the kernels, and composite on the
+      CPU reference for merge/flatten/export.
+- [x] **Layer ▸ Create Clipping Mask** (Ctrl+Alt+G, toggles to Release).
+- [ ] **Layer ▸ New Fill Layer ▸ Solid Color / Gradient / Pattern** — a fill layer ADDS coverage,
+      which an adjustment cannot, so it is its own layer kind; not built.
 - [ ] **Image ▸ Mode** — 2 of 12. Only RGB and 8 bits/channel, which are the current state, so
       nothing changes. Grayscale, CMYK, Lab, 16/32-bit are M10.
-- [ ] **Image ▸ Auto Tone / Auto Contrast / Auto Color** — greyed, correctly; M4.
+- [x] **Image ▸ Auto Tone / Auto Contrast / Auto Color** — Levels computed from the layer's
+      histogram with Photoshop's default 0.1% clip; Auto Color's midtone snap is `[fit]`.
 - [ ] **Image ▸ Duplicate, Apply Image, Calculations** — M4.
 - [x] **Layer ▸ New ▸ Layer Via Copy / Via Cut** (Ctrl+J / Ctrl+Shift+J). They do not touch
       the clipboard, as Photoshop's do not.
@@ -173,10 +203,13 @@ Zoom.
 
 ## 5. Panels
 
-Working: Layers, Color, Swatches, Info, Properties, History, Channels, Navigator.
+Working: Layers, Color, Swatches, Info, Properties, History, Channels, Navigator, Adjustments,
+Histogram.
 
-- [ ] **Adjustments** — placeholder (M4)
-- [ ] **Histogram** — placeholder (M4)
+- [x] **Adjustments** — one button per adjustment-layer kind (Color Lookup missing)
+- [x] **Properties** — edits the active adjustment layer; one history step per gesture
+- [x] **Histogram** — Colors / Luminosity / R / G / B with mean, std dev, median, pixel count.
+      Whole image only: no per-layer source, no cache-level warning, no expanded view.
 - [ ] **Brushes** — placeholder; was scoped to M3 and did not land
 - [ ] **Brush Settings** — placeholder (M8)
 - [ ] **Paths** — placeholder (M7)
@@ -195,6 +228,17 @@ frozen at whatever it last said. That produced at least four false alarms in thi
 What stays trustworthy there is anything driven by **worker messages**, which are not
 frame-bound: the Layers panel, dialogs, document summaries, thumbnails. Verify through the DOM,
 and treat any canvas screenshot or timing taken in a hidden pane as unconfirmed.
+
+Two tools for that, in dev builds:
+
+- `window.__umbraDoc` is the latest document summary (layers, adjustment parameters, history
+  names) exactly as the panels receive it.
+- The **Navigator's canvas** is a real 2-D canvas filled from a worker message, so its pixels
+  can be read with `getImageData` and diffed — that is how M4's "the dialog's preview matches
+  what OK commits" was checked (max Δ 3 through the mip-scaled thumbnail, mean 0.08).
+
+And one trap: synthetic `PointerEvent`s have no live pointer, so `setPointerCapture` throws on
+them. Drag handlers here use window listeners instead, which also makes them scriptable.
 
 ## Keeping this file honest
 

@@ -20,6 +20,8 @@ import { docToClip, type ViewState } from './view.js';
 import type { BlendMode } from '@umbra/core/blend';
 import { MipPlane } from '../tiles/mip.js';
 import type { Doc, Layer } from '../document.js';
+import type { Adjustment } from '@umbra/kernels/adjust';
+import { toGpuAdjustment, type GpuAdjustment } from './adjust.glsl.js';
 
 const QUAD_VERT = /* glsl */ `#version 300 es
 precision highp float;
@@ -181,6 +183,33 @@ export class DocumentRenderer {
     this.eraseOverlay = overlay;
   }
 
+  /**
+   * An Image ▸ Adjustments dialog's live preview: the adjustment as a CLIPPED adjustment layer
+   * directly above its target, masked by the selection. Clipped, it sees only the target's
+   * pixels and is shaped by the target's alpha, which is exactly what applying it to those
+   * pixels does — so the preview is a GPU pass per frame rather than a CPU pass per slider
+   * step, and the committed result is the same function (the CPU kernel). If the target is
+   * itself inside a clipping group the preview also affects the clipped layers beneath it in
+   * that group; that is the one place it is approximate.
+   */
+  private adjustPreview: { layerId: number; adjustment: Adjustment; mask: MipPlane | null } | null = null;
+
+  setAdjustPreview(p: { layerId: number; adjustment: Adjustment; mask: MipPlane | null } | null): void {
+    this.adjustPreview = p;
+  }
+
+  /** One GPU form per adjustment VALUE, so its table uploads once per edit, not per frame. */
+  private gpuAdjustments = new WeakMap<Adjustment, GpuAdjustment>();
+
+  private gpuAdjustment(adj: Adjustment): GpuAdjustment {
+    let g = this.gpuAdjustments.get(adj);
+    if (!g) {
+      g = toGpuAdjustment(adj);
+      this.gpuAdjustments.set(adj, g);
+    }
+    return g;
+  }
+
   /** Map a layer list to GPU layers, splicing the live stroke in above its target. */
   private toGpuLayers(layers: readonly Layer[], view: ViewState, clip: Rect): GpuLayer[] {
     const out: GpuLayer[] = [];
@@ -202,6 +231,22 @@ export class DocumentRenderer {
             this.stats.layerPasses++;
             this.stats.tileInstances += this.tiles.draw(o.plane, view, clip);
           },
+        });
+      }
+      const a = this.adjustPreview;
+      if (a && a.layerId === l.id) {
+        const mask = a.mask;
+        out.push({
+          kind: 'adjustment',
+          name: '<adjust preview>',
+          visible: true,
+          opacity: 1,
+          fill: 1,
+          blendMode: 'normal',
+          clipped: true,
+          maskDensity: 1,
+          adjustment: this.gpuAdjustment(a.adjustment),
+          drawMask: mask ? () => void this.tiles.draw(mask, view, clip, true) : undefined,
         });
       }
     }
@@ -250,6 +295,8 @@ export class DocumentRenderer {
 
     if (layer.kind === 'group') {
       out.children = this.toGpuLayers(layer.children, view, clip);
+    } else if (layer.kind === 'adjustment') {
+      out.adjustment = this.gpuAdjustment(layer.adjustment);
     } else {
       const plane = layer.plane;
       out.drawSource = (_t: RenderTarget) => {

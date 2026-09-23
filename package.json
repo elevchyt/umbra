@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "pnpm --filter @umbra/shell-electron dev",
     "build": "pnpm --filter @umbra/app build && pnpm --filter @umbra/shell-electron build",
-    "typecheck": "tsc -b",
+    "typecheck": "pnpm -r --no-bail --filter '!@umbra/testkit' exec tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "budget": "node scripts/budget.mjs",

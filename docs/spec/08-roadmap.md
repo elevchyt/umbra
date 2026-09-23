@@ -282,6 +282,49 @@ the approximation is and what evidence would settle it. Every adjustment must ad
 self-consistent: identity parameters are a no-op, the destructive command and the adjustment
 layer agree to ±1/255, and a round trip through PSD preserves the parameters.
 
+**Progress (2026-09-23).** Landed: 17 destructive adjustments (all 14 kernel kinds plus
+Selective Color, Desaturate and Equalize) with Preview dialogs; Auto Tone / Contrast / Color;
+15 adjustment-layer kinds with Properties editing, the Adjustments and Histogram panels, and PSD
+read/write; Create/Release Clipping Mask. Exit status: every implemented kind passes
+destructive ≡ layer within 1/255 on the CPU reference and a PSD parameter round trip (engine
+`commands/adjust.test.ts`), and GPU ≡ CPU in the parity suite (108/108, 25 of them adjustment
+cases). Still open: Color Lookup, Shadows/Highlights, HDR Toning, Match and Replace Color,
+Hue/Saturation colour ranges, fill layers, presets, eyedroppers and Auto Options, Curves pencil
+and on-image modes, Info before/after, and adjustment fusion (each adjustment layer is one
+full-viewport pass today).
+
+**Findings.**
+
+1. **A 3-D LUT is not good enough for adjustment layers.** Measured against the kernels on
+   200 000 random colours, a 52³ table was off by up to 7 levels for a Hue/Saturation hue shift,
+   and 86³ still by 2: the function creases along hue-sector boundaries that do not line up
+   with the grid. Every non-table adjustment therefore has a GLSL transcription of its kernel,
+   and the parity suite checks each over 4 096 exact 8-bit colours.
+2. **The dialog preview is an adjustment layer.** Image ▸ Adjustments previews by drawing the
+   adjustment as a temporary *clipped* adjustment layer over the target: clipped, it sees only
+   the target's pixels and is shaped by its alpha, which is what applying it does. A slider step
+   costs a GPU pass instead of ~200 ms of CPU on a 2400×1600 layer; OK runs the kernel once.
+   Checked in the browser by diffing the Navigator's pixels: max Δ 3, mean 0.08.
+3. **Inputs are quantised to 8 bits on both sides.** A composited backdrop is float; without
+   quantising, 127.9996/255 lands either side of a Threshold or Posterize step depending on
+   which side of the diff computed it. Threshold also compares with a 1e-3 epsilon, because on
+   8-bit input the luminance is often *exactly* an integer and float32 must agree with float64.
+4. **Two re-mount bugs that would have broken every drag.** The editor switched on
+   `props.value.kind` inside JSX, which tracks the whole value and re-created the editor on each
+   change; the Properties panel was keyed on the layer *object*, new with every summary. Either
+   replaces the slider under the pointer mid-drag. Neither showed in a test; both showed the
+   moment a scripted drag checked `element.isConnected`.
+5. **PSD details.** An untouched (all-white) adjustment mask is stored as no pixels and read
+   back as no mask, so opening restores the reveal-all mask; Exposure's float32 fields need
+   rounding back (0.8 → 0.800000011920929); ag-psd reads Hue/Saturation's Colorize fields as
+   the master record's `a…d`. The decoded record is kept on the layer, so anything not modelled
+   — colour ranges, preset names — is written back unchanged.
+6. **Painting fell back to another layer.** With a group (now also an adjustment layer)
+   active, the brush, fill and copy silently used the topmost pixel layer. They refuse now;
+   painting an adjustment layer's mask waits for mask targeting.
+7. **`pnpm typecheck` had never worked** — it ran `tsc -b` with no root tsconfig. It now checks
+   each package.
+
 ### M5 — Filters I + Smart Objects (XL)
 Filter framework (registry, auto-dialogs with zoomable preview + on-canvas preview, selection/
 channel/mask awareness, tiled ROI execution, Last Filter, Fade), all Blur / Sharpen / Noise /

@@ -1,13 +1,16 @@
 /** Message protocol between the UI thread and the engine worker (spec 03 §2). */
 import type { BrushParams } from '@umbra/kernels/brush';
 import type { Gradient } from '@umbra/kernels/gradient';
+import type { Adjustment } from '@umbra/kernels/adjust';
 import type { GpuCaps } from './gpu/caps.js';
 
 
 export interface LayerSummary {
   id: number;
   name: string;
-  kind: 'pixel' | 'group';
+  kind: 'pixel' | 'group' | 'adjustment';
+  /** Adjustment layers: the parameters, for the Properties panel to edit. */
+  adjustment?: Adjustment;
   /** Indentation level in the Layers panel. */
   depth: number;
   opacity: number;
@@ -122,6 +125,12 @@ export type ToEngine =
   | { t: 'setCentre'; x: number; y: number }
   | { t: 'setLayerLocks'; id: number; locks: Partial<{ transparency: boolean; pixels: boolean; position: boolean; all: boolean }> }
   | { t: 'maskCommand'; command: string; id?: number }
+  | { t: 'previewAdjustment'; adjustment: Adjustment | null }
+  | { t: 'applyAdjustment'; adjustment: Adjustment }
+  | { t: 'autoAdjust'; mode: 'tone' | 'contrast' | 'color' | 'equalize' }
+  | { t: 'addAdjustmentLayer'; adjustment: Adjustment }
+  | { t: 'setLayerAdjustment'; id: number; adjustment: Adjustment; final: boolean }
+  | { t: 'requestHistogram'; source: 'layer' | 'below' | 'composite'; id?: number }
   | { t: 'layerVia'; cut: boolean }
   | { t: 'reselect' }
   | { t: 'transformLayerFixed'; op: 'rotate180' | 'rotate90cw' | 'rotate90ccw' | 'flipH' | 'flipV' }
@@ -203,6 +212,7 @@ export type FromEngine =
   | { t: 'ready'; caps: GpuCaps }
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
+  | { t: 'histogram'; source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }
   | { t: 'contextLost' }
   | { t: 'contextRestored' }
   | { t: 'spikes'; pass: boolean; text: string }

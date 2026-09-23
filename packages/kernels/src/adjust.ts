@@ -86,6 +86,19 @@ export interface ColorBalanceBand {
 
 export const NO_BALANCE: ColorBalanceBand = { cyanRed: 0, magentaGreen: 0, yellowBlue: 0 };
 
+/** Selective Color's nine colour ranges, in Photoshop's menu (and PSD) order. */
+export const SELECTIVE_RANGES = ['reds', 'yellows', 'greens', 'cyans', 'blues', 'magentas', 'whites', 'neutrals', 'blacks'] as const;
+export type SelectiveRange = (typeof SELECTIVE_RANGES)[number];
+
+/** Percentages, −100…100. */
+export interface CmykShift {
+  c: number;
+  m: number;
+  y: number;
+  k: number;
+}
+export const NO_CMYK_SHIFT: CmykShift = { c: 0, m: 0, y: 0, k: 0 };
+
 export type Adjustment =
   | { kind: 'brightnessContrast'; brightness: number; contrast: number; legacy: boolean }
   | { kind: 'levels'; master: LevelsChannel; r: LevelsChannel; g: LevelsChannel; b: LevelsChannel }
@@ -101,7 +114,28 @@ export type Adjustment =
   | { kind: 'colorBalance'; shadows: ColorBalanceBand; midtones: ColorBalanceBand; highlights: ColorBalanceBand; preserveLuminosity: boolean }
   | { kind: 'blackWhite'; reds: number; yellows: number; greens: number; cyans: number; blues: number; magentas: number; tint: [number, number, number] | null }
   | { kind: 'photoFilter'; color: [number, number, number]; density: number; preserveLuminosity: boolean }
-  | { kind: 'gradientMap'; gradient: Gradient; reverse: boolean };
+  | { kind: 'gradientMap'; gradient: Gradient; reverse: boolean }
+  | { kind: 'selectiveColor'; relative: boolean; ranges: Record<SelectiveRange, CmykShift> };
+
+/** Photoshop's names, as they appear in menus, layer names and history. */
+export const ADJUSTMENT_LABEL: Record<Adjustment['kind'], string> = {
+  brightnessContrast: 'Brightness/Contrast',
+  levels: 'Levels',
+  curves: 'Curves',
+  exposure: 'Exposure',
+  invert: 'Invert',
+  posterize: 'Posterize',
+  threshold: 'Threshold',
+  desaturate: 'Desaturate',
+  channelMixer: 'Channel Mixer',
+  hueSaturation: 'Hue/Saturation',
+  vibrance: 'Vibrance',
+  colorBalance: 'Color Balance',
+  blackWhite: 'Black & White',
+  photoFilter: 'Photo Filter',
+  gradientMap: 'Gradient Map',
+  selectiveColor: 'Selective Color',
+};
 
 /** Parameters that leave the image alone, for "is this adjustment doing anything?" checks. */
 export function defaultAdjustment(kind: Adjustment['kind']): Adjustment {
@@ -160,6 +194,12 @@ export function defaultAdjustment(kind: Adjustment['kind']): Adjustment {
     case 'photoFilter':
       // Warming Filter (85), Photoshop's default, at its default density.
       return { kind, color: [236 / 255, 138 / 255, 0], density: 25, preserveLuminosity: true };
+    case 'selectiveColor':
+      return {
+        kind,
+        relative: true,
+        ranges: Object.fromEntries(SELECTIVE_RANGES.map((r) => [r, NO_CMYK_SHIFT])) as Record<SelectiveRange, CmykShift>,
+      };
     case 'gradientMap':
       return {
         kind,
@@ -239,7 +279,9 @@ export function compile(adj: Adjustment): Applier {
       return {
         shape: 'pixel',
         apply: (rgb) => {
-          const v = luminance(rgb[0]!, rgb[1]!, rgb[2]!) * 255 >= t ? 1 : 0;
+          // The epsilon makes the comparison robust to float error: on 8-bit input the
+          // luminance is often EXACTLY an integer, and the GPU's float32 must agree with this.
+          const v = luminance(rgb[0]!, rgb[1]!, rgb[2]!) * 255 + 1e-3 >= t ? 1 : 0;
           rgb[0] = v;
           rgb[1] = v;
           rgb[2] = v;
@@ -271,6 +313,8 @@ export function compile(adj: Adjustment): Applier {
       return photoFilter(adj.color, adj.density, adj.preserveLuminosity);
     case 'gradientMap':
       return gradientMap(adj.gradient, adj.reverse);
+    case 'selectiveColor':
+      return selectiveColor(adj);
   }
 }
 
@@ -620,6 +664,76 @@ function photoFilter(
   };
 }
 
+/**
+ * Selective Color — spec 05 §A, exact algorithm.
+ *
+ * This is the published reverse-engineering (pkh.me, and the FFmpeg `selectivecolor` filter
+ * by the same author). A pixel belongs to a range by which channel is its max or min (Reds:
+ * red is the max; Yellows: blue is the min, …) or by its brightness (Whites, Neutrals,
+ * Blacks), and each range acts in proportion to a scale Ω of how strongly it belongs —
+ * max−mid for the primaries, mid−min for the secondaries. Within a range the C, M and Y
+ * sliders act on R, G and B respectively, with K acting on all three:
+ *
+ *   φ = clamp(((−1 − adj)·K − adj) · m, −v, 1 − v),   m = 1 (Absolute) or 1 − v (Relative)
+ *
+ * and the pixel moves by Σ φ·Ω. The one liberty taken: FFmpeg rounds each range's
+ * contribution to an integer; here the sum is kept in float and rounded once, at the end.
+ */
+function selectiveColor(adj: Extract<Adjustment, { kind: 'selectiveColor' }>): PixelApplier {
+  const rows = SELECTIVE_RANGES.map((r) => {
+    const s = adj.ranges[r];
+    return [s.c / 100, s.m / 100, s.y / 100, s.k / 100] as const;
+  });
+  const active = rows.map((r) => r.some((v) => v !== 0));
+  const relative = adj.relative;
+  const out = new Float32Array(3);
+  return {
+    shape: 'pixel',
+    apply: (rgb) => {
+      const r = Math.round(clamp01(rgb[0]!) * 255);
+      const g = Math.round(clamp01(rgb[1]!) * 255);
+      const b = Math.round(clamp01(rgb[2]!) * 255);
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      const mid = r + g + b - max - min;
+      const white = r > 128 && g > 128 && b > 128;
+      const black = r < 128 && g < 128 && b < 128;
+      const neutral = max > 0 && min < 255;
+      out[0] = 0;
+      out[1] = 0;
+      out[2] = 0;
+      for (let i = 0; i < 9; i++) {
+        if (!active[i]) continue;
+        let member: boolean;
+        let scale: number;
+        switch (i) {
+          case 0: member = r === max; scale = max - mid; break; // reds
+          case 1: member = b === min; scale = mid - min; break; // yellows
+          case 2: member = g === max; scale = max - mid; break; // greens
+          case 3: member = r === min; scale = mid - min; break; // cyans
+          case 4: member = b === max; scale = max - mid; break; // blues
+          case 5: member = g === min; scale = mid - min; break; // magentas
+          case 6: member = white; scale = 2 * min - 255; break;
+          case 7: member = neutral; scale = (510 - (Math.abs(2 * max - 255) + Math.abs(2 * min - 255))) / 2; break;
+          default: member = black; scale = 255 - 2 * max;
+        }
+        if (!member || scale <= 0) continue;
+        const [c, m, y, k] = rows[i]!;
+        for (let ch = 0; ch < 3; ch++) {
+          const v = (ch === 0 ? r : ch === 1 ? g : b) / 255;
+          const a = ch === 0 ? c : ch === 1 ? m : y;
+          let res = (-1 - a) * k - a;
+          if (relative) res *= 1 - v;
+          out[ch] = out[ch]! + Math.min(1 - v, Math.max(-v, res)) * scale;
+        }
+      }
+      rgb[0] = clamp01((r + out[0]!) / 255);
+      rgb[1] = clamp01((g + out[1]!) / 255);
+      rgb[2] = clamp01((b + out[2]!) / 255);
+    },
+  };
+}
+
 /** Gradient Map — spec 05 §A: the gradient sampled at the pixel's luminance. */
 function gradientMap(gradient: Gradient, reverse: boolean): PixelApplier {
   // A 256-entry ramp: the gradient is sampled once per level rather than once per pixel.
@@ -681,6 +795,30 @@ export function applyToRgba8(applier: Applier, data: Uint8Array, mask?: Uint8Arr
       data[i + c] = Math.round(coverage >= 1 ? next : data[i + c]! + (next - data[i + c]!) * coverage);
     }
   }
+}
+
+/**
+ * An applier as a function on 0…1 colour, for the CPU reference compositor.
+ *
+ * The input is quantised to 8 bits first. Adjustments are defined on 8-bit values (the LUT
+ * ones literally so), the GPU quantises the same way, and without it a backdrop that is
+ * 127.9996/255 after blending would land either side of a Threshold or Posterize step
+ * depending on which side of the diff it was computed.
+ */
+export function applierToRgbFn(applier: Applier): (c: readonly [number, number, number]) => [number, number, number] {
+  const q = (v: number) => Math.round(clamp01(v) * 255);
+  if (applier.shape === 'lut') {
+    const { r, g, b } = applier;
+    return (c) => [r[q(c[0])]! / 255, g[q(c[1])]! / 255, b[q(c[2])]! / 255];
+  }
+  const px = new Float32Array(3);
+  return (c) => {
+    px[0] = q(c[0]) / 255;
+    px[1] = q(c[1]) / 255;
+    px[2] = q(c[2]) / 255;
+    applier.apply(px);
+    return [clamp01(px[0]!), clamp01(px[1]!), clamp01(px[2]!)];
+  };
 }
 
 /** Convenience for tests and previews: adjust one 0…255 RGB triple. */

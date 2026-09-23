@@ -5,8 +5,9 @@
  * bitmap can be released before the next one is produced.
  *
  * Fidelity policy (spec 07 §1.3): anything we cannot yet model — type layers, effects,
- * adjustment layers, smart objects — still opens, still renders from the raster stored in the
- * file, and is flagged so the UI can say so plainly rather than pretending it is editable.
+ * smart objects, the adjustment kinds not implemented yet — still opens, still renders from
+ * the raster stored in the file, and is flagged so the UI can say so plainly rather than
+ * pretending it is editable. Adjustment layers of the implemented kinds open as live layers.
  */
 import { TILE_SIZE, TILE_SHIFT, type PlaneFormat } from '@umbra/core/pixels';
 import type { BlendMode } from '@umbra/core/blend';
@@ -20,8 +21,10 @@ import {
 import { Plane, Tile } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
 import { RGBA8 } from './tiles/import.js';
+import { fromPsdAdjustment } from './psd-adjust.js';
 import {
   emptyDoc,
+  makeAdjustmentLayer,
   makeGroup,
   makePixelLayer,
   DEFAULT_BLENDING_STATE,
@@ -139,7 +142,13 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
 
   const build = (items: PsdLayerInfo[]): Layer[] =>
     items.map((it) => {
-      if (it.unsupported) warnings.push({ layer: it.name, features: it.unsupported });
+      const features = [...(it.unsupported ?? [])];
+      const adjusted = it.adjustment ? fromPsdAdjustment(it.adjustment) : null;
+      if (it.adjustment && !adjusted) {
+        features.push(`${(it.adjustment as { type?: string }).type ?? 'unknown'} adjustment layer`);
+      }
+      if (adjusted) features.push(...adjusted.lost);
+      if (features.length) warnings.push({ layer: it.name, features });
 
       const common = {
         id: nextLayerId(),
@@ -161,6 +170,23 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
           ...common,
           // PSD stores "pass through" explicitly; anything else isolates the group.
           blendMode: (PSD_BLEND_MODE[it.blendMode] ?? 'passThrough') as BlendMode,
+        });
+      }
+      if (adjusted) {
+        return makeAdjustmentLayer(it.name, adjusted.adjustment, {
+          ...common,
+          // An untouched adjustment mask is all white, which a PSD stores as no pixels at all
+          // and our reader therefore returns as no mask. Put the empty reveal-all mask back,
+          // so there is something to paint into, as there is in Photoshop.
+          mask: common.mask ?? {
+            plane: new MipPlane(Plane.empty(MASK_FORMAT, [255])),
+            enabled: true,
+            linked: true,
+            density: 1,
+            feather: 0,
+            defaultColor: 1,
+          },
+          psdExtra: { adjustment: it.adjustment },
         });
       }
       const plane = planes.get(it.index) ?? Plane.empty(RGBA8);

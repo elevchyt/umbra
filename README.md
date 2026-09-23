@@ -9,22 +9,23 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M3 complete, M4 in progress.** That means selections, painting, transforms, the clipboard
-and PSD open/save work; adjustments, filters, layer styles, vector and type do not.
+**M0–M3 complete, M4 mostly landed.** Selections, painting, transforms, the clipboard, PSD
+open/save, and adjustments — destructive and as adjustment layers — work; filters, layer
+styles, vector and type do not.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
 > Most of the UI is present because M1's exit criterion was that a Photoshop user finds
-> everything where they expect it — **387 of 505 menu commands do nothing when clicked**, and a
-> handful of controls look live but are inert. That file is the running checklist, and it
+> everything where they expect it — **337 of 505 menu commands are not built yet** (greyed out,
+> not silently inert). That file is the running checklist, and it
 > separates *broken* (cheap bugs) from *not built yet* (the roadmap). It carries the script
 > that regenerates it, because the hand-maintained flags in the source have been wrong before.
 
 | | |
 |---|---|
-| Tests | 372 across 18 files |
-| Blend parity | 83/83 cases, GPU ≡ CPU, maxΔ = 1 |
-| Payload | 134 KB gzipped UI + 428 KB worker |
+| Tests | 422 across 22 files |
+| GPU ≡ CPU parity | 108/108 cases (every blend mode, every adjustment), maxΔ = 1 |
+| Payload | 150 KB UI + 139 KB worker, gzipped |
 | Compositing | 100 layers at 4K, ~8 ms/frame |
 
 ## What works
@@ -34,6 +35,12 @@ Selection), a brush engine with real opacity-vs-flow separation, Pencil and Eras
 Bucket and Gradient, Move and Free Transform, Crop, the clipboard, layers with all 27 blend
 modes, masks, groups and clipping, the Channels and History panels, PSD open and save, and a
 crash-recovery journal.
+
+Adjustments: Brightness/Contrast, Levels, Curves, Exposure, Vibrance, Hue/Saturation, Color
+Balance, Black & White, Photo Filter, Channel Mixer, Invert, Posterize, Threshold, Gradient
+Map, Selective Color, Desaturate, Equalize and Auto Tone/Contrast/Color — as dialogs with live
+preview and, for the fifteen Photoshop has as layers, as adjustment layers edited in
+Properties and saved to PSD.
 
 ## Running it
 

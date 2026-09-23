@@ -64,6 +64,9 @@ import * as TransformCmd from './commands/transform.js';
 import * as ClipCmd from './commands/clipboard.js';
 import * as ChannelCmd from './commands/channels.js';
 import * as MaskCmd from './commands/masks.js';
+import * as AdjustCmd from './commands/adjust.js';
+import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
+import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import {
   IDENTITY,
   about,
@@ -841,6 +844,16 @@ export class Engine {
     void this.journal.clear();
   }
 
+  /** Toggle "clipped to the layer below" — Layer ▸ Create/Release Clipping Mask. */
+  toggleClipped(id: number): boolean {
+    const layer = findLayer(this.doc.layers, id);
+    if (!layer) return false;
+    const next = LayerCmd.setClipped(this.doc, id, !layer.clipped);
+    if (next === this.doc) return false;
+    this.commit(next, layer.clipped ? 'Release Clipping Mask' : 'Create Clipping Mask');
+    return true;
+  }
+
   setLayerLocks(id: number, patch: Partial<LayerLocks>): void {
     const layer = findLayer(this.doc.layers, id);
     if (!layer) return;
@@ -849,6 +862,150 @@ export class Engine {
       { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, locks })) },
       'Lock',
     );
+  }
+
+  // ---- adjustments -------------------------------------------------------------------------
+
+  /**
+   * An open Image ▸ Adjustments dialog's preview. The selection's mask plane is built once and
+   * reused while the selection is unchanged, so a slider step costs a GPU pass and nothing else.
+   */
+  private adjustPreview: {
+    layerId: number;
+    adjustment: Adjustment;
+    mask: MipPlane | null;
+    selection: Doc['selection'];
+  } | null = null;
+
+  /** The active layer, when it is one that Image ▸ Adjustments can change. */
+  private adjustTarget(): number | null {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    return layer && layer.kind === 'pixel' ? layer.id : null;
+  }
+
+  previewAdjustment(adjustment: Adjustment | null): void {
+    const id = this.adjustTarget();
+    if (!adjustment || id === null) {
+      this.adjustPreview = null;
+      return;
+    }
+    const prev = this.adjustPreview;
+    const reuse = prev && prev.layerId === id && prev.selection === this.doc.selection;
+    const plane = reuse ? null : MaskCmd.selectionPlane(this.doc);
+    this.adjustPreview = {
+      layerId: id,
+      adjustment,
+      mask: reuse ? prev.mask : plane ? new MipPlane(plane) : null,
+      selection: this.doc.selection,
+    };
+  }
+
+  /** Image ▸ Adjustments ▸ …, OK. */
+  applyAdjustment(adjustment: Adjustment): boolean {
+    this.adjustPreview = null;
+    const id = this.adjustTarget();
+    if (id === null) return false;
+    const next = AdjustCmd.applyAdjustment(this.doc, id, adjustment);
+    if (next === this.doc) return false;
+    this.commit(next, ADJUSTMENT_LABEL[adjustment.kind]);
+    return true;
+  }
+
+  /**
+   * Image ▸ Auto Tone / Auto Contrast / Auto Color, and Adjustments ▸ Equalize: Levels (or a
+   * table) computed from the target's own histogram — inside the selection when there is one.
+   */
+  autoAdjust(mode: 'tone' | 'contrast' | 'color' | 'equalize'): boolean {
+    const id = this.adjustTarget();
+    if (id === null) return false;
+    const h = this.histogram('layer');
+    const next =
+      mode === 'equalize'
+        ? AdjustCmd.applyLut(this.doc, id, equalizeLut(h))
+        : AdjustCmd.applyAdjustment(this.doc, id, mode === 'tone' ? autoTone(h) : mode === 'contrast' ? autoContrast(h) : autoColor(h));
+    if (next === this.doc) return false;
+    this.commit(next, { tone: 'Auto Tone', contrast: 'Auto Contrast', color: 'Auto Color', equalize: 'Equalize' }[mode]);
+    return true;
+  }
+
+  /** Layer ▸ New Adjustment Layer ▸ …, and the Adjustments panel. */
+  addAdjustmentLayer(adjustment: Adjustment): boolean {
+    const next = AdjustCmd.addAdjustmentLayer(this.doc, adjustment);
+    this.commit(next, `New ${ADJUSTMENT_LABEL[adjustment.kind]} Layer`);
+    return true;
+  }
+
+  /**
+   * Edit an adjustment layer from the Properties panel. Intermediate values of a drag are
+   * applied without a history step; `final` records one step for the whole gesture, named as
+   * Photoshop names it ("Modify Curves Layer").
+   */
+  setLayerAdjustment(id: number, adjustment: Adjustment, final: boolean): boolean {
+    const next = AdjustCmd.setAdjustment(this.doc, id, adjustment);
+    if (next === this.doc) return false;
+    if (final) this.commit(next, `Modify ${ADJUSTMENT_LABEL[adjustment.kind]} Layer`);
+    else this.doc = next;
+    return true;
+  }
+
+  /**
+   * Histograms for the Levels and Curves editors. `layer` counts the active layer's pixels
+   * inside the selection — what a destructive adjustment will act on. `below` counts the
+   * composite underneath adjustment layer `id` — what that layer receives as its input.
+   * `composite` is the whole image, for the Histogram panel. Fully transparent pixels are not
+   * counted in any of them.
+   */
+  histogram(source: 'layer' | 'below' | 'composite', id?: number): { r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array } {
+    const r = new Uint32Array(256);
+    const g = new Uint32Array(256);
+    const b = new Uint32Array(256);
+    const lum = new Uint32Array(256);
+    const count = (R: number, G: number, B: number) => {
+      r[R]!++;
+      g[G]!++;
+      b[B]!++;
+      lum[Math.round(luminance(R, G, B))]!++;
+    };
+
+    if (source === 'layer') {
+      const layerId = this.adjustTarget();
+      const layer = layerId === null ? undefined : findLayer(this.doc.layers, layerId);
+      if (!layer || layer.kind !== 'pixel') return { r, g, b, lum };
+      const plane = layer.plane.base;
+      const sel = this.doc.selection;
+      for (const { tx, ty } of plane.tileCells()) {
+        if (!plane.hasTile(tx, ty)) continue;
+        const tile = plane.tileAt(tx, ty);
+        const d = tile.data;
+        for (let y = 0; y < TILE_SIZE; y++) {
+          const dy = (ty << TILE_SHIFT) + y;
+          if (dy < 0 || dy >= this.doc.height) continue;
+          for (let x = 0; x < TILE_SIZE; x++) {
+            const dx = (tx << TILE_SHIFT) + x;
+            if (dx < 0 || dx >= this.doc.width) continue;
+            if (sel && sel.mask[dy * sel.width + dx]! < 128) continue;
+            const o = tile.uniform ? 0 : (y * TILE_SIZE + x) * 4;
+            if (d[o + 3] === 0) continue;
+            count(d[o]!, d[o + 1]!, d[o + 2]!);
+          }
+        }
+      }
+      return { r, g, b, lum };
+    }
+
+    let below = this.doc;
+    if (source === 'below') {
+      const target = id ?? this.doc.activeLayerIds[0];
+      if (target === undefined) return { r, g, b, lum };
+      below = { ...this.doc, layers: layersBelow(this.doc.layers, target) };
+    }
+    const { pixels } = this.renderer.renderToBuffer(below, this.caps.maxTextureSize);
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] === 0) continue;
+      count(pixels[i]!, pixels[i + 1]!, pixels[i + 2]!);
+    }
+    return { r, g, b, lum };
   }
 
   // ---- masks ----------------------------------------------------------------------------
@@ -1443,6 +1600,9 @@ export class Engine {
     const id = this.doc.activeLayerIds[0];
     const found = id === undefined ? undefined : findLayer(this.doc.layers, id);
     if (found && found.kind === 'pixel') return found;
+    // A group or adjustment layer is active: Photoshop refuses rather than painting somewhere
+    // else. (Painting an adjustment layer's MASK needs mask targeting, which is not built.)
+    if (found) return null;
     // Fall back to the topmost pixel layer at the root.
     for (let i = this.doc.layers.length - 1; i >= 0; i--) {
       const l = this.doc.layers[i]!;
@@ -1663,6 +1823,7 @@ export class Engine {
         ? { ids: new Set(this.transform.ids), matrix: this.transform.matrix }
         : null,
     );
+    this.renderer.setAdjustPreview(this.adjustPreview);
     const overlay = this.quickMask ? this.selectionTexture() : null;
     const s = this.renderer.render(
       this.doc,
@@ -1750,6 +1911,7 @@ export class Engine {
         id: layer.id,
         name: layer.name,
         kind: layer.kind,
+        adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         depth,
         opacity: layer.opacity,
         fill: layer.fill,
@@ -1839,3 +2001,20 @@ function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
 }
 
 export { TILE_SHIFT };
+
+/**
+ * The layer tree as it is beneath layer `id`: its later siblings dropped, and at every level
+ * above it, everything after the group that contains it. What an adjustment layer receives.
+ */
+function layersBelow(layers: readonly Layer[], id: number): Layer[] {
+  const out: Layer[] = [];
+  for (const l of layers) {
+    if (l.id === id) return out;
+    if (l.kind === 'group' && findLayer(l.children, id)) {
+      out.push({ ...l, children: layersBelow(l.children, id) });
+      return out;
+    }
+    out.push(l);
+  }
+  return out;
+}

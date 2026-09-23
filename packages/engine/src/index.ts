@@ -21,3 +21,17 @@ export {
   type GradientStyle,
 } from '@umbra/kernels/gradient';
 export type { PaintMode } from './commands/fill.js';
+export {
+  ADJUSTMENT_LABEL,
+  DEFAULT_LEVELS,
+  defaultAdjustment,
+  type Adjustment,
+  type ChannelMixerOutput,
+  type ColorBalanceBand,
+  type HueRange,
+  type LevelsChannel,
+  SELECTIVE_RANGES,
+  type SelectiveRange,
+  type CmykShift,
+} from '@umbra/kernels/adjust';
+export { evaluateCurve, normaliseCurve, type CurvePoint } from '@umbra/kernels/curve';

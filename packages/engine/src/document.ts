@@ -11,6 +11,7 @@ import { MipPlane } from './tiles/mip.js';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
+import type { Adjustment } from '@umbra/kernels/adjust';
 import type { Selection } from './selection.js';
 
 export type LabelColor =
@@ -88,7 +89,16 @@ export interface GroupLayer extends LayerBase {
   readonly expanded: boolean;
 }
 
-export type Layer = PixelLayer | GroupLayer;
+/**
+ * An adjustment layer: no pixels, only a function of whatever is composited beneath it
+ * (spec 02 §3, spec 06 §8). Its mask limits where it applies, exactly as a pixel layer's does.
+ */
+export interface AdjustmentLayer extends LayerBase {
+  readonly kind: 'adjustment';
+  readonly adjustment: Adjustment;
+}
+
+export type Layer = PixelLayer | GroupLayer | AdjustmentLayer;
 
 /**
  * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
@@ -167,6 +177,29 @@ export function makeGroup(name: string, children: Layer[], over: Partial<GroupLa
     seed: 0,
     children,
     expanded: true,
+    ...over,
+  };
+}
+
+export function makeAdjustmentLayer(
+  name: string,
+  adjustment: Adjustment,
+  over: Partial<AdjustmentLayer> = {},
+): AdjustmentLayer {
+  return {
+    kind: 'adjustment',
+    id: nextLayerId(),
+    name,
+    visible: true,
+    opacity: 1,
+    fill: 1,
+    blendMode: 'normal',
+    clipped: false,
+    locks: NO_LOCKS,
+    color: 'none',
+    blending: DEFAULT_BLENDING_STATE,
+    seed: 0,
+    adjustment,
     ...over,
   };
 }

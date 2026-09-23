@@ -99,6 +99,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
           case 'mergeVisible': engine.mergeVisible(); break;
           case 'flatten': engine.flatten(); break;
           case 'stampVisible': engine.stampVisible(); break;
+          case 'clip': if (id !== undefined) engine.toggleClipped(id); break;
         }
         post({ t: 'doc', doc: engine.summary() });
         break;
@@ -198,6 +199,27 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.setLayerLocks(msg.id, msg.locks);
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'previewAdjustment':
+        engine?.previewAdjustment(msg.adjustment);
+        break;
+      case 'applyAdjustment':
+        if (engine?.applyAdjustment(msg.adjustment)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'autoAdjust':
+        if (engine?.autoAdjust(msg.mode)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'addAdjustmentLayer':
+        if (engine?.addAdjustmentLayer(msg.adjustment)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setLayerAdjustment':
+        if (engine?.setLayerAdjustment(msg.id, msg.adjustment, msg.final)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestHistogram': {
+        if (!engine) break;
+        const h = engine.histogram(msg.source, msg.id);
+        post({ t: 'histogram', source: msg.source, ...h }, [h.r.buffer, h.g.buffer, h.b.buffer, h.lum.buffer]);
+        break;
+      }
       case 'maskCommand':
         if (engine?.maskCommand(msg.command, msg.id)) post({ t: 'doc', doc: engine.summary() });
         break;

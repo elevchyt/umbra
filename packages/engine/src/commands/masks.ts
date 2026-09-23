@@ -39,6 +39,12 @@ function planeFrom(coverage: Uint8Array, width: number, height: number, def: 0 |
   return writer.commit();
 }
 
+/** The selection as a mask plane, or null when there is none — for previews and new layers. */
+export function selectionPlane(doc: Doc): Plane | null {
+  const sel = doc.selection;
+  return sel ? planeFrom(sel.mask, doc.width, doc.height, 0, false) : null;
+}
+
 function maskOf(plane: Plane, defaultColor: 0 | 1): RasterMask {
   return {
     plane: new MipPlane(plane),

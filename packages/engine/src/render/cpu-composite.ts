@@ -8,6 +8,7 @@ import { TILE_SHIFT, TILE_SIZE, channelCount, maxValue } from '@umbra/core/pixel
 import type { CompositeLayer, Sample } from '@umbra/kernels/composite';
 import { DEFAULT_BLENDING } from '@umbra/kernels/composite';
 import type { Rgb } from '@umbra/kernels/blend';
+import { applierToRgbFn, compile } from '@umbra/kernels/adjust';
 import type { Doc, Layer } from '../document.js';
 import type { Plane } from '../tiles/plane.js';
 
@@ -61,6 +62,8 @@ export function toCompositeLayer(layer: Layer): CompositeLayer {
 
   if (layer.kind === 'group') {
     base.children = layer.children.map(toCompositeLayer);
+  } else if (layer.kind === 'adjustment') {
+    base.adjust = applierToRgbFn(compile(layer.adjustment));
   } else {
     const plane = layer.plane.base;
     base.sample = (x, y) => samplePlane(plane, x, y);

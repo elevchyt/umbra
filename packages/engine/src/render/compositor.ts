@@ -9,6 +9,7 @@
  * and CPU results can be diffed directly with no premultiply round trip in between.
  */
 import { BLEND_MODE_INDEX, BLEND_GLSL, SPECIAL_FILL_GLSL } from './blend.glsl.js';
+import { ADJUST_GLSL, type GpuAdjustment } from './adjust.glsl.js';
 import { Program } from '../gpu/program.js';
 import type { GpuCaps } from '../gpu/caps.js';
 import type { BlendMode } from '@umbra/core/blend';
@@ -101,6 +102,59 @@ void main() {
   fragColor = result;
 }`;
 
+/**
+ * Adjustment layer pass — spec 06 §8: `Cr = mix(Cb, B(Cb, f(Cb)), α)` with α = mask ×
+ * opacity × fill (× Blend If), and the backdrop's alpha passed through untouched.
+ */
+const ADJUST_FRAG = /* glsl */ `#version 300 es
+precision highp float;
+in vec2 v_uv;
+
+uniform sampler2D u_backdrop;
+uniform sampler2D u_mask;
+uniform int   u_mode;
+uniform float u_opacity;
+uniform float u_fill;
+uniform float u_hasMask;
+uniform float u_maskDensity;
+uniform vec3  u_channels;
+uniform float u_blendIfCount;
+uniform vec4  u_blendIfThis;
+uniform vec4  u_blendIfUnder;
+uniform float u_blendIfChannel;
+
+${BLEND_GLSL}
+${ADJUST_GLSL}
+
+out vec4 fragColor;
+
+float channelValue(vec3 c, float which) {
+  if (which < 0.5) return uLum(c);
+  if (which < 1.5) return c.r;
+  if (which < 2.5) return c.g;
+  return c.b;
+}
+
+void main() {
+  vec4 backdrop = texture(u_backdrop, v_uv);
+  if (backdrop.a <= 0.0) { fragColor = backdrop; return; }
+  vec3 adjusted = clamp(adjustColor(quantise8(backdrop.rgb)), 0.0, 1.0);
+
+  float alpha = u_opacity * u_fill;
+  if (u_hasMask > 0.5) {
+    float coverage = texture(u_mask, v_uv).r;
+    alpha *= 1.0 - u_maskDensity * (1.0 - coverage);
+  }
+  if (u_blendIfCount > 0.5) {
+    alpha *= rampWeight(channelValue(adjusted, u_blendIfChannel), u_blendIfThis);
+    alpha *= rampWeight(channelValue(backdrop.rgb, u_blendIfChannel), u_blendIfUnder);
+  }
+  if (alpha <= 0.0) { fragColor = backdrop; return; }
+
+  vec4 over = compositeOver(u_mode, vec4(backdrop.rgb, 1.0), vec4(adjusted, alpha));
+  fragColor = vec4(mix(backdrop.rgb, over.rgb, u_channels), backdrop.a);
+}`;
+
 const COPY_FRAG = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -144,7 +198,9 @@ export interface BlendIfSpec {
 }
 
 export interface GpuLayer {
-  kind: 'pixel' | 'group';
+  kind: 'pixel' | 'group' | 'adjustment';
+  /** Adjustment layers: the function, as uniforms. */
+  adjustment?: GpuAdjustment;
   name?: string;
   visible: boolean;
   opacity: number;
@@ -329,6 +385,87 @@ export class LayerCompositor {
     this.drawQuad();
   }
 
+  private _adjust?: Program;
+  /**
+   * Adjustment tables by identity. The renderer caches one `GpuAdjustment` per adjustment
+   * value, so a table is uploaded once per edit rather than once per frame; the cap keeps a
+   * long slider drag from leaking a texture per step.
+   */
+  private tables = new Map<Float32Array, WebGLTexture>();
+  private emptyTable?: WebGLTexture;
+
+  private tableTexture(table: Float32Array | null): WebGLTexture {
+    const gl = this.gl;
+    const upload = (data: Float32Array): WebGLTexture => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA32F, 256, 1);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.FLOAT, data);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      return tex;
+    };
+    if (!table) return (this.emptyTable ??= upload(new Float32Array(256 * 4)));
+    let tex = this.tables.get(table);
+    if (tex) {
+      // Refresh recency.
+      this.tables.delete(table);
+      this.tables.set(table, tex);
+      return tex;
+    }
+    tex = upload(table);
+    this.tables.set(table, tex);
+    if (this.tables.size > 64) {
+      const [oldest, oldTex] = this.tables.entries().next().value!;
+      gl.deleteTexture(oldTex);
+      this.tables.delete(oldest);
+    }
+    return tex;
+  }
+
+  private adjustPass(dst: RenderTarget, backdrop: RenderTarget, mask: RenderTarget | null, layer: GpuLayer): void {
+    const gl = this.gl;
+    const adj = layer.adjustment;
+    this._adjust ??= new Program(gl, QUAD_VERT, ADJUST_FRAG, 'composite.adjust');
+    const table = this.tableTexture(adj?.table ?? null);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+    gl.viewport(0, 0, dst.width, dst.height);
+    gl.disable(gl.BLEND);
+    const p = this._adjust;
+    p.use();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, backdrop.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, (mask ?? backdrop).tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, table);
+    p.u1i('u_backdrop', 0);
+    p.u1i('u_mask', 1);
+    p.u1i('u_adjTable', 2);
+
+    p.u1i('u_mode', BLEND_MODE_INDEX[layer.blendMode] ?? 0);
+    p.u1f('u_opacity', layer.opacity);
+    p.u1f('u_fill', layer.fill);
+    p.u1f('u_hasMask', mask ? 1 : 0);
+    p.u1f('u_maskDensity', layer.maskDensity ?? 1);
+    const ch = layer.channels ?? { r: true, g: true, b: true };
+    gl.uniform3f(p.loc('u_channels'), ch.r ? 1 : 0, ch.g ? 1 : 0, ch.b ? 1 : 0);
+    const bi = layer.blendIf?.[0];
+    p.u1f('u_blendIfCount', bi ? 1 : 0);
+    if (bi) {
+      p.u4f('u_blendIfThis', ...bi.thisLayer);
+      p.u4f('u_blendIfUnder', ...bi.underlying);
+      p.u1f('u_blendIfChannel', CHANNEL_INDEX[bi.channel]);
+    }
+
+    p.u1i('u_adjKind', adj?.kind ?? -1);
+    const v = adj?.params ?? new Float32Array(16);
+    for (let i = 0; i < 4; i++) p.u4f(`u_adj${i}`, v[i * 4]!, v[i * 4 + 1]!, v[i * 4 + 2]!, v[i * 4 + 3]!);
+
+    this.drawQuad();
+  }
+
   private copyPass(dst: RenderTarget, src: RenderTarget, opacity = 1): void {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
@@ -471,6 +608,13 @@ export class LayerCompositor {
 
   private compositeOne(layer: GpuLayer, backdrop: RenderTarget): RenderTarget {
     if (layer.kind === 'group') return this.compositeGroup(layer, backdrop);
+    if (layer.kind === 'adjustment') {
+      const mask = this.renderMask(layer);
+      const dst = this.acquire();
+      this.adjustPass(dst, backdrop, mask, layer);
+      if (mask) this.release(mask);
+      return dst;
+    }
 
     const src = this.renderSource(layer);
     const mask = this.renderMask(layer);
@@ -662,6 +806,10 @@ void main() { fragColor = vec4(texture(u_color, v_uv).rgb, texture(u_alpha, v_uv
     this.lerpProgram.dispose();
     this._opaque?.dispose();
     this._applyAlpha?.dispose();
+    this._adjust?.dispose();
+    for (const tex of this.tables.values()) this.gl.deleteTexture(tex);
+    if (this.emptyTable) this.gl.deleteTexture(this.emptyTable);
+    this.tables.clear();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);
   }

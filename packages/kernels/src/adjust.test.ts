@@ -406,3 +406,45 @@ describe('applying over pixels', () => {
     expect(data[0]).toBe(191);
   });
 });
+
+describe('selective color', () => {
+  const sc = (relative: boolean, patch: Partial<Record<string, { c?: number; m?: number; y?: number; k?: number }>>) => {
+    const base = defaultAdjustment('selectiveColor') as Extract<Adjustment, { kind: 'selectiveColor' }>;
+    const ranges = { ...base.ranges };
+    for (const [k, v] of Object.entries(patch)) ranges[k as keyof typeof ranges] = { c: 0, m: 0, y: 0, k: 0, ...v };
+    return { ...base, relative, ranges } as Adjustment;
+  };
+
+  it('does nothing at its defaults', () => {
+    expect(applyToRgb(defaultAdjustment('selectiveColor'), 200, 90, 30)).toEqual([200, 90, 30]);
+  });
+
+  it('Absolute cyan in Reds removes red from a pure red; Relative has no room to act', () => {
+    // Pure red is at the top of its channel, so Relative (scaled by 1 − v) cannot move it.
+    expect(applyToRgb(sc(false, { reds: { c: 100 } }), 255, 0, 0)).toEqual([0, 0, 0]);
+    expect(applyToRgb(sc(true, { reds: { c: 100 } }), 255, 0, 0)).toEqual([255, 0, 0]);
+  });
+
+  it('acts in proportion to how strongly a pixel belongs to the range', () => {
+    // Reds' scale is max − mid: an orange (255,128,0) is half as "red" as pure red.
+    const [r] = applyToRgb(sc(false, { reds: { c: 100 } }), 255, 128, 0);
+    expect(r).toBe(255 - 127);
+  });
+
+  it('leaves other hues alone', () => {
+    expect(applyToRgb(sc(false, { reds: { c: 100, k: 50 } }), 20, 200, 40)).toEqual([20, 200, 40]);
+  });
+
+  it('Neutrals shift a mid grey but not pure black or white', () => {
+    const a = sc(false, { neutrals: { c: 20 } });
+    expect(applyToRgb(a, 128, 128, 128)[0]).toBeLessThan(128);
+    expect(applyToRgb(a, 0, 0, 0)).toEqual([0, 0, 0]);
+    expect(applyToRgb(a, 255, 255, 255)).toEqual([255, 255, 255]);
+  });
+
+  it('Blacks darken the shadows and leave highlights', () => {
+    const a = sc(true, { blacks: { k: 50 } });
+    expect(applyToRgb(a, 40, 50, 60)[0]).toBeLessThan(40);
+    expect(applyToRgb(a, 200, 210, 220)).toEqual([200, 210, 220]);
+  });
+});

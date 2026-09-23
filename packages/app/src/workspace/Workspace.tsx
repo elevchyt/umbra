@@ -4,7 +4,9 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment } from '@umbra/engine';
+import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
+import { initialAdjustment } from '../adjust/initial';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -43,7 +45,9 @@ async function deliverFile(name: string, buffer: ArrayBuffer): Promise<void> {
 /** Hand a headless harness its result; the Electron main process is waiting on this. */
 function reportToShell(pass: boolean, text: string): void {
   const shell = (globalThis as Record<string, any>).umbraShell;
-  shell?.reportSpikes?.({ pass, text });
+  // In a plain browser there is no shell to hand the report to; the console is the report.
+  if (shell?.reportSpikes) shell.reportSpikes({ pass, text });
+  else console.log(text);
 }
 
 /** Arrow keys move by one document pixel, or ten with Shift. */
@@ -92,6 +96,9 @@ export function Workspace() {
           store.setStats(s);
         },
         onDoc: (d) => {
+          // Dev aid, like __umbraStats: the summary is what the panels render from, and it
+          // arrives by message, so it is trustworthy even when a hidden pane stalls frames.
+          if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraDoc = d;
           store.setDoc(d);
           if (store.tabs.length === 0) {
             store.setTabs([{ id: 1, name: d.name, dirty: false }]);
@@ -105,6 +112,7 @@ export function Workspace() {
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
         onTransform: setTransforming,
         onThumbnail: store.setThumbnail,
+        onHistogram: store.setHistogram,
         onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
         onNoRecovery: () => startDefaultDocument(),
         onSampled: (color, toBackground) => {
@@ -590,6 +598,24 @@ export function Workspace() {
       case 'layer.delete':
         send({ t: 'layerCommand', command: 'delete' });
         break;
+      case 'image.autoTone':
+      case 'image.autoContrast':
+      case 'image.autoColor':
+      case 'adjust.equalize': {
+        const doc = store.doc();
+        const active = doc?.layers.find((l) => l.id === doc.activeLayerIds[0]);
+        if (!active || active.kind !== 'pixel') {
+          flash('Could not complete the command because the target layer is not a pixel layer.');
+          break;
+        }
+        const mode = cmd === 'adjust.equalize' ? 'equalize' : cmd === 'image.autoTone' ? 'tone' : cmd === 'image.autoContrast' ? 'contrast' : 'color';
+        send({ t: 'autoAdjust', mode });
+        break;
+      }
+      case 'layer.clippingMask':
+        // Toggles, as Ctrl+Alt+G does in Photoshop: create when unclipped, release when clipped.
+        send({ t: 'layerCommand', command: 'clip' });
+        break;
       case 'layer.duplicate':
         send({ t: 'layerCommand', command: 'duplicate' });
         break;
@@ -647,6 +673,60 @@ export function Workspace() {
         send({ t: 'imageCommand', command: 'revealAll' });
         break;
 
+      case 'adjust.brightnessContrast':
+      case 'adjust.levels':
+      case 'adjust.curves':
+      case 'adjust.exposure':
+      case 'adjust.vibrance':
+      case 'adjust.hueSaturation':
+      case 'adjust.colorBalance':
+      case 'adjust.blackWhite':
+      case 'adjust.photoFilter':
+      case 'adjust.channelMixer':
+      case 'adjust.invert':
+      case 'adjust.posterize':
+      case 'adjust.threshold':
+      case 'adjust.gradientMap':
+      case 'adjust.desaturate':
+      case 'adjust.selectiveColor': {
+        // Image ▸ Adjustments act on pixels, so the target must be a pixel layer — Photoshop
+        // greys these out for groups and adjustment layers; here the command explains itself.
+        const kind = cmd.slice('adjust.'.length) as Adjustment['kind'];
+        const doc = store.doc();
+        const active = doc?.layers.find((l) => l.id === doc.activeLayerIds[0]);
+        if (!active || active.kind !== 'pixel') {
+          flash(`Could not complete ${ADJUSTMENT_LABEL[kind]} because the target layer is not a pixel layer.`);
+          break;
+        }
+        if (kind === 'invert' || kind === 'desaturate') {
+          send({ t: 'applyAdjustment', adjustment: defaultAdjustment(kind) });
+        } else {
+          store.openDialog('adjustment', initialAdjustment(kind));
+        }
+        break;
+      }
+      case 'adjLayer.brightnessContrast':
+      case 'adjLayer.levels':
+      case 'adjLayer.curves':
+      case 'adjLayer.exposure':
+      case 'adjLayer.vibrance':
+      case 'adjLayer.hueSaturation':
+      case 'adjLayer.colorBalance':
+      case 'adjLayer.blackWhite':
+      case 'adjLayer.photoFilter':
+      case 'adjLayer.channelMixer':
+      case 'adjLayer.invert':
+      case 'adjLayer.posterize':
+      case 'adjLayer.threshold':
+      case 'adjLayer.gradientMap':
+      case 'adjLayer.selectiveColor': {
+        // Photoshop opens the Properties panel on the new layer rather than a dialog.
+        const kind = cmd.slice('adjLayer.'.length) as Adjustment['kind'];
+        send({ t: 'addAdjustmentLayer', adjustment: initialAdjustment(kind) });
+        store.openPanel('properties');
+        break;
+      }
+
       default: {
         const info = COMMAND_BY_ID.get(cmd);
         store.setStatusMessage(
@@ -667,6 +747,11 @@ export function Workspace() {
   /** The small one-field dialogs the Select ▸ Modify commands share. */
   function promptAmount(title: string, label: string, value: number, apply: (v: number) => void): void {
     setAmountPrompt({ title, label, value, apply });
+  }
+
+  function flash(message: string): void {
+    store.setStatusMessage(message);
+    setTimeout(() => store.setStatusMessage(null), 4000);
   }
 
   /** The document a session starts with when there is nothing to recover. */
@@ -1109,6 +1194,13 @@ export function Workspace() {
             </div>
           </Dialog>
         )}
+      </Show>
+      <Show when={store.dialog()?.id === 'adjustment'}>
+        <AdjustmentDialog
+          initial={store.dialog()!.payload as Adjustment}
+          send={(m) => send(m as Parameters<typeof send>[0])}
+          onClose={store.closeDialog}
+        />
       </Show>
       <Show when={store.dialog()?.id === 'fill'}>
         <FillDialog

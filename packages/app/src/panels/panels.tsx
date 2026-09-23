@@ -1,4 +1,7 @@
-import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, on, onCleanup, onMount, type JSX } from 'solid-js';
+import { ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment } from '@umbra/engine';
+import { AdjustmentEditor } from '../adjust/editors';
+import { ADJUSTMENT_ICON, initialAdjustment } from '../adjust/initial';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
@@ -39,13 +42,13 @@ export function renderPanel(id: string): JSX.Element {
     case 'paths':
       return <Placeholder name="Paths" milestone="M7" what="work path, saved paths, fill and stroke path" />;
     case 'adjustments':
-      return <Placeholder name="Adjustments" milestone="M4" what="the 16 adjustment layers and their presets" />;
+      return <AdjustmentsPanel />;
     case 'brushSettings':
       return <Placeholder name="Brush Settings" milestone="M8" what="shape dynamics, scattering, texture, dual brush, transfer" />;
     case 'brushes':
       return <Placeholder name="Brushes" milestone="M3" what="brush presets and .abr import" />;
     case 'histogram':
-      return <Placeholder name="Histogram" milestone="M4" what="per-channel histograms and statistics" />;
+      return <HistogramPanel />;
     default:
       return <Placeholder name={PANEL_META[id]?.title ?? id} milestone="later" what="" />;
   }
@@ -182,9 +185,20 @@ function LayersPanel() {
                   </button>
                 </Show>
 
-                <div class="layer-thumb" classList={{ group: l.kind === 'group' }} aria-hidden="true">
+                <div
+                  class="layer-thumb"
+                  classList={{ group: l.kind === 'group', adjustment: l.kind === 'adjustment' }}
+                  aria-hidden="true"
+                  onDblClick={() => {
+                    // Photoshop opens an adjustment layer's settings from its thumbnail.
+                    if (l.kind === 'adjustment') store.openPanel('properties');
+                  }}
+                >
                   <Show when={l.kind === 'group'}>
                     <Icon name="folder" size={14} />
+                  </Show>
+                  <Show when={l.kind === 'adjustment' && l.adjustment}>
+                    {(a) => <Icon name={ADJUSTMENT_ICON[a().kind]} size={15} />}
                   </Show>
                 </div>
 
@@ -700,6 +714,287 @@ function InfoPanel() {
 // ---- Properties -----------------------------------------------------------------------
 
 function PropertiesPanel() {
+  const d = () => store.doc();
+  const activeAdjustment = () => {
+    const doc = d();
+    const l = doc?.layers.find((r) => r.id === doc.activeLayerIds[0]);
+    return l && l.kind === 'adjustment' && l.adjustment ? l : null;
+  };
+  // Keyed on the layer ID, not the layer: every document summary is a new object, and keying
+  // on it re-mounted the editor on each one — replacing the slider being dragged.
+  const adjustmentId = createMemo(() => activeAdjustment()?.id);
+  return (
+    <Show when={adjustmentId()} keyed fallback={<DocumentProperties />}>
+      {(id) => <AdjustmentProperties id={id} />}
+    </Show>
+  );
+}
+
+/**
+ * An adjustment layer's settings — the Properties panel as Photoshop shows it for one.
+ *
+ * The editor works on a local copy while a drag is in progress: the engine echoes every step
+ * back as a summary, and applying those echoes mid-drag would pull the control back to where
+ * it was a message ago. Outside a drag the summary wins, which is how undo shows up here.
+ */
+function AdjustmentProperties(props: { id: number }) {
+  const send = (msg: unknown) => store.engine?.(msg);
+  const summary = () => store.doc()?.layers.find((l) => l.id === props.id)?.adjustment;
+  const [local, setLocal] = createSignal<Adjustment | undefined>(summary());
+  // Until the engine has echoed our last change, its summaries describe states we have
+  // already moved past (the echoes of earlier drag steps) and are ignored.
+  let awaiting: string | null = null;
+  createEffect(
+    on(summary, (s) => {
+      if (!s) return;
+      if (awaiting !== null) {
+        if (JSON.stringify(s) !== awaiting) return;
+        awaiting = null;
+      }
+      setLocal(s);
+    }),
+  );
+
+  // Levels, Curves and Threshold draw the histogram of what this layer receives.
+  const needsHistogram = () => {
+    const k = local()?.kind;
+    return k === 'levels' || k === 'curves' || k === 'threshold';
+  };
+  createEffect(
+    on(
+      () => [props.id, store.doc()?.historyIndex, needsHistogram()] as const,
+      ([id, , need]) => {
+        if (need) send({ t: 'requestHistogram', source: 'below', id });
+      },
+    ),
+  );
+
+  const change = (next: Adjustment, final: boolean) => {
+    awaiting = JSON.stringify(next);
+    setLocal(next);
+    send({ t: 'setLayerAdjustment', id: props.id, adjustment: next, final });
+  };
+
+  return (
+    <div class="properties-panel">
+      <Show when={local()}>
+        {(a) => (
+          <>
+            <div class="properties-head adjust-head">
+              <Icon name={ADJUSTMENT_ICON[a().kind]} size={15} />
+              <span>{ADJUSTMENT_LABEL[a().kind]}</span>
+            </div>
+            <div class="properties-adjust">
+              <AdjustmentEditor value={a()} onChange={change} compact histogram="below" />
+            </div>
+            <div class="properties-foot">
+              <button
+                type="button"
+                class="mini-icon"
+                title="Reset to adjustment defaults"
+                onClick={() => change(a().kind === 'gradientMap' ? initialAdjustment('gradientMap') : defaultAdjustment(a().kind), true)}
+              >
+                <Icon name="reset" size={14} />
+              </button>
+              <button
+                type="button"
+                class="mini-icon"
+                title="Toggle layer visibility"
+                onClick={() => {
+                  const l = store.doc()?.layers.find((r) => r.id === props.id);
+                  if (l) send({ t: 'setLayerVisible', id: props.id, visible: !l.visible });
+                }}
+              >
+                <Icon name="eye" size={14} />
+              </button>
+              <button
+                type="button"
+                class="mini-icon"
+                title="Delete this adjustment layer"
+                onClick={() => {
+                  send({ t: 'selectLayer', id: props.id });
+                  send({ t: 'layerCommand', command: 'delete' });
+                }}
+              >
+                <Icon name="trash" size={14} />
+              </button>
+            </div>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+// ---- Adjustments -------------------------------------------------------------------------
+
+/** Photoshop's panel order: tonal row, colour row, then the special-purpose ones. */
+const ADJUSTMENT_GRID: (Adjustment['kind'] | null)[][] = [
+  ['brightnessContrast', 'levels', 'curves', 'exposure'],
+  ['vibrance', 'hueSaturation', 'colorBalance', 'blackWhite', 'photoFilter', 'channelMixer'],
+  ['invert', 'posterize', 'threshold', 'gradientMap', 'selectiveColor'],
+];
+
+function AdjustmentsPanel() {
+  const add = (kind: Adjustment['kind']) => {
+    store.engine?.({ t: 'addAdjustmentLayer', adjustment: initialAdjustment(kind) });
+    store.openPanel('properties');
+  };
+  return (
+    <div class="adjustments-panel">
+      <div class="adjustments-caption">Add an adjustment</div>
+      <For each={ADJUSTMENT_GRID}>
+        {(row) => (
+          <div class="adjustments-row">
+            <For each={row}>
+              {(kind) => (
+                <Show when={kind}>
+                  {(k) => (
+                    <button
+                      type="button"
+                      class="adjustments-button"
+                      title={`${ADJUSTMENT_LABEL[k()]} — new adjustment layer`}
+                      disabled={!store.doc()}
+                      onClick={() => add(k())}
+                    >
+                      <Icon name={ADJUSTMENT_ICON[k()]} size={18} />
+                    </button>
+                  )}
+                </Show>
+              )}
+            </For>
+          </div>
+        )}
+      </For>
+      <div class="dim adjustments-note">Color Lookup is not implemented yet.</div>
+    </div>
+  );
+}
+
+// ---- Histogram ---------------------------------------------------------------------------
+
+/**
+ * Histogram panel — the composite's per-channel histograms, overlaid in their colours, with
+ * the luminosity one behind in grey, plus Photoshop's statistics for the chosen channel.
+ * Recomputed when the document changes (each history step), not per frame.
+ */
+function HistogramPanel() {
+  const send = (msg: unknown) => store.engine?.(msg);
+  const [channel, setChannel] = createSignal<'colors' | 'lum' | 'r' | 'g' | 'b'>('colors');
+  createEffect(
+    on(
+      () => [store.doc()?.historyIndex, store.doc()?.history.length, store.doc()?.name] as const,
+      () => {
+        if (store.doc()) send({ t: 'requestHistogram', source: 'composite' });
+      },
+    ),
+  );
+  const h = () => store.histogram('composite');
+
+  const path = (c: Uint32Array | undefined, max: number) => {
+    if (!c) return '';
+    let d = 'M0 100';
+    for (let i = 0; i < 256; i++) {
+      const y = 100 - Math.min(1, c[i]! / max) * 100;
+      d += `L${i} ${y}L${i + 1} ${y}`;
+    }
+    return `${d}L256 100Z`;
+  };
+  const scale = (cs: (Uint32Array | undefined)[]) => {
+    let max = 1;
+    for (const c of cs) if (c) for (let i = 1; i < 255; i++) max = Math.max(max, c[i]!);
+    return max;
+  };
+
+  const stats = createMemo(() => {
+    const hist = h();
+    if (!hist) return null;
+    const c = channel() === 'colors' || channel() === 'lum' ? hist.lum : hist[channel() as 'r' | 'g' | 'b'];
+    let n = 0;
+    let sum = 0;
+    for (let i = 0; i < 256; i++) {
+      n += c[i]!;
+      sum += i * c[i]!;
+    }
+    if (n === 0) return { mean: 0, dev: 0, median: 0, pixels: 0 };
+    const mean = sum / n;
+    let v = 0;
+    let acc = 0;
+    let median = 0;
+    let found = false;
+    for (let i = 0; i < 256; i++) {
+      v += c[i]! * (i - mean) ** 2;
+      acc += c[i]!;
+      if (!found && acc >= n / 2) {
+        median = i;
+        found = true;
+      }
+    }
+    return { mean, dev: Math.sqrt(v / n), median, pixels: n };
+  });
+
+  return (
+    <div class="histogram-panel">
+      <Select
+        value={channel()}
+        label="Channel"
+        width={96}
+        options={[
+          { value: 'colors', label: 'Colors' },
+          { value: 'lum', label: 'Luminosity' },
+          { value: 'r', label: 'Red' },
+          { value: 'g', label: 'Green' },
+          { value: 'b', label: 'Blue' },
+        ]}
+        onChange={setChannel}
+      />
+      <Show when={h()} fallback={<div class="dim pad">No document</div>}>
+        {(hist) => (
+          <>
+            <svg class="histogram-graph" viewBox="0 0 256 100" preserveAspectRatio="none">
+              <Show
+                when={channel() === 'colors'}
+                fallback={
+                  <path
+                    class={`histogram-fill ch-${channel()}`}
+                    d={path(channel() === 'lum' ? hist().lum : hist()[channel() as 'r' | 'g' | 'b'], scale([channel() === 'lum' ? hist().lum : hist()[channel() as 'r' | 'g' | 'b']]))}
+                  />
+                }
+              >
+                {(() => {
+                  const max = scale([hist().r, hist().g, hist().b]);
+                  return (
+                    <>
+                      <path class="histogram-fill ch-r blend" d={path(hist().r, max)} />
+                      <path class="histogram-fill ch-g blend" d={path(hist().g, max)} />
+                      <path class="histogram-fill ch-b blend" d={path(hist().b, max)} />
+                    </>
+                  );
+                })()}
+              </Show>
+            </svg>
+            <Show when={stats()}>
+              {(s) => (
+                <div class="histogram-stats">
+                  <span>Mean:</span>
+                  <span>{s().mean.toFixed(2)}</span>
+                  <span>Std Dev:</span>
+                  <span>{s().dev.toFixed(2)}</span>
+                  <span>Median:</span>
+                  <span>{s().median}</span>
+                  <span>Pixels:</span>
+                  <span>{s().pixels}</span>
+                </div>
+              )}
+            </Show>
+          </>
+        )}
+      </Show>
+    </div>
+  );
+}
+
+function DocumentProperties() {
   const d = () => store.doc();
   return (
     <div class="properties-panel">

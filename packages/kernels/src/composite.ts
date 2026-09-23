@@ -60,7 +60,7 @@ export const DEFAULT_BLENDING: AdvancedBlending = {
 };
 
 export interface CompositeLayer {
-  kind: 'pixel' | 'group';
+  kind: 'pixel' | 'group' | 'adjustment';
   name?: string;
   visible: boolean;
   /** 0…1 */
@@ -75,6 +75,8 @@ export interface CompositeLayer {
   sample?: (x: number, y: number) => Sample;
   /** Group layers only, bottom-most first. */
   children?: CompositeLayer[];
+  /** Adjustment layers only: the colour function applied to the backdrop (spec 06 §8). */
+  adjust?: (backdrop: Rgb) => Rgb;
   /** Seed for Dissolve, so the pattern is stable per layer. */
   seed?: number;
 }
@@ -176,6 +178,7 @@ function shapeAlpha(layer: CompositeLayer, x: number, y: number, pixelAlpha: num
 
 function compositeOne(layer: CompositeLayer, backdrop: Composited, ctx: Ctx): Composited {
   if (layer.kind === 'group') return compositeGroup(layer, backdrop, ctx);
+  if (layer.kind === 'adjustment') return compositeAdjustment(layer, backdrop, ctx);
 
   const s = layer.sample!(ctx.x, ctx.y);
   const special = isSpecialFillMode(layer.blendMode);
@@ -214,6 +217,27 @@ function compositeOne(layer: CompositeLayer, backdrop: Composited, ctx: Ctx): Co
   }
 
   return applyChannelMask(result, backdrop, layer.blending.channels);
+}
+
+/**
+ * Adjustment layer — spec 06 §8. The layer's "source" is its function of the backdrop, its
+ * coverage is mask × opacity × fill, and it adds no coverage of its own: the result keeps the
+ * backdrop's alpha, so an adjustment over transparency stays transparent.
+ *
+ * Fill acts as a second opacity here, including for the eight special-fill modes — there is
+ * no content colour for Fill to fold into.
+ */
+function compositeAdjustment(layer: CompositeLayer, backdrop: Composited, ctx: Ctx): Composited {
+  if (backdrop.alpha <= 0 || !layer.adjust) return backdrop;
+  const adjusted = layer.adjust(backdrop.color);
+  let alpha = shapeAlpha(layer, ctx.x, ctx.y, 1) * layer.fill * layer.opacity;
+  if (layer.blending.blendIf.length > 0) {
+    alpha *= blendIfWeight(layer.blending.blendIf, adjusted, backdrop.color);
+  }
+  if (alpha <= 0) return backdrop;
+  // Against an opaque backdrop the general equation reduces to mix(Cb, B(Cb, f(Cb)), α).
+  const over = compositePixel(layer.blendMode, backdrop.color, 1, adjusted, alpha);
+  return applyChannelMask({ color: over.color, alpha: backdrop.alpha }, backdrop, layer.blending.channels);
 }
 
 /** Replace the backdrop inside the layer's shape, for knockout (spec 06 §7). */

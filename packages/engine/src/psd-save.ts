@@ -24,6 +24,7 @@ import type { Doc, Layer } from './document.js';
 import type { Plane } from './tiles/plane.js';
 import { tilesInRect } from './tiles/plane.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
+import { toPsdAdjustment } from './psd-adjust.js';
 
 /** Our mode ids → the names ag-psd writes. */
 const TO_PSD_MODE: Record<string, string> = Object.fromEntries(
@@ -158,6 +159,11 @@ function toAgLayer(layer: Layer, doc: Doc): AgLayer {
 
   if (layer.kind === 'group') {
     return { ...common, opened: layer.expanded, children: layer.children.map((c) => toAgLayer(c, doc)) };
+  }
+
+  if (layer.kind === 'adjustment') {
+    const source = (layer.psdExtra as { adjustment?: unknown } | undefined)?.adjustment;
+    return { ...common, left: 0, top: 0, right: 0, bottom: 0, adjustment: toPsdAdjustment(layer.adjustment, source) };
   }
 
   const rect = tightBounds(layer.plane.base);

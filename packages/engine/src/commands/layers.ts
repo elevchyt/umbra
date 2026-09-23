@@ -180,6 +180,18 @@ export function groupLayers(doc: Doc, ids: readonly number[], name?: string): Do
   return { ...doc, layers, activeLayerIds: made ? [made.id] : doc.activeLayerIds };
 }
 
+/**
+ * Layer ▸ Create / Release Clipping Mask (Ctrl+Alt+G toggles). The bottom layer of a sibling
+ * list has nothing beneath it to clip to, so it cannot be clipped, as in Photoshop.
+ */
+export function setClipped(doc: Doc, id: number, clipped: boolean): Doc {
+  const found = locate(doc.layers, id);
+  if (!found) return doc;
+  const layer = found.parent[found.index]!;
+  if (layer.clipped === clipped || (clipped && found.index === 0)) return doc;
+  return { ...doc, layers: mapSiblings(doc.layers, id, (sib, i) => { sib[i] = { ...layer, clipped }; return sib; }) };
+}
+
 export function ungroup(doc: Doc, id: number): Doc {
   const found = locate(doc.layers, id);
   if (!found) return doc;

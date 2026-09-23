@@ -155,6 +155,9 @@ function targetLayer(doc: Doc): PixelLayer | null {
   const id = doc.activeLayerIds[0];
   const found = id === undefined ? undefined : findLayer(doc.layers, id);
   if (found && found.kind === 'pixel') return found;
+  // A group or adjustment layer is active: Photoshop refuses rather than painting somewhere
+  // else. (Painting an adjustment layer's MASK needs mask targeting, which is not built.)
+  if (found) return null;
   for (let i = doc.layers.length - 1; i >= 0; i--) {
     const l = doc.layers[i]!;
     if (l.kind === 'pixel') return l;

@@ -15,7 +15,10 @@ import {
   type CompositeLayer,
 } from '@umbra/kernels/composite';
 import type { Rgb } from '@umbra/kernels/blend';
+import { applierToRgbFn, compile, ADJUSTMENT_LABEL, type Adjustment } from '@umbra/kernels/adjust';
 import { Program } from './gpu/program.js';
+import { toGpuAdjustment } from './render/adjust.glsl.js';
+import { ADJUSTMENT_SAMPLES } from './adjust-samples.js';
 import { LayerCompositor, type GpuLayer, type RenderTarget } from './render/compositor.js';
 import type { GpuCaps } from './gpu/caps.js';
 
@@ -30,7 +33,7 @@ void main() { v_uv = a_corner; gl_Position = vec4(a_corner * 2.0 - 1.0, 0.0, 1.0
 const PATTERN_FRAG = /* glsl */ `#version 300 es
 precision highp float;
 in vec2 v_uv;
-uniform int u_kind;      // 0 = solid, 1 = horizontal ramp, 2 = vertical ramp
+uniform int u_kind;      // 0 = solid, 1 = horizontal ramp, 2 = vertical ramp, 3 = colour field
 uniform vec4 u_color;
 uniform float u_opacity;
 uniform float u_premultiply;
@@ -39,12 +42,19 @@ void main() {
   vec4 c;
   if (u_kind == 1) c = vec4(vec3(v_uv.x), u_color.a);
   else if (u_kind == 2) c = vec4(vec3(v_uv.y), u_color.a);
+  else if (u_kind == 3) {
+    // 4096 distinct 8-bit colours, built from integer pixel coordinates so the CPU side can
+    // reproduce every value exactly — no float rounding that could differ between the two.
+    int x = int(gl_FragCoord.x);
+    int y = int(gl_FragCoord.y);
+    c = vec4(float(x * 4) / 255.0, float(y * 4) / 255.0, float((x * 37 + y * 11) % 256) / 255.0, u_color.a);
+  }
   else c = u_color;
   c.a *= u_opacity;
   fragColor = u_premultiply > 0.5 ? vec4(c.rgb * c.a, c.a) : c;
 }`;
 
-type PatternKind = 'solid' | 'rampX' | 'rampY';
+type PatternKind = 'solid' | 'rampX' | 'rampY' | 'colors';
 
 /** Value a pattern produces at a pixel, matching the shader exactly. */
 function patternSample(kind: PatternKind, color: Rgb, alpha: number, x: number, y: number): { color: Rgb; alpha: number } {
@@ -53,6 +63,7 @@ function patternSample(kind: PatternKind, color: Rgb, alpha: number, x: number, 
   const v = (y + 0.5) / PARITY_SIZE;
   if (kind === 'rampX') return { color: [u, u, u], alpha };
   if (kind === 'rampY') return { color: [v, v, v], alpha };
+  if (kind === 'colors') return { color: [(x * 4) / 255, (y * 4) / 255, ((x * 37 + y * 11) % 256) / 255], alpha };
   return { color, alpha };
 }
 
@@ -68,6 +79,8 @@ interface CaseLayer {
   maskPattern?: PatternKind;
   maskDensity?: number;
   children?: CaseLayer[];
+  /** Makes this an adjustment layer; `pattern` is then ignored. */
+  adjustment?: Adjustment;
   blendIf?: { channel: 'gray'; thisLayer: [number, number, number, number]; underlying: [number, number, number, number] }[];
 }
 
@@ -118,7 +131,7 @@ export class ParityRunner {
     premultiply = false,
   ): void {
     const gl = this.gl;
-    const k = kind === 'rampX' ? 1 : kind === 'rampY' ? 2 : 0;
+    const k = kind === 'rampX' ? 1 : kind === 'rampY' ? 2 : kind === 'colors' ? 3 : 0;
     this.pattern.use();
     this.pattern.u1i('u_kind', k);
     this.pattern.u4f('u_color', color[0], color[1], color[2], alpha);
@@ -132,6 +145,20 @@ export class ParityRunner {
   private toGpuLayer(l: CaseLayer): GpuLayer {
     const color = l.color ?? [1, 1, 1];
     const alpha = l.alpha ?? 1;
+    if (l.adjustment) {
+      return {
+        kind: 'adjustment',
+        visible: l.visible ?? true,
+        opacity: l.opacity ?? 1,
+        fill: l.fill ?? 1,
+        blendMode: l.mode ?? 'normal',
+        clipped: l.clipped ?? false,
+        maskDensity: l.maskDensity ?? 1,
+        blendIf: l.blendIf,
+        adjustment: toGpuAdjustment(l.adjustment),
+        drawMask: l.maskPattern ? (_t: RenderTarget) => this.paint(l.maskPattern!, [1, 1, 1], 1) : undefined,
+      };
+    }
     const out: GpuLayer = {
       kind: l.children ? 'group' : 'pixel',
       visible: l.visible ?? true,
@@ -171,6 +198,16 @@ export class ParityRunner {
       clipped: l.clipped ?? false,
       blending: { ...DEFAULT_BLENDING, blendIf: l.blendIf ?? [] },
     });
+    const mask = l.maskPattern
+      ? {
+          sample: (x: number, y: number) => patternSample(l.maskPattern!, [1, 1, 1], 1, x, y).color[0],
+          enabled: true,
+          density: l.maskDensity ?? 1,
+        }
+      : undefined;
+    if (l.adjustment) {
+      return { ...base, kind: 'adjustment', sample: undefined, adjust: applierToRgbFn(compile(l.adjustment)), mask };
+    }
     if (l.children) {
       return {
         ...base,
@@ -182,13 +219,7 @@ export class ParityRunner {
     return {
       ...base,
       sample: (x, y) => patternSample(l.pattern, color, alpha, x, y),
-      mask: l.maskPattern
-        ? {
-            sample: (x, y) => patternSample(l.maskPattern!, [1, 1, 1], 1, x, y).color[0],
-            enabled: true,
-            density: l.maskDensity ?? 1,
-          }
-        : undefined,
+      mask,
     };
   }
 
@@ -395,6 +426,60 @@ export function parityCases(): ParityCase[] {
         {
           pattern: 'solid',
           children: [{ pattern: 'solid', children: [{ pattern: 'rampY', mode: 'overlay' }] }],
+        },
+      ],
+    },
+  );
+
+  // Adjustment layers: every kind over 4096 distinct colours, GLSL mirror vs CPU kernel.
+  for (const adjustment of ADJUSTMENT_SAMPLES) {
+    cases.push({
+      name: `adjustment ${ADJUSTMENT_LABEL[adjustment.kind]}${adjustment.kind === 'hueSaturation' && adjustment.colorize ? ' (colorize)' : ''}${adjustment.kind === 'brightnessContrast' && adjustment.legacy ? ' (legacy)' : ''}`,
+      layers: [{ pattern: 'colors' }, { pattern: 'solid', adjustment }],
+    });
+  }
+  const hue = ADJUSTMENT_SAMPLES.find((a) => a.kind === 'hueSaturation')!;
+  const curves = ADJUSTMENT_SAMPLES.find((a) => a.kind === 'curves')!;
+  cases.push(
+    {
+      name: 'adjustment through a mask',
+      layers: [{ pattern: 'colors' }, { pattern: 'solid', adjustment: hue, maskPattern: 'rampY' }],
+    },
+    {
+      name: 'adjustment at 50% opacity, Multiply',
+      layers: [{ pattern: 'colors' }, { pattern: 'solid', adjustment: curves, opacity: 0.5, mode: 'multiply' }],
+    },
+    {
+      name: 'adjustment in Luminosity mode',
+      layers: [{ pattern: 'colors' }, { pattern: 'solid', adjustment: hue, mode: 'luminosity' }],
+    },
+    {
+      name: 'adjustment over a 50% alpha backdrop keeps its alpha',
+      layers: [{ pattern: 'colors', alpha: 0.5 }, { pattern: 'solid', adjustment: { kind: 'invert' } }],
+    },
+    {
+      name: 'clipped adjustment affects only its base',
+      layers: [
+        { pattern: 'rampX' },
+        { pattern: 'colors', alpha: 0.5 },
+        { pattern: 'solid', adjustment: hue, clipped: true },
+      ],
+    },
+    {
+      name: 'adjustment inside a pass-through group reaches below it',
+      layers: [
+        { pattern: 'colors' },
+        { pattern: 'solid', children: [{ pattern: 'solid', adjustment: { kind: 'invert' } }] },
+      ],
+    },
+    {
+      name: 'adjustment inside an isolated group sees only the group',
+      layers: [
+        { pattern: 'colors' },
+        {
+          pattern: 'solid',
+          mode: 'normal',
+          children: [{ pattern: 'rampY', alpha: 0.5 }, { pattern: 'solid', adjustment: { kind: 'invert' } }],
         },
       ],
     },

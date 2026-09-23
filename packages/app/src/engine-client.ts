@@ -22,6 +22,7 @@ export interface EngineClientEvents {
   onDoc?: (doc: DocSummary) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
+  onHistogram?: (h: { source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }) => void;
   onThumbnail?: (t: { pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }) => void;
   onRecovery?: (info: { name: string; savedAt: number; width: number; height: number }) => void;
   onNoRecovery?: () => void;
@@ -115,6 +116,9 @@ export class EngineClient {
         break;
       case 'thumbnail':
         this.events.onThumbnail?.(msg);
+        break;
+      case 'histogram':
+        this.events.onHistogram?.(msg);
         break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);
