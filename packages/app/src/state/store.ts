@@ -265,6 +265,7 @@ export type DialogId =
   | 'filter'
   | 'gallery'
   | 'smartBlend'
+  | 'closeContents'
   | 'fade'
   | 'calculations'
   | 'definePattern';

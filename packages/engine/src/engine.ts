@@ -39,6 +39,7 @@ import {
   type Layer,
   type PixelLayer,
   type SmartObjectLayer,
+  type SmartSource,
 } from './document.js';
 import { History } from './history.js';
 import {
@@ -319,6 +320,7 @@ export class Engine {
   }
 
   openBitmap(bitmap: ImageBitmap, name: string): void {
+    this.dropContents();
     const { plane, width, height } = planeFromImageBitmap(bitmap);
     const layer = makePixelLayer('Background', plane);
     this.warnings = [];
@@ -348,6 +350,7 @@ export class Engine {
   }
 
   openPsdBuffer(buffer: ArrayBuffer, name: string): void {
+    this.dropContents();
     const { doc, warnings, patterns } = openPsd(buffer, name);
     for (const p of patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
     this.warnings = warnings;
@@ -357,6 +360,7 @@ export class Engine {
   }
 
   newDoc(width: number, height: number): void {
+    this.dropContents();
     this.warnings = [];
     this.doc = emptyDoc(width, height);
     this.history = new History(this.doc, 'New');
@@ -836,27 +840,31 @@ export class Engine {
    */
   private maybeJournal(now: number): void {
     if (this.journalIntervalMs <= 0) return;
-    if (this.doc === this.journalledDoc) return;
-    if (this.doc.layers.length === 0) return;
+    // While a smart object's contents are open, the document worth recovering is the outermost
+    // one, as it stood when they were last saved into it.
+    const rootDoc = this.parents.length ? this.parents[0]!.doc : this.doc;
+    const rootHistory = this.parents.length ? this.parents[0]!.history : this.history;
+    if (rootDoc === this.journalledDoc) return;
+    if (rootDoc.layers.length === 0) return;
     // Nothing to recover until the user has changed something: the default document is
     // recreated on launch, and a freshly opened file is already on disk. Snapshotting either
     // costs about two seconds of this thread (measured: a 2400×1600 six-layer document encodes
     // in ~1.9 s) for no benefit.
-    if (this.history.list().length <= 1) return;
+    if (rootHistory.list().length <= 1) return;
     if (now < this.journalDueAt) return;
     // Encoding a PSD blocks this thread for as long as it takes, so it must not land in the
     // middle of a stroke or a drag. Both end in a committed document a moment later anyway.
     if (this.painting || this.transform || this.crop) return;
     this.journalDueAt = now + this.journalIntervalMs;
-    this.journalledDoc = this.doc;
+    this.journalledDoc = rootDoc;
     try {
       // No flattened composite: a journal is read back by this program, not by another one,
       // and the composite would add another full canvas to every snapshot.
-      this.journal.write(savePsd(this.doc, { maximizeCompatibility: false }), {
-        name: this.doc.name,
+      this.journal.write(savePsd(rootDoc, { maximizeCompatibility: false }), {
+        name: rootDoc.name,
         savedAt: Date.now(),
-        width: this.doc.width,
-        height: this.doc.height,
+        width: rootDoc.width,
+        height: rootDoc.height,
       });
     } catch (err) {
       // A document the PSD writer cannot express yet must not break editing; the next
@@ -1248,6 +1256,111 @@ export class Engine {
   previewSmartBlend(layerId: number, index: number, blend: { blendMode: BlendMode; opacity: number } | null): void {
     this.previewDoc = blend ? Smart.updateSmartFilter(this.doc, layerId, index, blend, this.smartMap) : null;
     if (this.previewDoc === this.doc) this.previewDoc = null;
+  }
+
+  // ---- Edit Contents and Place --------------------------------------------------------------
+
+  /**
+   * Layer ▸ Smart Objects ▸ Edit Contents opens the embedded document in place of the one
+   * holding it (Photoshop opens a tab; this is the same with the parent kept aside until the
+   * contents close). Nested smart objects nest.
+   */
+  private parents: { doc: Doc; history: History; view: ViewState; source: SmartSource; warnings: Engine['warnings'] }[] = [];
+  /** The contents as last saved into the parent, to tell whether closing needs to ask. */
+  private contentsSaved: Doc | null = null;
+
+  get editingContents(): { path: string[]; dirty: boolean } | null {
+    if (this.parents.length === 0) return null;
+    return { path: [...this.parents.map((p) => p.doc.name), this.doc.name], dirty: this.doc !== this.contentsSaved };
+  }
+
+  editContents(): boolean {
+    const smart = this.activeSmart() ?? this.activeSmartAny();
+    if (!smart) return false;
+    this.previewDoc = null;
+    this.fadeState = null;
+    this.parents.push({ doc: this.doc, history: this.history, view: this.view, source: smart.source, warnings: this.warnings });
+    this.doc = { ...smart.source.doc, name: smart.source.name };
+    this.contentsSaved = this.doc;
+    this.history = new History(this.doc, 'Open');
+    this.warnings = [];
+    this.fitView(this.doc.width, this.doc.height);
+    return true;
+  }
+
+  /** Another document replaces this one: any open contents go with it. */
+  private dropContents(): void {
+    this.parents = [];
+    this.contentsSaved = null;
+  }
+
+  private activeSmartAny(): SmartObjectLayer | null {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    return layer && layer.kind === 'smart' ? layer : null;
+  }
+
+  /** File ▸ Save while editing contents: every instance in the parent takes the new contents. */
+  saveContents(): boolean {
+    const top = this.parents[this.parents.length - 1];
+    if (!top || this.doc === this.contentsSaved) return false;
+    const source = Smart.makeSource(top.source.name, { ...this.doc, name: top.source.doc.name }, top.source.id);
+    const next = Smart.replaceSource(top.doc, source);
+    top.history.push('Update Smart Object', next);
+    top.doc = next;
+    top.source = source;
+    this.contentsSaved = this.doc;
+    return true;
+  }
+
+  /** Close the contents, saving them into the parent first when `save`. */
+  closeContents(save: boolean): boolean {
+    if (this.parents.length === 0) return false;
+    if (save) this.saveContents();
+    const top = this.parents.pop()!;
+    this.previewDoc = null;
+    this.fadeState = null;
+    this.doc = top.doc;
+    this.history = top.history;
+    this.view = top.view;
+    this.warnings = top.warnings;
+    this.contentsSaved = this.parents.length ? this.doc : null;
+    this.compositeCache = null;
+    return true;
+  }
+
+  /** A file's contents as a document: a PSD's layers, or a picture as one layer. */
+  private contentsFrom(file: { name: string; bitmap?: ImageBitmap; psd?: ArrayBuffer }): Doc | null {
+    if (file.psd) return openPsd(file.psd, file.name).doc;
+    if (!file.bitmap) return null;
+    const { plane, width, height } = planeFromImageBitmap(file.bitmap);
+    const layer = makePixelLayer(file.name.replace(/\.[^.]+$/, ''), plane);
+    return { ...emptyDoc(width, height, file.name), layers: [layer], activeLayerIds: [layer.id] };
+  }
+
+  /**
+   * File ▸ Place Embedded (into this document, above the active layer) and File ▸ Open as
+   * Smart Object (`asDocument`: a new document holding just the smart object).
+   */
+  placeEmbedded(file: { name: string; bitmap?: ImageBitmap; psd?: ArrayBuffer; bytes?: Uint8Array; type?: string; asDocument?: boolean }): boolean {
+    const contents = this.contentsFrom(file);
+    if (!contents) return false;
+    const psb = file.psd ? file.name.replace(/\.psd$/i, '.psb') : file.name;
+    const source = Smart.makeSource(psb, contents, undefined, file.bytes && file.type ? { bytes: file.bytes, type: file.type } : undefined);
+    const name = file.name.replace(/\.[^.]+$/, '');
+    if (file.asDocument) {
+      this.dropContents();
+      const layer = Smart.makeSmartLayer(name, source, { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }, contents);
+      this.warnings = [];
+      this.doc = { ...emptyDoc(contents.width, contents.height, file.name), layers: [layer], activeLayerIds: [layer.id] };
+      this.history = new History(this.doc, 'Open');
+      this.fitView(contents.width, contents.height);
+      return true;
+    }
+    const layer = Smart.makeSmartLayer(name, source, Smart.placeTransform(contents, this.doc), this.doc);
+    const above = this.doc.activeLayerIds[0];
+    this.commit({ ...this.doc, layers: insertLayer(this.doc.layers, layer, above), activeLayerIds: [layer.id] }, 'Place Embedded');
+    return true;
   }
 
   // ---- Edit ▸ Fade ------------------------------------------------------------------------
@@ -2566,6 +2679,7 @@ export class Engine {
       height: this.doc.height,
       activeLayerIds: [...this.doc.activeLayerIds],
       maskTarget: this.paintTarget()?.mask ? this.doc.activeLayerIds[0] ?? null : null,
+      editingContents: this.editingContents,
       lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
       fadeName: this.fadeName,
       hasSelection: !!this.doc.selection,

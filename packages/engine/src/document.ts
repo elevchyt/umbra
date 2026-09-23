@@ -124,6 +124,11 @@ export interface SmartSource {
   readonly doc: Doc;
   /** The embedded document flattened, in its own pixel space — what the transform places. */
   readonly composite: Plane;
+  /**
+   * The file the contents came from (a placed PNG or JPEG), kept byte for byte so a saved
+   * PSD embeds the original, as Photoshop does. Editing the contents drops it.
+   */
+  readonly file?: { readonly bytes: Uint8Array; readonly type: string };
 }
 
 /** One smart filter: a registry filter with its settings, blended onto what is beneath it. */

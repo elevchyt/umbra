@@ -206,8 +206,10 @@ function LayersPanel() {
                     if (l.hasMask && (l.kind === 'pixel' || l.kind === 'smart')) store.engine?.({ t: 'setMaskTarget', id: l.id, mask: false });
                   }}
                   onDblClick={() => {
-                    // Photoshop opens an adjustment layer's settings from its thumbnail.
+                    // Photoshop opens an adjustment layer's settings from its thumbnail, and a
+                    // smart object's contents.
                     if (l.kind === 'adjustment' || l.kind === 'fill') store.openPanel('properties');
+                    if (l.kind === 'smart') store.engine?.({ t: 'editContents' });
                   }}
                 >
                   <Show when={l.kind === 'group'}>

@@ -98,6 +98,8 @@ export interface DocSummary {
   activeLayerIds: number[];
   /** The active layer when its MASK is the edit target (always so for adjustment/fill layers). */
   maskTarget: number | null;
+  /** Set while a smart object's contents are open: the documents above them, and whether they changed since saved. */
+  editingContents: { path: string[]; dirty: boolean } | null;
   /** Filter ▸ Last Filter's filter, once one has been applied. */
   lastFilter: { id: string; label: string } | null;
   /** What Edit ▸ Fade would fade, while it can ("Gaussian Blur"); null otherwise. */
@@ -220,6 +222,12 @@ export type ToEngine =
   /** The dialog's preview box: a document rectangle, answered with before and after. */
   | { t: 'filterBox'; id: string; params: FilterParams; fg: Rgb3; bg: Rgb3; rect: { x0: number; y0: number; x1: number; y1: number }; seq: number; smartIndex?: number }
   | { t: 'smartCommand'; cmd: SmartCommand }
+  | { t: 'editContents' }
+  /** Save the open contents into the smart object (every instance), and optionally close them. */
+  | { t: 'saveContents' }
+  | { t: 'closeContents'; save: boolean }
+  /** File ▸ Place Embedded / Open as Smart Object. `bytes` is the original file, kept to embed in a PSD. */
+  | { t: 'placeEmbedded'; name: string; bitmap?: ImageBitmap; psd?: ArrayBuffer; bytes?: Uint8Array; type?: string; asDocument?: boolean }
   | { t: 'smartFilterOp'; layerId: number; index: number; op: SmartFilterOp }
   /** Latest wins; null ends the preview. */
   | { t: 'previewSmartBlend'; layerId: number; index: number; blend: { blendMode: BlendMode; opacity: number } | null }

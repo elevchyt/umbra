@@ -20,6 +20,7 @@ import {
   makeSource,
   moveSmartFilter,
   newSmartViaCopy,
+  placeTransform,
   rasterizeSmart,
   rendered,
   removeSmartFilter,
@@ -215,5 +216,21 @@ describe('instances, copies and conversion back', () => {
     expect(group.kind).toBe('group');
     const inner = (group as { children: readonly { id: number }[] }).children[0]!;
     expect(worst(pixels(g, inner.id), pixels(s))).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('Place Embedded', () => {
+  it('centres the contents and scales them down to fit, never up', () => {
+    const big = placeTransform({ width: 400, height: 100 }, { width: 200, height: 200 });
+    expect([big.a, big.d, big.e, big.f]).toEqual([0.5, 0.5, 0, 75]);
+    const small = placeTransform({ width: 20, height: 10 }, { width: 200, height: 200 });
+    expect([small.a, small.e, small.f]).toEqual([1, 90, 95]);
+  });
+
+  it('keeps the original file with the contents until they are edited', () => {
+    const doc = docWith();
+    const src = makeSource('photo.png', doc, undefined, { bytes: new Uint8Array([1, 2, 3]), type: 'image/png' });
+    expect(src.file?.type).toBe('image/png');
+    expect(makeSource(src.name, doc, src.id).file).toBeUndefined();
   });
 });

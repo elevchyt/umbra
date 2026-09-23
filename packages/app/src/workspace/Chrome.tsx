@@ -4,7 +4,7 @@ import { store } from '../state/store';
 import { TOOL_BY_ID } from '../tools/registry';
 
 /** Document tab strip — spec 01 §1 ("Document area"). */
-export function DocumentTabs(props: { onClose: (id: number) => void; onSelect: (id: number) => void }) {
+export function DocumentTabs(props: { onClose: (id: number) => void; onSelect: (id: number) => void; onCloseContents?: () => void }) {
   return (
     <Show when={store.tabs.length > 0}>
       <div class="doc-tabs">
@@ -12,7 +12,7 @@ export function DocumentTabs(props: { onClose: (id: number) => void; onSelect: (
           {(t) => (
             <div
               class="doc-tab"
-              classList={{ active: store.activeTab() === t.id }}
+              classList={{ active: store.activeTab() === t.id && !store.doc()?.editingContents }}
               onClick={() => props.onSelect(t.id)}
               onAuxClick={(e) => {
                 // Middle-click closes, as in every tabbed editor.
@@ -27,6 +27,28 @@ export function DocumentTabs(props: { onClose: (id: number) => void; onSelect: (
                 onClick={(e) => {
                   e.stopPropagation();
                   props.onClose(t.id);
+                }}
+              >
+                <Icon name="close" size={10} />
+              </button>
+            </div>
+          )}
+        </For>
+        {/* A smart object's contents open as their own tab, after the document holding them. */}
+        <For each={store.doc()?.editingContents?.path.slice(1) ?? []}>
+          {(name, i) => (
+            <div class="doc-tab" classList={{ active: i() === (store.doc()?.editingContents?.path.length ?? 0) - 2 }}>
+              <span class="doc-tab-title">
+                {name}
+                {i() === (store.doc()?.editingContents?.path.length ?? 0) - 2 && store.doc()?.editingContents?.dirty ? ' *' : ''}
+              </span>
+              <button
+                type="button"
+                class="doc-tab-close"
+                title="Close the contents and return to the smart object"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onCloseContents?.();
                 }}
               >
                 <Icon name="close" size={10} />

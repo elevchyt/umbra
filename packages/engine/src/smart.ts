@@ -14,7 +14,7 @@
 import { rectIntersect, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
 import { compositePixel } from '@umbra/kernels/blend';
-import { compose, transformedBounds, translate, type Mat } from '@umbra/kernels/matrix';
+import { compose, scale, transformedBounds, translate, type Mat } from '@umbra/kernels/matrix';
 import { FILTER_BY_ID } from '@umbra/kernels/filters/index';
 import { Plane } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
@@ -71,8 +71,17 @@ export function flattenSource(doc: Doc): Plane {
   return rasterize(visible, canvas);
 }
 
-export function makeSource(name: string, doc: Doc, id = nextSourceId++): SmartSource {
-  return { id, name, doc, composite: flattenSource(doc) };
+export function makeSource(name: string, doc: Doc, id = nextSourceId++, file?: SmartSource['file']): SmartSource {
+  return file ? { id, name, doc, composite: flattenSource(doc), file } : { id, name, doc, composite: flattenSource(doc) };
+}
+
+/**
+ * File ▸ Place Embedded: contents placed centred on the canvas and, when bigger than it,
+ * scaled down to fit — Photoshop's default "Resize Image During Place".
+ */
+export function placeTransform(content: Size, canvas: Size): Mat {
+  const k = Math.min(1, canvas.width / content.width, canvas.height / content.height);
+  return compose(scale(k), translate((canvas.width - content.width * k) / 2, (canvas.height - content.height * k) / 2));
 }
 
 /** The source's canvas as placed in the document. */

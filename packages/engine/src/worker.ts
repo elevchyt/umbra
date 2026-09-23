@@ -264,6 +264,20 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         pendingPreview = null;
         if (engine?.smartCommand(msg.cmd)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'editContents':
+        pendingPreview = null;
+        if (engine?.editContents()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'saveContents':
+        if (engine?.saveContents()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'closeContents':
+        pendingPreview = null;
+        if (engine?.closeContents(msg.save)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'placeEmbedded':
+        if (engine?.placeEmbedded(msg)) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'smartFilterOp':
         pendingPreview = null;
         if (engine?.smartFilterOp(msg.layerId, msg.index, msg.op)) post({ t: 'doc', doc: engine.summary() });

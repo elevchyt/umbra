@@ -189,7 +189,13 @@ implementation.
       filter (Filter Gallery included) applied to a smart object becomes a smart filter; its
       row in the Layers panel has an eye, double-click to edit, blending options, reorder and
       delete; a selection active at the first filter becomes the filter mask. Duplicate Layer
-      makes instances that share contents.
+      makes instances that share contents. **Edit Contents** (or double-click the thumbnail)
+      opens the embedded document as its own tab; Ctrl+S or closing with Save updates every
+      instance. **File ▸ Place Embedded** and **Open as Smart Object** take a picture or a PSD.
+- [ ] **Linked smart objects** (Place Linked, Relink, Update Modified Content, Embed/Convert to
+      Linked), Replace Contents, Export Contents and Stack Mode are not built — they need file
+      watching and a second open document (M11). Place Embedded does not start a Free
+      Transform afterwards as Photoshop does.
 - [ ] **Painting on a smart filter's mask is not built.** The mask renders, disables and
       deletes, and comes from the selection, but brushes do not target it yet.
 - [ ] **Smart objects render on the CPU**: each edit re-renders the object (≈2 s for a

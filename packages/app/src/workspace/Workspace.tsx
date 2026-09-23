@@ -22,6 +22,7 @@ import { PANEL_META, PANEL_BY_COMMAND, renderPanel } from '../panels/panels';
 import { WORKSPACE_BY_ID, DEFAULT_LAYOUT } from '../workspaces/layouts';
 import { Keymap, EXTRA_BINDINGS, isTextEntry, chordFromEvent, chordLabel } from '../keymap/keymap';
 import { OptionsBar } from './OptionsBar';
+import { Button } from '@umbra/ui/widgets/controls';
 import { DocumentTabs, StatusBar } from './Chrome';
 import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, ShortcutsDialog, ImageSizeDialog, CanvasSizeDialog, AmountDialog, FillDialog, StrokeDialog, Dialog, NameDialog, type FillRequest, type StrokeRequest } from '../dialogs/Dialogs';
 
@@ -30,6 +31,7 @@ const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 /** Commands that only make sense on a smart object, and when. */
 const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
   'so.newViaCopy': () => true,
+  'so.editContents': () => true,
   'so.convertToLayers': () => true,
   'so.rasterize': () => true,
   'rasterize.smartObject': () => true,
@@ -118,11 +120,13 @@ export function Workspace() {
           // arrives by message, so it is trustworthy even when a hidden pane stalls frames.
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraDoc = d;
           store.setDoc(d);
+          // While a smart object's contents are open, the tab keeps the outer document's name.
+          const name = d.editingContents?.path[0] ?? d.name;
           if (store.tabs.length === 0) {
-            store.setTabs([{ id: 1, name: d.name, dirty: false }]);
+            store.setTabs([{ id: 1, name, dirty: false }]);
             store.setActiveTab(1);
           } else {
-            store.setTabs(0, 'name', d.name);
+            store.setTabs(0, 'name', name);
           }
         },
         onSpikes: (pass, text) => reportToShell(pass, text),
@@ -402,6 +406,16 @@ export function Workspace() {
         void openFile();
         break;
       case 'file.close':
+        // Closing a smart object's contents returns to the document holding it.
+        if (store.doc()?.editingContents) {
+          if (store.doc()!.editingContents!.dirty) store.openDialog('closeContents');
+          else send({ t: 'closeContents', save: false });
+          break;
+        }
+        store.setTabs([]);
+        store.setActiveTab(null);
+        send({ t: 'newDoc', width: 1920, height: 1080 });
+        break;
       case 'file.closeAll':
         store.setTabs([]);
         store.setActiveTab(null);
@@ -411,9 +425,25 @@ export function Workspace() {
         window.close();
         break;
       case 'file.save':
+        // Saving contents puts them back into the smart object, as Photoshop's Ctrl+S does.
+        if (store.doc()?.editingContents) {
+          send({ t: 'saveContents' });
+          break;
+        }
+        send({ t: 'savePsd', name: psdName() });
+        break;
       case 'file.saveAs':
       case 'file.saveCopy':
         send({ t: 'savePsd', name: psdName() });
+        break;
+      case 'file.placeEmbedded':
+        placeFile(false);
+        break;
+      case 'file.openAsSmartObject':
+        placeFile(true);
+        break;
+      case 'so.editContents':
+        send({ t: 'editContents' });
         break;
 
       case 'edit.undo':
@@ -983,6 +1013,33 @@ export function Workspace() {
     store.setScreenMode(order[(i + 1) % order.length]!);
   }
 
+  /**
+   * File ▸ Place Embedded and Open as Smart Object: the file becomes a smart object's
+   * contents. A picture also travels as its original bytes, which a saved PSD embeds as is.
+   */
+  function placeFile(asDocument: boolean): void {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,.psd,.psb';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (/\.psb?$|\.psd$/i.test(file.name)) {
+        const psd = await file.arrayBuffer();
+        client?.send({ t: 'placeEmbedded', name: file.name, psd, asDocument }, [psd]);
+      } else {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const bitmap = await createImageBitmap(file);
+        client?.send({ t: 'placeEmbedded', name: file.name, bitmap, bytes, type: file.type || 'image/png', asDocument }, [bitmap, bytes.buffer]);
+      }
+      if (asDocument) {
+        store.setTabs([{ id: 1, name: file.name, dirty: false }]);
+        store.setActiveTab(1);
+      }
+    };
+    input.click();
+  }
+
   async function openFile(): Promise<void> {
     const input = document.createElement('input');
     input.type = 'file';
@@ -1161,6 +1218,7 @@ export function Workspace() {
       return layer?.kind === 'smart' && smartOnly(layer.smart!);
     }
     if (cmd === 'so.convert' || cmd === 'filter.convertForSmart') return (store.doc()?.activeLayerIds.length ?? 0) > 0;
+    if (cmd === 'file.placeEmbedded') return !!store.doc();
     return !!entry.done;
   };
 
@@ -1221,6 +1279,7 @@ export function Workspace() {
           <DocumentTabs
             onClose={() => runCommand('file.close')}
             onSelect={(id) => store.setActiveTab(id)}
+            onCloseContents={() => runCommand('file.close')}
           />
           <div class="doc-area" ref={docAreaRef} classList={{ 'with-rulers': store.extras.rulers }}>
             <canvas ref={canvasRef} class={cursorClass(store.activeTool())} />
@@ -1399,6 +1458,34 @@ export function Workspace() {
       </Show>
       <Show when={store.dialog()?.id === 'gallery'}>
         <GalleryDialog payload={store.dialog()!.payload as GalleryPayload | undefined} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
+      </Show>
+      <Show when={store.dialog()?.id === 'closeContents'}>
+        <Dialog
+          title="Umbra"
+          width={360}
+          okLabel="Save"
+          onOk={() => {
+            send({ t: 'closeContents', save: true });
+            store.closeDialog();
+          }}
+          onCancel={store.closeDialog}
+          footer={
+            <Button
+              width={90}
+              onClick={() => {
+                send({ t: 'closeContents', save: false });
+                store.closeDialog();
+              }}
+            >
+              Don't Save
+            </Button>
+          }
+        >
+          <p class="dialog-text">
+            Save changes to the contents of “{store.doc()?.name}” before closing? Saving updates the smart object in “
+            {store.doc()?.editingContents?.path.at(-2)}”.
+          </p>
+        </Dialog>
       </Show>
       <Show when={store.dialog()?.id === 'smartBlend'}>
         <SmartBlendDialog payload={store.dialog()!.payload as SmartBlendPayload} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
