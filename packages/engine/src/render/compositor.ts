@@ -9,7 +9,47 @@
  * and CPU results can be diffed directly with no premultiply round trip in between.
  */
 import { BLEND_MODE_INDEX, BLEND_GLSL, SPECIAL_FILL_GLSL } from './blend.glsl.js';
-import { ADJUST_GLSL, type GpuAdjustment } from './adjust.glsl.js';
+import { ADJUST_GLSL, ADJ_KIND, type GpuAdjustment } from './adjust.glsl.js';
+
+/**
+ * An adjustment layer that can be folded into its neighbours: a table-shaped adjustment
+ * (Levels, Curves, Brightness/Contrast, Exposure, Invert, Posterize) applied plainly —
+ * Normal, full opacity and fill, no mask, no Blend If, all channels, not clipped and not a
+ * clipping base. Two of those in a row are one table: T₂[T₁[v]].
+ */
+function fusable(l: GpuLayer): boolean {
+  const ch = l.channels;
+  return (
+    l.kind === 'adjustment' &&
+    l.visible &&
+    l.adjustment?.kind === ADJ_KIND.table &&
+    !!l.adjustment.table &&
+    l.blendMode === 'normal' &&
+    l.opacity >= 1 &&
+    l.fill >= 1 &&
+    !l.drawMask &&
+    !l.clipped &&
+    !(l.blendIf && l.blendIf.length) &&
+    (!ch || (ch.r && ch.g && ch.b))
+  );
+}
+
+/**
+ * Compose tables in order. Entries are k/255 exactly, which is what makes this exact: the
+ * sequential passes quantise each intermediate result back to the same byte this indexes by.
+ */
+function composeTables(tables: readonly Float32Array[]): Float32Array {
+  const out = new Float32Array(256 * 4);
+  for (let i = 0; i < 256; i++) {
+    for (let c = 0; c < 3; c++) {
+      let v = i;
+      for (const t of tables) v = Math.round(t[v * 4 + c]! * 255);
+      out[i * 4 + c] = v / 255;
+    }
+    out[i * 4 + 3] = 1;
+  }
+  return out;
+}
 import { Program } from '../gpu/program.js';
 import type { GpuCaps } from '../gpu/caps.js';
 import type { BlendMode } from '@umbra/core/blend';
@@ -386,6 +426,38 @@ export class LayerCompositor {
   }
 
   private _adjust?: Program;
+  /** Adjustment fusion on (the default); the parity suite turns it off to compare. */
+  fusion = true;
+  /** Adjustment layers folded into a fused pass since the last `takeFusedCount`. */
+  private fusedLayers = 0;
+
+  takeFusedCount(): number {
+    const n = this.fusedLayers;
+    this.fusedLayers = 0;
+    return n;
+  }
+
+  /** Fused tables by the identities of their parts, so a still document uploads nothing. */
+  private tableIds = new WeakMap<Float32Array, number>();
+  private nextTableId = 1;
+  private fused = new Map<string, Float32Array>();
+
+  private fusedTable(tables: readonly Float32Array[]): Float32Array {
+    const key = tables
+      .map((t) => {
+        let id = this.tableIds.get(t);
+        if (!id) this.tableIds.set(t, (id = this.nextTableId++));
+        return id;
+      })
+      .join(',');
+    let out = this.fused.get(key);
+    if (!out) {
+      out = composeTables(tables);
+      this.fused.set(key, out);
+      if (this.fused.size > 32) this.fused.delete(this.fused.keys().next().value!);
+    }
+    return out;
+  }
   /**
    * Adjustment tables by identity. The renderer caches one `GpuAdjustment` per adjustment
    * value, so a table is uploaded once per edit rather than once per frame; the cap keeps a
@@ -545,6 +617,24 @@ export class LayerCompositor {
       // A layer with a clipped layer above it is a clipping BASE: it must go through the
       // clipping path, never into a batch, or its clipped layers lose what they clip to.
       const isClipBase = (k: number) => layers[k + 1]?.clipped === true;
+
+      // Adjustment fusion (spec 03 §5.2): a run of plain table-shaped adjustment layers is one
+      // pass through their composed table, not one full-viewport pass each.
+      if (this.fusion && fusable(layer) && !isClipBase(i)) {
+        let end = i;
+        while (end + 1 < layers.length && fusable(layers[end + 1]!) && !isClipBase(end + 1)) end++;
+        if (end > i) {
+          const run = layers.slice(i, end + 1);
+          const table = this.fusedTable(run.map((l) => l.adjustment!.table!));
+          const next = this.acquire();
+          this.adjustPass(next, acc, null, { ...layer, adjustment: { kind: ADJ_KIND.table, table, params: layer.adjustment!.params } });
+          this.release(acc);
+          acc = next;
+          this.fusedLayers += run.length;
+          i = end + 1;
+          continue;
+        }
+      }
 
       // Fast path: batch a run of plain Normal layers into a single blend pass.
       if (layer.plain && layer.drawBatched && !isClipBase(i)) {

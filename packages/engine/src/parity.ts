@@ -93,6 +93,8 @@ export interface ParityCase {
   layers: CaseLayer[];
   /** Allowed max per-channel difference in 8-bit units. */
   tolerance?: number;
+  /** The case exists to exercise adjustment fusion; fail if nothing was fused. */
+  expectFused?: boolean;
 }
 
 export interface ParityResult {
@@ -251,8 +253,19 @@ export class ParityRunner {
   }
 
   run(testCase: ParityCase): ParityResult {
+    this.compositor.takeFusedCount();
     const gpu = this.compositor.compositeToPixels(testCase.layers.map((l) => this.toGpuLayer(l)));
     this.compositor.releaseAll();
+    const fused = this.compositor.takeFusedCount();
+    // Fusion must be invisible: the fused render has to equal the pass-by-pass one exactly.
+    let fusionDelta = 0;
+    if (testCase.expectFused) {
+      this.compositor.fusion = false;
+      const plain = this.compositor.compositeToPixels(testCase.layers.map((l) => this.toGpuLayer(l)));
+      this.compositor.releaseAll();
+      this.compositor.fusion = true;
+      for (let i = 0; i < plain.length; i++) fusionDelta = Math.max(fusionDelta, Math.abs(plain[i]! - gpu[i]!));
+    }
 
     const cpuLayers = testCase.layers.map((l) => this.toCpuLayer(l));
     const cpu = new Uint8ClampedArray(PARITY_SIZE * PARITY_SIZE * 4);
@@ -285,8 +298,13 @@ export class ParityRunner {
 
     const tolerance = testCase.tolerance ?? 1;
     return {
-      name: testCase.name,
-      pass: maxDelta <= tolerance,
+      name:
+        testCase.expectFused && fused === 0
+          ? `${testCase.name} (NOT FUSED)`
+          : fusionDelta > 0
+            ? `${testCase.name} (fused ≠ unfused by ${fusionDelta})`
+            : testCase.name,
+      pass: maxDelta <= tolerance && (!testCase.expectFused || (fused > 0 && fusionDelta === 0)),
       maxDelta,
       meanDelta: sum / cpu.length,
       worstAt,
@@ -510,6 +528,36 @@ export function parityCases(): ParityCase[] {
           children: [{ pattern: 'rampY', alpha: 0.5 }, { pattern: 'solid', adjustment: { kind: 'invert' } }],
         },
       ],
+    },
+  );
+
+  // Adjustment fusion: runs of plain table adjustments composite in one pass.
+  const tableKinds = ADJUSTMENT_SAMPLES.filter((a) => ['levels', 'curves', 'brightnessContrast', 'exposure', 'posterize', 'invert'].includes(a.kind));
+  cases.push(
+    {
+      name: 'fused: every table adjustment in one run',
+      layers: [{ pattern: 'colors' }, ...tableKinds.map((adjustment) => ({ pattern: 'solid' as const, adjustment }))],
+      expectFused: true,
+    },
+    {
+      name: 'fused: two runs split by a Hue/Saturation and a pixel layer',
+      layers: [
+        { pattern: 'colors' },
+        { pattern: 'solid', adjustment: tableKinds[0]! },
+        { pattern: 'solid', adjustment: tableKinds[3]! },
+        { pattern: 'solid', adjustment: hue },
+        { pattern: 'solid', adjustment: { kind: 'invert' } },
+        { pattern: 'solid', adjustment: tableKinds[2]! },
+        { pattern: 'rampY', alpha: 0.4 },
+        { pattern: 'solid', adjustment: tableKinds[1]! },
+        { pattern: 'solid', adjustment: { kind: 'posterize', levels: 6 } },
+      ],
+      expectFused: true,
+      // After a partial-alpha blend the backdrop is no longer exactly k/255, and the GPU keeps
+      // it in float16 where the reference keeps float64: a value within rounding distance of
+      // a byte boundary quantises differently, and steep tables after it (a posterize step)
+      // magnify that. The fused and unfused GPU renders are still required to be identical.
+      tolerance: 64,
     },
   );
 
