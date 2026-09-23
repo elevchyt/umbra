@@ -13,9 +13,9 @@ looks like it does. Tick things off as they land.
   where they expect it. They should be *disabled* rather than silently inert, which is itself
   an entry in §1.
 
-First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted again after M4's
-adjustments landed the same day. Of 505 menu commands, **134 are wired**, 34 are panel toggles
-generated from the panel registry, and **337 are not built** — greyed out, correctly. Regenerate
+First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted again when M4
+finished the same day. Of 505 menu commands, **146 are wired**, 34 are panel toggles
+generated from the panel registry, and **325 are not built** — greyed out, correctly. Regenerate
 with the script at the bottom; `shell.test.ts` fails if a menu item's `done:` flag and its
 handler ever disagree.
 
@@ -81,6 +81,20 @@ by tests — which is itself the recurring lesson of this project.
 - [x] **The journal snapshotted untouched documents** — about 1.9 s of worker time per snapshot
       for a 2400×1600 six-layer document, spent on something with nothing to recover. It now
       waits for the first edit.
+- [x] **Stored mask tiles never reached the GPU (found in M4, broken since M3).** The atlas
+      uploaded every tile as RGBA8; a mask tile is one byte per pixel, so WebGL rejected the
+      upload and the slot drew whatever it held before. Every mask with stored pixels —
+      Reveal/Hide Selection, From Transparency, PSD masks — rendered wrong; only masks with
+      nothing stored looked right. The console had been printing
+      `texSubImage3D: ArrayBufferView not big enough` the whole time.
+- [x] **Mip levels lost a plane's default (found in M4).** Every downsampled level defaulted
+      to 0, so a white-default mask read as black below level 1: zoomed out, everything near
+      a painted mask tile was hidden.
+- [x] **Parity follow-up done:** document-parity cases now render real documents (tile store,
+      atlas, stored-tile masks, adjustment and fill layers) against the CPU reference, and
+      any WebGL error raised during the run fails it. The two bugs above fail those cases.
+- [ ] **Parity does not cover mip levels.** It renders at 1:1; the mip default is covered by a
+      unit test instead.
 - [ ] **A journal write failed with a `DOMException` once, cause not established.** It was logged
       as `[object DOMException]`; it now logs the name and message. Leading suspect: two windows
       writing the one journal — there is one per origin, not per window. Needs a real repro.
@@ -98,24 +112,41 @@ by tests — which is itself the recurring lesson of this project.
       real answer.
 - [ ] **Gradient presets are the three built-ins.** No stop editor; the preset dropdown cannot
       be extended.
-- [ ] **Hue/Saturation has master sliders only** — the six per-colour ranges (Reds…Magentas)
-      with their draggable band edges are not there. A PSD's ranges are *kept* on save (the
-      layer carries the original record), and the open report says they do not render.
-- [ ] **Painting on an adjustment layer does nothing.** Photoshop paints its mask; that needs
-      mask targeting (clicking the mask thumbnail to edit the mask), which does not exist for
-      any layer yet. Until then the brush, fill and copy *refuse* on a group or adjustment layer
-      — they used to fall back silently to the topmost pixel layer, which was worse.
-- [ ] **Adjustment dialogs start from defaults every time.** Photoshop remembers the last-used
-      settings per dialog (and Ctrl+Alt+L etc. reopen with them); there are no presets either.
-- [ ] **Levels and Curves have no eyedroppers, no Auto button, no Options.** Curves has no
-      pencil mode and no on-image tool; Channel Mixer and Black & White have no presets.
+- [x] **Hue/Saturation colour ranges** — the six ranges with Photoshop's draggable range bar,
+      read from and written to PSD. (Its saturation model changed on the way: see the roadmap.)
+- [x] **Mask targeting.** Click a mask thumbnail to paint into the mask (it is framed);
+      adjustment and fill layers always target theirs. Brush, pencil, eraser, Edit ▸ Fill,
+      Delete and the Gradient tool write grey into it, with a live preview.
+- [ ] **Paint Bucket on a mask, and Alt-click to view a mask on its own**, are not built.
+- [x] **Presets and Last Used** in every adjustment dialog and Properties (built-ins for
+      Curves, Levels, Exposure, Black & White, Hue/Saturation, Channel Mixer).
+- [x] **Levels/Curves eyedroppers, Auto and Auto Color Correction Options; Curves pencil mode
+      and on-image tool** (and on-image for Hue/Saturation and Black & White).
+- [ ] **Auto Options has no target colours** (the shadow/midtone/highlight swatches), and
+      Ctrl+Alt+L-style "open with last settings" shortcuts are not bound — use Last Used.
+- [ ] **A pencil-drawn Curves channel saves to PSD as 16 points** (a PSD's curves are points;
+      ag-psd does not read or write the map form).
 - [ ] **Gradient Map offers six preset gradients**, not the gradient editor — the same gap as
-      the Gradient tool's (above).
+      the Gradient tool's (above). No Dither or Method either.
+- [ ] **Color Lookup: 3DLUT files only** — Abstract and Device Link profiles are ICC, which is
+      not modelled; Dither is ignored.
+- [ ] **Pattern fill scale is not saved to PSD** — ag-psd does not model it; it reopens at 100%.
+- [ ] **Apply Image always preserves transparency** and has no Mask option; Calculations cannot
+      output a new document, and Match Color cannot use another document — both need
+      multi-document support (M11), as does Image ▸ Duplicate.
 - [ ] **Applying a non-table adjustment to a big layer blocks the worker** for about 200 ms on
       a 2400×1600 layer (Hue/Saturation, Vibrance, Color Balance, …; the table-shaped ones are
-      ~20 ms). The dialog's preview is a GPU pass and does not pay this; only OK does.
+      ~20 ms). The dialog's preview is a GPU pass and does not pay this; only OK does. The
+      spatial ones (Shadows/Highlights, HDR Toning, …) preview on the CPU at a few hundred ms.
 - [ ] **Auto Color's "Snap Neutral Midtones" is a stand-in** (per-channel gamma toward the mean
       colour); Photoshop searches for near-neutral pixels. Tagged `[fit]` in `kernels/auto.ts`.
+      Shadows/Highlights, Replace Color, Match Color and HDR Toning are `[fit]` models too.
+- [ ] **Step adjustments after a partial blend can differ GPU vs CPU by a step.** Accumulators
+      are float16 on the GPU and float64 in the reference; a value within rounding distance of
+      a byte boundary quantises differently, and a Posterize/Threshold step magnifies it. Only
+      at such boundary pixels; it would show in export (CPU) vs screen (GPU).
+- [ ] **Newer adjustment layers** (Color & Vibrance-style, Clarity & Dehaze, Grain) are left
+      for M5 — spec 05 says they reuse the Develop filter kernels, which arrive there.
 - [ ] **PSD unknown-block pass-through is not implemented.** ag-psd discards blocks it does not
       model, so saving a PSD opened from Photoshop loses anything Umbra does not understand.
 
@@ -127,9 +158,9 @@ the feature is complete.
 | Menu | Wired | Chiefly waiting on |
 |---|---|---|
 | File | 8 / 50 | export & automation (M11), place/linked (M5) |
-| Edit | 25 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
-| Image | 30 / 56 | Color Lookup, Shadows/Highlights, HDR Toning, Match/Replace Color (M4), colour modes (M10) |
-| Layer | 37 / 137 | layer styles (M6), smart objects (M5), fill layers and Color Lookup layers (M4), align & distribute (M9) |
+| Edit | 26 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
+| Image | 37 / 56 | colour modes (M10), Duplicate and Arbitrary rotation (M11), variables (M11) |
+| Layer | 41 / 137 | layer styles (M6), smart objects (M5), align & distribute (M9), type & shapes (M7) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
 | Filter | 0 / 8 | all filters (M5) |
@@ -143,26 +174,20 @@ implementation.
 
 ### Specifically, in the menus you are most likely to reach for
 
-- [x] **Image ▸ Adjustments — 17 of 22.** Brightness/Contrast, Levels, Curves, Exposure,
-      Vibrance, Hue/Saturation, Color Balance, Black & White, Photo Filter, Channel Mixer,
-      Invert, Posterize, Threshold, Gradient Map, Selective Color, Desaturate and Equalize.
-      Each dialog has a live Preview and Alt = Reset; the preview is the GPU drawing the
-      adjustment as a clipped layer, so it costs nothing on the pixels until OK.
-- [ ] **Image ▸ Adjustments — the other 5:** Color Lookup (needs .cube/.3dl loading and a 3-D
-      LUT texture), Shadows/Highlights, HDR Toning, Match Color, Replace Color (all spatial or
-      multi-image; none is a per-pixel function).
-- [x] **Layer ▸ New Adjustment Layer — 15 of 16** (all but Color Lookup), plus the
-      Adjustments panel and editing in Properties. They open from and save to PSD with their
-      parameters, render on the GPU through GLSL mirrors of the kernels, and composite on the
-      CPU reference for merge/flatten/export.
+- [x] **Image ▸ Adjustments — all 22.** The per-pixel ones preview on the GPU (the adjustment
+      drawn as a clipped layer); Shadows/Highlights, Replace Color, Match Color and HDR Toning
+      preview on the CPU. Every dialog has Preview, Alt = Reset, Preset and Last Used.
+- [x] **Layer ▸ New Adjustment Layer — all 16**, the Adjustments panel, editing in Properties,
+      PSD round trip, and fusion of plain table adjustments into one GPU pass.
+- [x] **Layer ▸ New Fill Layer ▸ Solid Color / Gradient / Pattern**, with PSD round trip
+      (patterns embedded), Edit ▸ Define Pattern and a Patterns panel.
+- [x] **Image ▸ Apply Image and Calculations.**
 - [x] **Layer ▸ Create Clipping Mask** (Ctrl+Alt+G, toggles to Release).
-- [ ] **Layer ▸ New Fill Layer ▸ Solid Color / Gradient / Pattern** — a fill layer ADDS coverage,
-      which an adjustment cannot, so it is its own layer kind; not built.
 - [ ] **Image ▸ Mode** — 2 of 12. Only RGB and 8 bits/channel, which are the current state, so
       nothing changes. Grayscale, CMYK, Lab, 16/32-bit are M10.
 - [x] **Image ▸ Auto Tone / Auto Contrast / Auto Color** — Levels computed from the layer's
       histogram with Photoshop's default 0.1% clip; Auto Color's midtone snap is `[fit]`.
-- [ ] **Image ▸ Duplicate, Apply Image, Calculations** — M4.
+- [ ] **Image ▸ Duplicate** — needs more than one open document (M11).
 - [x] **Layer ▸ New ▸ Layer Via Copy / Via Cut** (Ctrl+J / Ctrl+Shift+J). They do not touch
       the clipboard, as Photoshop's do not.
 - [x] **Layer ▸ Layer Mask ▸ …** — 7 of 9: Reveal All, Hide All, Reveal Selection, Hide
@@ -182,11 +207,11 @@ implementation.
       grid, guides, pixel grid, selection edges and layer edges; only selection edges is
       honoured by the renderer.
 
-## 4. Tools — 18 of 69 implemented
+## 4. Tools — 19 of 69 implemented
 
 Working: Move, Rectangular/Elliptical/Single Row/Single Column Marquee, Lasso, Polygonal Lasso,
-Magic Wand, Crop, Eyedropper, Brush, Pencil, Eraser, Gradient, Paint Bucket, Hand, Rotate View,
-Zoom.
+Magic Wand, Crop, Eyedropper, Color Sampler, Brush, Pencil, Eraser, Gradient, Paint Bucket,
+Hand, Rotate View, Zoom.
 
 - [ ] Healing family — Spot Healing, Healing Brush, Patch, Content-Aware Move, Red Eye, Remove (M8)
 - [ ] Clone Stamp, Pattern Stamp (M8)
@@ -199,17 +224,23 @@ Zoom.
 - [ ] Shape family — 6 tools (M7)
 - [ ] Object Selection, Quick Selection, Magnetic Lasso, Selection Brush (M9)
 - [ ] Perspective Crop, Slice, Slice Select (M11)
-- [ ] Artboard, Frame, Color Sampler, Ruler, Note, Count (M11)
+- [ ] Artboard, Frame, Ruler, Note, Count (M11)
 
 ## 5. Panels
 
 Working: Layers, Color, Swatches, Info, Properties, History, Channels, Navigator, Adjustments,
-Histogram.
+Histogram, Patterns.
 
 - [x] **Adjustments** — one button per adjustment-layer kind (Color Lookup missing)
 - [x] **Properties** — edits the active adjustment layer; one history step per gesture
-- [x] **Histogram** — Colors / Luminosity / R / G / B with mean, std dev, median, pixel count.
-      Whole image only: no per-layer source, no cache-level warning, no expanded view.
+- [x] **Histogram** — Colors / Luminosity / R / G / B / All Channels View, with mean, std dev,
+      median, pixel count. Whole image only (no per-layer source); it is computed exactly, so
+      there is no cache warning to show.
+- [x] **Info** — RGB and CMYK under the pointer, position, up to ten colour samplers, and
+      before/after pairs while a dialog previews. The panel options (choosing the second
+      readout's colour model) are not built.
+- [x] **Properties** — adjustment layers and fill layers.
+- [x] **Patterns** — the pattern library; clicking one applies it to an active pattern fill.
 - [ ] **Brushes** — placeholder; was scoped to M3 and did not land
 - [ ] **Brush Settings** — placeholder (M8)
 - [ ] **Paths** — placeholder (M7)
@@ -232,7 +263,13 @@ and treat any canvas screenshot or timing taken in a hidden pane as unconfirmed.
 Two tools for that, in dev builds:
 
 - `window.__umbraDoc` is the latest document summary (layers, adjustment parameters, history
-  names) exactly as the panels receive it.
+  names) exactly as the panels receive it. `__umbraSend(msg)` sends any engine message;
+  `__umbraProbe` and `__umbraThumb` are the latest Info readouts and rendered thumbnail.
+- The engine accepts `{ t: 'tick' }` as a message, so a script can drive frames itself: with
+  `pointerrawupdate` events (not `pointermove`, which Chromium's client ignores for strokes)
+  and ticks sent in between, a brush stroke runs even while the pane is stalled.
+- The Navigator coalesces its thumbnail requests on animation frames, so in a stalled pane its
+  canvas can be several edits behind — ask with `requestThumbnail` and read `__umbraThumb`.
 - The **Navigator's canvas** is a real 2-D canvas filled from a worker message, so its pixels
   can be read with `getImageData` and diffed — that is how M4's "the dialog's preview matches
   what OK commits" was checked (max Δ 3 through the mip-scaled thumbnail, mean 0.08).

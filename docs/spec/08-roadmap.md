@@ -282,16 +282,22 @@ the approximation is and what evidence would settle it. Every adjustment must ad
 self-consistent: identity parameters are a no-op, the destructive command and the adjustment
 layer agree to ±1/255, and a round trip through PSD preserves the parameters.
 
-**Progress (2026-09-23).** Landed: 17 destructive adjustments (all 14 kernel kinds plus
-Selective Color, Desaturate and Equalize) with Preview dialogs; Auto Tone / Contrast / Color;
-15 adjustment-layer kinds with Properties editing, the Adjustments and Histogram panels, and PSD
-read/write; Create/Release Clipping Mask. Exit status: every implemented kind passes
-destructive ≡ layer within 1/255 on the CPU reference and a PSD parameter round trip (engine
-`commands/adjust.test.ts`), and GPU ≡ CPU in the parity suite (108/108, 25 of them adjustment
-cases). Still open: Color Lookup, Shadows/Highlights, HDR Toning, Match and Replace Color,
-Hue/Saturation colour ranges, fill layers, presets, eyedroppers and Auto Options, Curves pencil
-and on-image modes, Info before/after, and adjustment fusion (each adjustment layer is one
-full-viewport pass today).
+**Status (2026-09-23): complete**, with the deferrals below. All 22 Image ▸ Adjustments
+(per-pixel ones previewed on the GPU, the four spatial ones — Shadows/Highlights, Replace
+Color, Match Color, HDR Toning — on the CPU), Auto Tone/Contrast/Color with Auto Color
+Correction Options, all 16 adjustment layers, Solid/Gradient/Pattern fill layers, Apply Image
+and Calculations; Curves (points, pencil, on-image, eyedroppers, Auto), Levels (histogram,
+eyedroppers, Auto), Hue/Saturation colour ranges, presets and Last Used everywhere; the
+Adjustments, Properties, Histogram (incl. All Channels View), Info (readouts, samplers,
+before/after) and Patterns panels; mask targeting; adjustment fusion; PSD read/write for
+every adjustment and fill kind. Exit: every kind passes destructive ≡ layer within 1/255 and a
+PSD parameter round trip (CPU tests), GPU ≡ CPU parity is 126/126 including real documents
+through the renderer, and each proprietary model says what it is in the code.
+
+Deferred, with reasons: the newer layer kinds (Clarity & Dehaze, Grain, …) reuse the Develop
+filter kernels and move to M5; Color Lookup's Abstract/Device Link lookups are ICC profiles
+(M10, colour management); anything that needs a second open document — Image ▸ Duplicate,
+Match Color from another image, Calculations into a new document — moves to M11.
 
 **Findings.**
 
@@ -324,6 +330,38 @@ full-viewport pass today).
    painting an adjustment layer's mask waits for mask targeting.
 7. **`pnpm typecheck` had never worked** — it ran `tsc -b` with no root tsconfig. It now checks
    each package.
+8. **Stored mask tiles had never reached the GPU.** The atlas uploaded every tile as RGBA8; a
+   mask tile is one byte per pixel, so WebGL rejected the upload and the slot drew whatever
+   it held before. Since M3, every mask with stored pixels — Reveal/Hide Selection, From
+   Transparency, masks read from PSDs — rendered wrong, and the only symptom in the console
+   was a warning nobody read. The parity suite could not see it: it paints masks from
+   procedural patterns straight into scratch targets and never touches the tile store. It
+   was found by painting an adjustment layer's mask and diffing the result. Fixed by
+   widening single-channel tiles on upload; guarded by new *document* parity cases that
+   render real documents through the DocumentRenderer, and by failing any parity run that
+   leaves a WebGL error pending.
+9. **Mip levels dropped their plane's default.** Every downsampled level defaulted to 0, so a
+   white-default mask read as black from level 2 down: zoomed out, everything near a painted
+   mask tile was hidden. Each level now keeps its source's default.
+10. **Hue/Saturation's saturation changed model.** `s + (1 − s)·v` for positive values tinted
+    greys red (their hue reads as 0°) and pushed faint colours to full saturation at +100.
+    Saturation now scales, `s·(1 + v)`, so greys stay grey and −100 is still a neutral;
+    Vibrance's Saturation slider follows. Colour ranges are weighted sums on top.
+11. **Three preview strategies, chosen by what the operation is.** Per-pixel adjustments draw
+    as a temporary clipped adjustment layer on the GPU. The four spatial ones and Apply Image
+    compute a preview document on the CPU, and the worker keeps only the newest request so a
+    drag never queues behind itself. New Fill Layer creates the layer on open, folds the final
+    content into that creation step on OK (`History.amend`), and undoes it on Cancel.
+12. **Fusion is exact, and tested as such.** Table entries are k/255 and the pass-by-pass
+    path quantises between steps, so composing the tables is bit-identical; the parity suite
+    renders its fusion cases both ways and requires identical GPU output. What it cannot make
+    identical is GPU vs CPU after a partial-alpha blend followed by a step function: float16
+    accumulators and float64 reference values round differently at byte boundaries.
+13. **UI work tied to animation frames stalls in a hidden window.** Info readouts and dialog
+    preview coalescing ran on `requestAnimationFrame`; they now use timers, which is also
+    more correct — neither is frame work. The verification lessons are in
+    `docs/not-working.md`: dev hooks (`__umbraSend`, `__umbraProbe`, `__umbraThumb`), driving
+    ticks by message, and never trusting a canvas from a stalled pane.
 
 ### M5 — Filters I + Smart Objects (XL)
 Filter framework (registry, auto-dialogs with zoomable preview + on-canvas preview, selection/

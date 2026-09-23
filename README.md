@@ -9,23 +9,23 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M3 complete, M4 mostly landed.** Selections, painting, transforms, the clipboard, PSD
-open/save, and adjustments — destructive and as adjustment layers — work; filters, layer
-styles, vector and type do not.
+**M0–M4 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
+Photoshop's adjustments (destructive and as adjustment layers), fill layers and masks work;
+filters, layer styles, vector and type do not.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
 > Most of the UI is present because M1's exit criterion was that a Photoshop user finds
-> everything where they expect it — **337 of 505 menu commands are not built yet** (greyed out,
+> everything where they expect it — **325 of 505 menu commands are not built yet** (greyed out,
 > not silently inert). That file is the running checklist, and it
 > separates *broken* (cheap bugs) from *not built yet* (the roadmap). It carries the script
 > that regenerates it, because the hand-maintained flags in the source have been wrong before.
 
 | | |
 |---|---|
-| Tests | 422 across 22 files |
-| GPU ≡ CPU parity | 108/108 cases (every blend mode, every adjustment), maxΔ = 1 |
-| Payload | 150 KB UI + 139 KB worker, gzipped |
+| Tests | 464 across 28 files |
+| GPU ≡ CPU parity | 126/126 cases — every blend mode, every adjustment, fill layers, and real documents through the renderer |
+| Payload | 167 KB UI + 150 KB worker, gzipped |
 | Compositing | 100 layers at 4K, ~8 ms/frame |
 
 ## What works
@@ -36,11 +36,11 @@ Bucket and Gradient, Move and Free Transform, Crop, the clipboard, layers with a
 modes, masks, groups and clipping, the Channels and History panels, PSD open and save, and a
 crash-recovery journal.
 
-Adjustments: Brightness/Contrast, Levels, Curves, Exposure, Vibrance, Hue/Saturation, Color
-Balance, Black & White, Photo Filter, Channel Mixer, Invert, Posterize, Threshold, Gradient
-Map, Selective Color, Desaturate, Equalize and Auto Tone/Contrast/Color — as dialogs with live
-preview and, for the fifteen Photoshop has as layers, as adjustment layers edited in
-Properties and saved to PSD.
+Adjustments: all 22 of Image ▸ Adjustments plus Auto Tone/Contrast/Color, as dialogs with
+live preview, presets, eyedroppers and on-image tools, and all 16 as adjustment layers edited
+in Properties and saved to PSD. Solid Color, Gradient and Pattern fill layers; painting into
+layer masks; Apply Image and Calculations; the Info (with before/after), Histogram,
+Adjustments and Patterns panels; the Color Sampler tool.
 
 ## Running it
 
