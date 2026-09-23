@@ -855,6 +855,45 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 ::-webkit-scrollbar-corner { background: var(--panel-sunken); }
 
 /* Image Size / Canvas Size */
+/* A disabled mask shows Photoshop's red cross over the thumbnail. */
+.layer-mask-thumb.disabled {
+  background:
+    linear-gradient(45deg, transparent 45%, #d33 45%, #d33 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, #d33 45%, #d33 55%, transparent 55%),
+    var(--border-light);
+}
+
+/* Disabled must LOOK disabled. The whole point of §1 in docs/not-working.md was controls that
+   looked live and did nothing. */
+.mini-icon:disabled,
+.icon-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.mini-icon.active {
+  background: var(--row-active);
+}
+
+.navigator-canvas {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+  cursor: crosshair;
+  image-rendering: auto;
+}
+
+.layer-name-edit {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: var(--text);
+  background: var(--field-bg, #1e1e1e);
+  border: 1px solid var(--accent, #3b82f6);
+  padding: 0 3px;
+  height: 18px;
+}
+
 .history-rows { overflow-y: auto; flex: 1; }
 .history-row {
   display: flex;

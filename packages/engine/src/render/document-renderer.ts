@@ -230,7 +230,11 @@ export class DocumentRenderer {
     const maskPlane = layer.mask && layer.mask.enabled ? layer.mask.plane : null;
 
     if (maskPlane || erase) {
-      out.maskStartsOpaque = !maskPlane && !!erase;
+      // A mask's unstored area takes its DEFAULT, and Photoshop writes masks cropped to their
+      // painted bounds with a white default — "reveal everything else". The tile drawer only
+      // draws stored tiles, so the target has to start at that default or everything outside
+      // the stored rectangle is hidden. An erase preview on an unmasked layer starts at 1 too.
+      out.maskStartsOpaque = maskPlane ? layer.mask!.defaultColor === 1 : !!erase;
       out.drawMask = (_t: RenderTarget) => {
         if (maskPlane) this.tiles.draw(maskPlane, view, clip, true, 1, false, live);
         if (erase) {
@@ -386,6 +390,48 @@ export class DocumentRenderer {
     this.compositor.releaseAll();
 
     // readPixels is bottom-up; flip into document order.
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++) {
+      const src = (height - 1 - y) * width * 4;
+      const dst = y * width * 4;
+      for (let i = 0; i < width * 4; i++) {
+        pixels[dst + i] = Math.round(Math.min(1, Math.max(0, floats[src + i]!)) * 255);
+      }
+    }
+    return { pixels, width, height };
+  }
+
+  /**
+   * The whole document, SCALED to fit `maxSize` — the Navigator's thumbnail.
+   *
+   * `renderToBuffer` crops at 1:1 instead, which is right for the tools that need exact
+   * pixels (wand, bucket, eyedropper) and wrong for a preview. Rendering through a zoomed-out
+   * view lets the mip pyramid do the downscaling, so a 100-layer 4K document costs about what
+   * one viewport frame does.
+   */
+  renderThumbnail(doc: Doc, maxSize: number): { pixels: Uint8Array; width: number; height: number } {
+    const gl = this.gl;
+    const scale = Math.min(1, maxSize / Math.max(doc.width, doc.height));
+    const width = Math.max(1, Math.round(doc.width * scale));
+    const height = Math.max(1, Math.round(doc.height * scale));
+    const view: ViewState = {
+      zoom: scale,
+      rotation: 0,
+      centre: { x: doc.width / 2, y: doc.height / 2 },
+      width,
+      height,
+      devicePixelRatio: 1,
+    };
+    const clip = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };
+
+    this.compositor.resize(width, height);
+    const composite = this.compositor.compositeOnTransparent(this.toGpuLayers(doc.layers, view, clip));
+    const floats = new Float32Array(width * height * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, composite.fbo);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, floats);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.compositor.releaseAll();
+
     const pixels = new Uint8Array(width * height * 4);
     for (let y = 0; y < height; y++) {
       const src = (height - 1 - y) * width * 4;

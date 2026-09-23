@@ -55,8 +55,15 @@ function mapSiblings(
   );
 }
 
-export function addLayer(doc: Doc, name = 'Layer'): Doc {
-  const layer = makePixelLayer(nameFor(doc, name), Plane.empty(RGBA8));
+/**
+ * Add a layer above the active one. With a name, that name is used (made unique); without one
+ * it is the next "Layer N", as Photoshop's New Layer button makes.
+ */
+export function addLayer(doc: Doc, name?: string): Doc {
+  const layer = makePixelLayer(
+    name === undefined ? numberedName(doc, 'Layer') : nameFor(doc, name),
+    Plane.empty(RGBA8),
+  );
   const active = doc.activeLayerIds[0];
   const layers =
     active === undefined
@@ -68,7 +75,22 @@ export function addLayer(doc: Doc, name = 'Layer'): Doc {
   return { ...doc, layers, activeLayerIds: [layer.id] };
 }
 
-/** "Layer 1", "Layer 2", … avoiding names already in the document. */
+/**
+ * The next "Base N": one past the highest N in use. Photoshop does not refill gaps — delete
+ * Layer 2 of three and the next new layer is Layer 4 — and numbering past the maximum
+ * reproduces that without a per-document counter.
+ */
+export function numberedName(doc: Doc, base: string): string {
+  const pattern = new RegExp(`^${base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (\\d+)$`);
+  let max = 0;
+  for (const { layer } of walkLayers(doc.layers)) {
+    const m = pattern.exec(layer.name);
+    if (m) max = Math.max(max, Number(m[1]));
+  }
+  return `${base} ${max + 1}`;
+}
+
+/** An explicit name, suffixed with a number only if it is already taken. */
 function nameFor(doc: Doc, base: string): string {
   const used = new Set([...walkLayers(doc.layers)].map((w) => w.layer.name));
   if (!used.has(base)) return base;
@@ -122,7 +144,7 @@ export function reorderLayer(doc: Doc, id: number, delta: number): Doc {
  * Group the given layers. They must be siblings — Photoshop also refuses to group across
  * different parents — and the group takes the position of the topmost one.
  */
-export function groupLayers(doc: Doc, ids: readonly number[], name = 'Group'): Doc {
+export function groupLayers(doc: Doc, ids: readonly number[], name?: string): Doc {
   if (ids.length === 0) return doc;
   const first = locate(doc.layers, ids[0]!);
   if (!first) return doc;
@@ -132,6 +154,9 @@ export function groupLayers(doc: Doc, ids: readonly number[], name = 'Group'): D
   }
 
   const idSet = new Set(ids);
+  // The group is captured as it is made. Looking it up afterwards by name found the FIRST
+  // group whose name started with "Group" — an older one, whenever there was one.
+  let created: GroupLayer | null = null;
   const rebuild = (siblings: readonly Layer[]): Layer[] => {
     const contains = siblings.some((l) => idSet.has(l.id));
     if (!contains) {
@@ -143,15 +168,16 @@ export function groupLayers(doc: Doc, ids: readonly number[], name = 'Group'): D
     const rest = siblings.filter((l) => !idSet.has(l.id));
     const topIndex = siblings.reduce((acc, l, i) => (idSet.has(l.id) ? i : acc), 0);
     const insertAt = rest.findIndex((l) => siblings.indexOf(l) > topIndex);
-    const group = makeGroup(nameFor(doc, name), picked);
+    const group = makeGroup(name === undefined ? numberedName(doc, 'Group') : nameFor(doc, name), picked);
+    created = group;
     const out = [...rest];
     out.splice(insertAt < 0 ? out.length : insertAt, 0, group);
     return out;
   };
 
   const layers = rebuild(doc.layers);
-  const group = [...walkLayers(layers)].find((w) => w.layer.kind === 'group' && w.layer.name.startsWith(name));
-  return { ...doc, layers, activeLayerIds: group ? [group.layer.id] : doc.activeLayerIds };
+  const made = created as GroupLayer | null;
+  return { ...doc, layers, activeLayerIds: made ? [made.id] : doc.activeLayerIds };
 }
 
 export function ungroup(doc: Doc, id: number): Doc {

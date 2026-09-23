@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import workspaceSource from './Workspace.tsx?raw';
 import { MENUS, COMMANDS, COMMAND_BY_ID, type MenuNode } from '../menus/menus';
 import { TOOL_GROUPS, ALL_TOOLS, TOOL_BY_ID, cycleForKey, groupOf } from '../tools/registry';
 import { PANEL_META, PANEL_BY_COMMAND } from '../panels/registry';
@@ -304,5 +305,36 @@ describe('numeric field parsing', () => {
 
   it('never divides by zero', () => {
     expect(parseNumeric('10/0')).toBe(10);
+  });
+});
+
+/**
+ * `done: true` is what greys a menu item in or out, and it is maintained by hand — which has
+ * already gone wrong once in each direction (a dead item left enabled, working ones left
+ * greyed). This makes the flag and the code unable to disagree: a menu command is `done`
+ * exactly when `runCommand` has a case for it.
+ */
+describe('menu enablement matches the handlers', () => {
+  // `?raw` rather than node:fs: this is a browser package, and Vite's raw import keeps Node's
+  // types out of it while giving the test the file's text.
+  const source = workspaceSource;
+  // Only runCommand's own cases count — `isChecked` switches on command ids too, and a
+  // command that merely shows a tick has not been implemented.
+  const start = source.indexOf('function runCommand(');
+  const end = source.indexOf('\n  }\n', start);
+  const body = source.slice(start, end);
+  const handled = new Set([...body.matchAll(/case '([^']+)':/g)].map((m) => m[1]!));
+  const menuCommands = COMMANDS.filter(
+    (c) => !PANEL_BY_COMMAND[c.cmd] && !c.cmd.startsWith('workspace.'),
+  );
+
+  it('every enabled menu item has a handler', () => {
+    const dead = menuCommands.filter((c) => c.done && !handled.has(c.cmd)).map((c) => c.cmd);
+    expect(dead).toEqual([]);
+  });
+
+  it('every handled menu item is enabled', () => {
+    const hidden = menuCommands.filter((c) => !c.done && handled.has(c.cmd)).map((c) => c.cmd);
+    expect(hidden).toEqual([]);
   });
 });

@@ -22,7 +22,9 @@ export interface EngineClientEvents {
   onDoc?: (doc: DocSummary) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
+  onThumbnail?: (t: { pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }) => void;
   onRecovery?: (info: { name: string; savedAt: number; width: number; height: number }) => void;
+  onNoRecovery?: () => void;
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onParity?: (pass: boolean, text: string) => void;
@@ -107,6 +109,12 @@ export class EngineClient {
         break;
       case 'recovery':
         this.events.onRecovery?.(msg);
+        break;
+      case 'noRecovery':
+        this.events.onNoRecovery?.();
+        break;
+      case 'thumbnail':
+        this.events.onThumbnail?.(msg);
         break;
       case 'spikes':
         this.events.onSpikes?.(msg.pass, msg.text);

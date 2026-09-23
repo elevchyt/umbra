@@ -113,6 +113,14 @@ export function nextZoomStop(zoom: number, dir: 1 | -1): number {
 }
 
 /** View ▸ Fit on Screen. `pad` leaves a margin in CSS px, as Photoshop does. */
+/**
+ * True when a viewport is too small to fit anything into — which is what it reports before the
+ * page has laid out. Fitting against it clamps to MIN_ZOOM and leaves the document as a dot.
+ */
+export function isDegenerateViewport(v: ViewState, pad = 32): boolean {
+  return v.width - pad < 1 || v.height - pad < 1;
+}
+
 export function fitToScreen(v: ViewState, docW: number, docH: number, pad = 32): ViewState {
   const aw = Math.max(1, v.width - pad);
   const ah = Math.max(1, v.height - pad);

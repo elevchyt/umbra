@@ -63,7 +63,11 @@ export class Journal {
       }
     } catch (err) {
       // A failed journal write is not worth interrupting the user for; the next one may work.
-      console.warn('[journal] write failed', err);
+      // Log the NAME: a DOMException stringifies to "[object DOMException]" across the worker
+      // boundary, which says nothing. NoModificationAllowedError here usually means a second
+      // window is writing the same journal — there is one journal per origin, not per window.
+      const e = err as { name?: string; message?: string };
+      console.warn(`[journal] write failed: ${e.name ?? 'Error'}: ${e.message ?? String(err)}`);
     } finally {
       this.writing = false;
       if (this.pending) void this.drain();

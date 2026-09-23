@@ -194,6 +194,42 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         engine?.cancelTransform();
         post({ t: 'transform', active: false });
         break;
+      case 'setLayerLocks':
+        engine?.setLayerLocks(msg.id, msg.locks);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'maskCommand':
+        if (engine?.maskCommand(msg.command, msg.id)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'layerVia':
+        if (engine?.layerVia(msg.cut)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'reselect':
+        if (engine?.reselect()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'transformLayerFixed':
+        if (engine?.transformLayerFixed(msg.op)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestThumbnail': {
+        const t = engine?.thumbnail(msg.size);
+        if (t && engine) {
+          post(
+            { t: 'thumbnail', ...t, docWidth: engine.doc.width, docHeight: engine.doc.height },
+            [t.pixels.buffer],
+          );
+        }
+        break;
+      }
+      case 'setCentre':
+        engine?.setCentre(msg.x, msg.y);
+        break;
+      case 'transformAgain':
+        if (engine?.transformAgain()) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'renameLayer':
+        engine?.renameLayer(msg.id, msg.name);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'nudge':
         engine?.nudge(msg.dx, msg.dy);
         if (engine) post({ t: 'doc', doc: engine.summary() });
@@ -252,6 +288,10 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
             height: found.meta.height,
           });
           recovered = found.bytes;
+        } else {
+          // The UI waits for an answer either way before creating a document, so "nothing to
+          // recover" has to be said out loud rather than implied by silence.
+          post({ t: 'noRecovery' });
         }
         break;
       }
@@ -259,6 +299,9 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (!engine || !recovered) break;
         engine.openPsdBuffer(recovered, 'Recovered');
         recovered = null;
+        // Once recovered, the autosave IS the open document. Leaving it on disk offered the
+        // same recovery again on every launch; the next edit journals afresh anyway.
+        await engine.journal.clear();
         post({ t: 'doc', doc: engine.summary() });
         break;
       }

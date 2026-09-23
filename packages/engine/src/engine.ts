@@ -6,6 +6,7 @@ import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { EMPTY_RECT, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
 import { probeCaps, type GpuCaps } from './gpu/caps.js';
+import { isDegenerateViewport } from './render/view.js';
 import { TileAtlas } from './gpu/atlas.js';
 import { DocumentRenderer } from './render/document-renderer.js';
 import { DEFAULT_QUICK_MASK, type QuickMaskStyle } from './render/quick-mask.js';
@@ -62,6 +63,7 @@ import * as FillCmd from './commands/fill.js';
 import * as TransformCmd from './commands/transform.js';
 import * as ClipCmd from './commands/clipboard.js';
 import * as ChannelCmd from './commands/channels.js';
+import * as MaskCmd from './commands/masks.js';
 import {
   IDENTITY,
   about,
@@ -81,6 +83,7 @@ import { hitHandle, handlePoint, type HandleId } from './render/handles.js';
 import { magicWand } from '@umbra/kernels/selection';
 import type { Gradient, GradientStyle } from '@umbra/kernels/gradient';
 import type { PaintMode } from './commands/fill.js';
+import type { LayerLocks } from './document.js';
 import {
   DEFAULT_BRUSH,
   beginStroke as beginBrushStroke,
@@ -257,10 +260,24 @@ export class Engine {
     this.dabs = new DabPainter(this.gl);
   }
 
+  /**
+   * A fit requested while the viewport was still unlaid-out (0×0). The client sends `init`
+   * with the canvas's size at construction, which can precede layout; fitting then clamps to
+   * MIN_ZOOM and, with nothing to refit afterwards, the document stayed a dot at 0.1% until
+   * the user fitted by hand. The first usable resize completes the fit instead.
+   */
+  private fitPending = false;
+
+  private fitView(docW: number, docH: number): void {
+    this.view = fitToScreen(this.view, docW, docH);
+    this.fitPending = isDegenerateViewport(this.view);
+  }
+
   resize(width: number, height: number, dpr: number): void {
     this.view = { ...this.view, width, height, devicePixelRatio: dpr };
     this.canvas.width = Math.max(1, Math.round(width * dpr));
     this.canvas.height = Math.max(1, Math.round(height * dpr));
+    if (this.fitPending && !isDegenerateViewport(this.view)) this.fitView(this.doc.width, this.doc.height);
   }
 
   // ---- document ---------------------------------------------------------------------
@@ -277,7 +294,7 @@ export class Engine {
     this.warnings = [];
     this.doc = { ...emptyDoc(width, height, name), layers: [layer], activeLayerIds: [layer.id] };
     this.history = new History(this.doc, 'Open');
-    this.view = fitToScreen(this.view, width, height);
+    this.fitView(width, height);
   }
 
   /**
@@ -305,14 +322,14 @@ export class Engine {
     this.warnings = warnings;
     this.doc = doc;
     this.history = new History(doc, 'Open');
-    this.view = fitToScreen(this.view, doc.width, doc.height);
+    this.fitView(doc.width, doc.height);
   }
 
   newDoc(width: number, height: number): void {
     this.warnings = [];
     this.doc = emptyDoc(width, height);
     this.history = new History(this.doc, 'New');
-    this.view = fitToScreen(this.view, width, height);
+    this.fitView(width, height);
   }
 
   /**
@@ -361,7 +378,7 @@ export class Engine {
       activeLayerIds: layers.length ? [layers[layers.length - 1]!.id] : [],
     };
     this.history = new History(this.doc, 'New');
-    this.view = fitToScreen(this.view, width, height);
+    this.fitView(width, height);
   }
 
   // ---- layer commands -----------------------------------------------------------------
@@ -412,7 +429,7 @@ export class Engine {
   }
 
   addLayer(): void {
-    this.apply('New Layer', (d) => LayerCmd.addLayer(d, 'Layer'));
+    this.apply('New Layer', (d) => LayerCmd.addLayer(d));
   }
   deleteLayer(id: number): void {
     this.apply('Delete Layer', (d) => LayerCmd.deleteLayer(d, id));
@@ -498,9 +515,24 @@ export class Engine {
   selectAllPixels(): void {
     this.setSelection(selectAll(this.doc.width, this.doc.height), 'Select All');
   }
+  /** What the last Deselect dropped, for Select ▸ Reselect. */
+  private lastSelection: Selection | null = null;
+
   deselect(): void {
     if (!this.doc.selection) return;
+    this.lastSelection = this.doc.selection;
     this.setSelection(null, 'Deselect');
+  }
+
+  /**
+   * Select ▸ Reselect. The dropped selection is only valid on a canvas the same size — after
+   * a crop or an Image Size it describes pixels that are no longer there, so it is refused.
+   */
+  reselect(): boolean {
+    const sel = this.lastSelection;
+    if (!sel || sel.width !== this.doc.width || sel.height !== this.doc.height) return false;
+    this.setSelection(sel, 'Reselect');
+    return true;
   }
   invertSelectionCmd(): void {
     const sel = this.doc.selection ?? selectAll(this.doc.width, this.doc.height);
@@ -685,19 +717,35 @@ export class Engine {
   // ---- view -------------------------------------------------------------------------
 
   pan(dx: number, dy: number): void {
+    this.fitPending = false;
     this.view = panBy(this.view, dx, dy);
   }
   zoomAtPoint(factor: number, x: number, y: number): void {
+    this.fitPending = false;
     this.view = zoomAt(this.view, factor, x, y);
   }
+  /** Centre the view on a document point — the Navigator's click-to-pan. */
+  setCentre(x: number, y: number): void {
+    this.fitPending = false;
+    this.view = { ...this.view, centre: { x, y } };
+  }
+
+  /** A scaled render of the whole document; null while the GPU context is lost. */
+  thumbnail(maxSize: number): { pixels: Uint8Array; width: number; height: number } | null {
+    if (this.contextLost || this.doc.layers.length === 0) return null;
+    return this.renderer.renderThumbnail(this.doc, maxSize);
+  }
+
   setZoom(zoom: number): void {
+    this.fitPending = false;
     this.view = zoomAt(this.view, zoom / this.view.zoom, this.view.width / 2, this.view.height / 2);
   }
   rotate(radians: number): void {
+    this.fitPending = false;
     this.view = { ...this.view, rotation: radians };
   }
   fit(): void {
-    this.view = fitToScreen(this.view, this.doc.width, this.doc.height);
+    this.fitView(this.doc.width, this.doc.height);
   }
   actualPixels(): void {
     this.setZoom(1);
@@ -758,6 +806,11 @@ export class Engine {
     if (this.journalIntervalMs <= 0) return;
     if (this.doc === this.journalledDoc) return;
     if (this.doc.layers.length === 0) return;
+    // Nothing to recover until the user has changed something: the default document is
+    // recreated on launch, and a freshly opened file is already on disk. Snapshotting either
+    // costs about two seconds of this thread (measured: a 2400×1600 six-layer document encodes
+    // in ~1.9 s) for no benefit.
+    if (this.history.list().length <= 1) return;
     if (now < this.journalDueAt) return;
     // Encoding a PSD blocks this thread for as long as it takes, so it must not land in the
     // middle of a stroke or a drag. Both end in a committed document a moment later anyway.
@@ -786,6 +839,116 @@ export class Engine {
   forgetJournal(): void {
     this.journalledDoc = this.doc;
     void this.journal.clear();
+  }
+
+  setLayerLocks(id: number, patch: Partial<LayerLocks>): void {
+    const layer = findLayer(this.doc.layers, id);
+    if (!layer) return;
+    const locks = { ...layer.locks, ...patch };
+    this.commit(
+      { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, locks })) },
+      'Lock',
+    );
+  }
+
+  // ---- masks ----------------------------------------------------------------------------
+
+  maskCommand(command: string, id?: number): boolean {
+    const target = id ?? this.doc.activeLayerIds[0];
+    if (target === undefined) return false;
+    let next: Doc;
+    let name: string;
+    switch (command) {
+      case 'revealAll':
+      case 'hideAll':
+      case 'revealSelection':
+      case 'hideSelection':
+      case 'fromTransparency':
+        next = MaskCmd.addMask(this.doc, target, command);
+        name = 'Add Layer Mask';
+        break;
+      case 'add': {
+        // The Layers panel button: reveal the selection when there is one, else reveal all.
+        next = MaskCmd.addMask(this.doc, target, this.doc.selection ? 'revealSelection' : 'revealAll');
+        name = 'Add Layer Mask';
+        break;
+      }
+      case 'delete':
+        next = MaskCmd.deleteMask(this.doc, target);
+        name = 'Delete Layer Mask';
+        break;
+      case 'apply':
+        next = MaskCmd.applyMask(this.doc, target);
+        name = 'Apply Layer Mask';
+        break;
+      case 'toggle': {
+        // The menu's single Enable/Disable item, and Shift-click on the mask thumbnail.
+        const layer = findLayer(this.doc.layers, target);
+        if (!layer?.mask) return false;
+        const on = !layer.mask.enabled;
+        next = MaskCmd.setMaskEnabled(this.doc, target, on);
+        name = on ? 'Enable Layer Mask' : 'Disable Layer Mask';
+        break;
+      }
+      default:
+        return false;
+    }
+    if (next === this.doc) return false;
+    this.commit(next, name);
+    return true;
+  }
+
+  // ---- layer via copy / cut --------------------------------------------------------------
+
+  /**
+   * Layer ▸ New ▸ Layer Via Copy / Via Cut. These go through the clipboard's extract and paste
+   * but never TOUCH the clipboard — Photoshop keeps whatever the user copied, and so do we.
+   */
+  layerVia(cut: boolean): boolean {
+    const clip = ClipCmd.copy(this.doc);
+    if (!clip) return false;
+    const source = cut ? ClipCmd.clearSelection(this.doc) : this.doc;
+    const next = ClipCmd.paste({ ...source, selection: null }, clip, 'inPlace', this.view.centre);
+    this.commit(next, cut ? 'Layer Via Cut' : 'Layer Via Copy');
+    return true;
+  }
+
+  // ---- fixed layer transforms -------------------------------------------------------------
+
+  /**
+   * Edit ▸ Transform ▸ Rotate 180° / 90° CW / 90° CCW / Flip Horizontal / Flip Vertical on the
+   * active layer, about its own centre. (Image ▸ Image Rotation does the same to the whole
+   * canvas; these leave the canvas alone.)
+   */
+  transformLayerFixed(op: 'rotate180' | 'rotate90cw' | 'rotate90ccw' | 'flipH' | 'flipV'): boolean {
+    const ids = this.doc.activeLayerIds.length > 0 ? [...this.doc.activeLayerIds] : this.fallbackLayerIds();
+    const box = TransformCmd.transformBounds(this.doc, ids);
+    if (!box) return false;
+    const centre = { x: (box.x0 + box.x1) / 2, y: (box.y0 + box.y1) / 2 };
+    const m =
+      op === 'rotate180' ? rotateMat(Math.PI)
+      : op === 'rotate90cw' ? rotateMat(Math.PI / 2)
+      : op === 'rotate90ccw' ? rotateMat(-Math.PI / 2)
+      : op === 'flipH' ? scaleMat(-1, 1)
+      : scaleMat(1, -1);
+    // Quarter turns and flips of an integer-sized box land on whole pixels when the centre
+    // does; rounding the pivot keeps them lossless instead of resampling half a pixel.
+    const pivot = { x: Math.round(centre.x * 2) / 2, y: Math.round(centre.y * 2) / 2 };
+    const next = TransformCmd.transformLayers(this.doc, about(m, pivot), 'nearest', ids);
+    if (next === this.doc) return false;
+    this.commit(next, op.startsWith('flip') ? 'Flip' : 'Rotate');
+    return true;
+  }
+
+  renameLayer(id: number, name: string): void {
+    const trimmed = name.trim();
+    const layer = findLayer(this.doc.layers, id);
+    // An empty name is refused rather than stored: Photoshop reverts to the old name.
+    if (!layer || !trimmed || trimmed === layer.name) return;
+    this.commit(
+      { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, name: trimmed })) },
+      'Rename Layer',
+    );
   }
 
   // ---- history --------------------------------------------------------------------------
@@ -862,6 +1025,13 @@ export class Engine {
    * moving the canvas rather than the pixels.
    */
   private crop: { rect: Rect } | null = null;
+  /**
+   * The last committed Free Transform, for Edit ▸ Transform ▸ Again. It is kept in document
+   * space, pivot included, so repeating it CONTINUES the motion — rotate 15° about a point,
+   * then Again, and the layer is at 30° about the same point. That is what makes Again useful
+   * for laying copies out around a centre.
+   */
+  private lastTransform: Mat | null = null;
   cropDeletesPixels = false;
 
   get cropActive(): boolean {
@@ -913,7 +1083,7 @@ export class Engine {
     };
     if (clipped.x1 - clipped.x0 < 1 || clipped.y1 - clipped.y0 < 1) return;
     this.commit(ImageCmd.crop(this.doc, clipped, this.cropDeletesPixels), 'Crop');
-    this.view = fitToScreen(this.view, this.doc.width, this.doc.height);
+    this.fitView(this.doc.width, this.doc.height);
   }
 
   cancelCrop(): void {
@@ -926,7 +1096,7 @@ export class Engine {
     const rect = TransformCmd.selectionBoundsOf(this.doc);
     if (!rect) return;
     this.commit(ImageCmd.crop(this.doc, rect, this.cropDeletesPixels), 'Crop');
-    this.view = fitToScreen(this.view, this.doc.width, this.doc.height);
+    this.fitView(this.doc.width, this.doc.height);
   }
 
   // ---- bucket & gradient ----------------------------------------------------------------
@@ -1182,11 +1352,21 @@ export class Engine {
       return;
     }
 
+    if (!t.transient) this.lastTransform = t.matrix;
     let next = TransformCmd.transformLayers(this.doc, t.matrix, method, t.ids);
     // A selection moves with the pixels when they are dragged, as Photoshop does for a
     // floating selection — otherwise the marching ants would be left behind.
     if (next.selection && !t.transient) next = { ...next, selection: next.selection };
     this.commit(next, t.transient ? 'Move' : 'Free Transform');
+  }
+
+  /** Edit ▸ Transform ▸ Again. Returns false when there is nothing to repeat. */
+  transformAgain(): boolean {
+    if (!this.lastTransform || this.transform) return false;
+    const next = TransformCmd.transformLayers(this.doc, this.lastTransform);
+    if (next === this.doc) return false;
+    this.commit(next, 'Transform Again');
+    return true;
   }
 
   cancelTransform(): void {
@@ -1537,6 +1717,9 @@ export class Engine {
       zoom: this.view.zoom,
       centreX: this.view.centre.x,
       centreY: this.view.centre.y,
+      viewWidth: this.view.width,
+      viewHeight: this.view.height,
+      viewRotation: this.view.rotation,
       lastLatencyMs: this.lastLatencyMs,
       transform: this.transform ? transformReadout(this.transform.box, this.transform.matrix) : null,
     };
@@ -1574,6 +1757,8 @@ export class Engine {
         visible: layer.visible,
         clipped: layer.clipped,
         hasMask: !!layer.mask,
+        maskEnabled: layer.mask ? layer.mask.enabled : false,
+        locks: layer.locks,
         expanded: layer.kind === 'group' ? layer.expanded : false,
         tiles: layer.kind === 'pixel' ? layer.plane.base.tileCount : 0,
       })),

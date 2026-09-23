@@ -82,8 +82,10 @@ export function MenuBar(props: MenuBarProps) {
     });
   });
 
-  const enabled = (n: MenuBarNode) => {
-    if (n.items) return true;
+  const enabled = (n: MenuBarNode): boolean => {
+    // A submenu is live only if something inside it is. Otherwise it opens onto a column of
+    // grey, which reads as "broken" where a greyed parent reads as "not yet".
+    if (n.items) return n.items.some((c) => !c.separator && enabled(c));
     if (!n.cmd) return false;
     return props.isEnabled ? props.isEnabled(n.cmd) : !!n.done;
   };

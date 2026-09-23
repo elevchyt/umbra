@@ -202,3 +202,53 @@ describe('crop', () => {
     expect(crop(withSel, { x0: 20, y0: 20, x1: 40, y1: 40 }, false).selection).toBeNull();
   });
 });
+
+describe('fixed rotations and flips are lossless', () => {
+  // A deliberately asymmetric, odd-sized pattern: if a turn were off by a pixel or blurred,
+  // the round trip would not return it exactly.
+  function pattern(): Plane {
+    const w = Plane.empty(RGBA8).writer();
+    for (let y = 10; y < 17; y++) {
+      for (let x = 20; x < 31; x++) {
+        const data = w.mutable(0, 0);
+        const o = (y * TILE_SIZE + x) * 4;
+        data[o] = (x * 7 + y * 13) & 255;
+        data[o + 1] = x * 3;
+        data[o + 2] = y * 11;
+        data[o + 3] = 255;
+      }
+    }
+    return w.commit();
+  }
+
+  function pixels(p: Plane): number[] {
+    const out: number[] = [];
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) out.push(...at(p, x, y));
+    return out;
+  }
+
+  const pivot = { x: 25.5, y: 13.5 };
+
+  it('four quarter turns return the original exactly', () => {
+    const src = pattern();
+    let p = src;
+    for (let i = 0; i < 4; i++) p = transformPlane(p, about(rotate(Math.PI / 2), pivot), CLIP, 'nearest');
+    expect(pixels(p)).toEqual(pixels(src));
+  });
+
+  it('two flips return the original exactly', () => {
+    const src = pattern();
+    const flip = about(scale(-1, 1), pivot);
+    expect(pixels(transformPlane(transformPlane(src, flip, CLIP, 'nearest'), flip, CLIP, 'nearest'))).toEqual(
+      pixels(src),
+    );
+  });
+
+  it('a single quarter turn moves pixels without blending any', () => {
+    const out = transformPlane(pattern(), about(rotate(Math.PI / 2), pivot), CLIP, 'nearest');
+    const alphas = new Set<number>();
+    for (let y = 0; y < 48; y++) for (let x = 0; x < 48; x++) alphas.add(at(out, x, y)[3]);
+    // Nearest-neighbour: every pixel is fully in or fully out.
+    expect([...alphas].sort((a, b) => a - b)).toEqual([0, 255]);
+  });
+});

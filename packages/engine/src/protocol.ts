@@ -16,6 +16,8 @@ export interface LayerSummary {
   visible: boolean;
   clipped: boolean;
   hasMask: boolean;
+  maskEnabled: boolean;
+  locks: { transparency: boolean; pixels: boolean; position: boolean; all: boolean };
   expanded: boolean;
   tiles: number;
 }
@@ -61,6 +63,10 @@ export interface EngineStats {
   zoom: number;
   centreX: number;
   centreY: number;
+  /** Viewport size in CSS px, so the Navigator can draw what is on screen. */
+  viewWidth: number;
+  viewHeight: number;
+  viewRotation: number;
   /** Most recent input→pixels latency in ms, or null when nothing was painted. */
   lastLatencyMs: number | null;
   /**
@@ -111,6 +117,15 @@ export type ToEngine =
   | { t: 'commitTransform'; method?: string }
   | { t: 'cancelTransform' }
   | { t: 'nudge'; dx: number; dy: number }
+  | { t: 'transformAgain' }
+  | { t: 'requestThumbnail'; size: number }
+  | { t: 'setCentre'; x: number; y: number }
+  | { t: 'setLayerLocks'; id: number; locks: Partial<{ transparency: boolean; pixels: boolean; position: boolean; all: boolean }> }
+  | { t: 'maskCommand'; command: string; id?: number }
+  | { t: 'layerVia'; cut: boolean }
+  | { t: 'reselect' }
+  | { t: 'transformLayerFixed'; op: 'rotate180' | 'rotate90cw' | 'rotate90ccw' | 'flipH' | 'flipV' }
+  | { t: 'renameLayer'; id: number; name: string }
   | { t: 'clipboard'; op: string }
   | { t: 'saveSelection'; targetId?: number; op?: string; name?: string }
   | { t: 'loadSelection'; channelId: number; op?: string; invert?: boolean }
@@ -196,4 +211,6 @@ export type FromEngine =
   | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
   | { t: 'sampled'; color: [number, number, number]; toBackground: boolean }
   | { t: 'transform'; active: boolean }
-  | { t: 'recovery'; name: string; savedAt: number; width: number; height: number };
+  | { t: 'thumbnail'; pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }
+  | { t: 'recovery'; name: string; savedAt: number; width: number; height: number }
+  | { t: 'noRecovery' };

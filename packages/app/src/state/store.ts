@@ -75,6 +75,18 @@ const [brush, setBrush] = createStore({
   mode: 'normal' as string,
 });
 
+/** Latest document thumbnail for the Navigator; null until one has been rendered. */
+const [thumbnail, setThumbnail] = createSignal<{
+  pixels: Uint8Array;
+  width: number;
+  height: number;
+  docWidth: number;
+  docHeight: number;
+} | null>(null);
+
+/** The layer whose name is being edited in place in the Layers panel, if any. */
+const [renamingLayerId, setRenamingLayerId] = createSignal<number | null>(null);
+
 /** History panel: Photoshop's "Allow Non-Linear History" preference. */
 const [nonLinearHistory, setNonLinearHistory] = createSignal(false);
 
@@ -251,6 +263,10 @@ export const store = {
   setChannelView,
   nonLinearHistory,
   setNonLinearHistory,
+  renamingLayerId,
+  setRenamingLayerId,
+  thumbnail,
+  setThumbnail,
 
   foreground,
   setForeground,

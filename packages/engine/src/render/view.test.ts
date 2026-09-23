@@ -3,6 +3,7 @@ import {
   docPointAtScreen,
   fitToScreen,
   initialView,
+  isDegenerateViewport,
   nextZoomStop,
   panBy,
   visibleDocRect,
@@ -115,5 +116,19 @@ describe('matrix helpers', () => {
 
   it('leaves points unchanged under the identity', () => {
     expect(matApply(IDENTITY, 3, 4)).toEqual({ x: 3, y: 4 });
+  });
+});
+
+describe('fitting before layout', () => {
+  it('recognises an unlaid-out viewport', () => {
+    expect(isDegenerateViewport(initialView(0, 0))).toBe(true);
+    expect(isDegenerateViewport(initialView(20, 400))).toBe(true);
+    expect(isDegenerateViewport(initialView(654, 654))).toBe(false);
+  });
+
+  it('fitting against one is what produced the stuck 0.1% zoom', () => {
+    // The bug in one line: this is the zoom the document was left at.
+    expect(fitToScreen(initialView(0, 0), 2400, 1600).zoom).toBe(MIN_ZOOM);
+    expect(fitToScreen(initialView(654, 654), 2400, 1600).zoom).toBeGreaterThan(0.25);
   });
 });

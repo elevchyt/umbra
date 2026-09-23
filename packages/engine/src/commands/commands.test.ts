@@ -75,6 +75,33 @@ describe('layer tree commands', () => {
     expect(doc.layers).toHaveLength(2);
   });
 
+  it('numbers a default new layer one past the highest in use', () => {
+    expect(addLayer(docWith('Layer 1', 'Layer 2', 'Layer 3')).layers.at(-1)!.name).toBe('Layer 4');
+    expect(addLayer(docWith('Background')).layers.at(-1)!.name).toBe('Layer 1');
+  });
+
+  it('does not refill a gap in the numbering, as Photoshop does not', () => {
+    expect(addLayer(docWith('Layer 1', 'Layer 3')).layers.at(-1)!.name).toBe('Layer 4');
+  });
+
+  it('ignores names that merely start with the base', () => {
+    expect(addLayer(docWith('Layer 9 copy', 'Layers 50')).layers.at(-1)!.name).toBe('Layer 1');
+  });
+
+  it('selects the group it just made, not an older one', () => {
+    let doc = docWith('A', 'B', 'C', 'D');
+    const [a, b, c, d] = doc.layers.map((l) => l.id);
+    doc = groupLayers(doc, [a!, b!]);
+    const first = doc.activeLayerIds[0];
+    doc = groupLayers(doc, [c!, d!]);
+    const second = doc.activeLayerIds[0];
+    expect(second).not.toBe(first);
+    const names = doc.layers.map((l) => l.name);
+    expect(names).toContain('Group 1');
+    expect(names).toContain('Group 2');
+    expect(doc.layers.find((l) => l.id === second)!.name).toBe('Group 2');
+  });
+
   it('avoids duplicate names', () => {
     let doc = docWith('Layer');
     doc = addLayer(doc, 'Layer');

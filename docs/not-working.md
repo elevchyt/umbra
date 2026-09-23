@@ -13,41 +13,76 @@ looks like it does. Tick things off as they land.
   where they expect it. They should be *disabled* rather than silently inert, which is itself
   an entry in §1.
 
-Audited 2026-09-21 against `main` at M4(1/n), by cross-referencing all 505 menu commands
-against their handlers and then clicking through the results. 84 commands are wired directly,
-34 are panel toggles generated from the panel registry, and 387 do nothing. Regenerate with
-the script at the bottom.
+First audited 2026-09-21; §1 cleared and recounted 2026-09-23. Of 505 menu commands, **98 are
+wired**, 34 are panel toggles generated from the panel registry, and **373 are not built** —
+greyed out, correctly. Regenerate with the script at the bottom; `shell.test.ts` now fails if a
+menu item's `done:` flag and its handler ever disagree.
 
 ---
 
 ## 1. Broken — looks live, does nothing
 
-- [ ] **Layers panel footer buttons are all hardcoded `disabled`** — link, layer style, add
-      mask, new fill/adjustment layer, new group, new layer, delete layer. The engine
-      implements `layerCommand` add/delete/duplicate/group/ungroup/merge/flatten already and
-      the Layer menu uses it; only the buttons were never wired.
-      `packages/app/src/panels/panels.tsx` ~line 212. **This is the "delete button".**
-- [ ] **Layers panel lock buttons are hardcoded `disabled`** — transparency, pixels, position,
-      all. `LayerLocks` exists on every layer and is honoured by fill, stroke, transform and
-      the brush; nothing can set it. Same file, ~line 119.
-- [ ] **Delete / Backspace do nothing.** No key binding at all. In Photoshop they clear the
-      selection (Backspace fills with the background colour). `edit.clear` is implemented and
-      works from the menu — it just has no key.
-- [ ] **Navigator panel is a dead box.** The thumbnail never renders the document, and the
-      zoom field and slider are `onChange={() => {}}`. Reading the zoom works; setting it
-      does not.
-- [ ] **Layers panel "Filter by layer kind" buttons** are inert (they are labelled M11, but
-      they look like live toggles).
-- [ ] **Move tool's Align buttons** in the options bar are disabled placeholders.
-- [ ] **Every unimplemented menu item is silently inert rather than disabled.** Of 505 menu
-      commands, 84 have a handler and 34 more are panel toggles generated from the panel
-      registry — leaving **387 that do nothing at all when clicked**, with no feedback. They
-      should be greyed out, the way Photoshop greys what does not apply. This one entry is
-      most of why the app feels broken rather than unfinished, and it is a single change:
-      disable any item whose command has no handler.
-- [ ] **`layer.rename` is marked `done: true` in the menu data but has no handler** — the only
-      place the `done:` flags and reality disagree.
-- [ ] **Double-clicking a layer name does not rename it.** No inline edit anywhere.
+**All cleared 2026-09-23.** Kept for the record, with what each turned out to be.
+
+- [x] **Layers panel footer buttons were all hardcoded `disabled`.** New layer, delete, new
+      group and add mask now work (Alt-click Add Mask hides instead of reveals). Link, layer
+      style and fill/adjustment layer are not built yet, so they stay disabled — but now look
+      disabled and say why in their tooltip.
+- [x] **Layers panel lock buttons were hardcoded `disabled`.** All four toggle, and show their
+      state.
+- [x] **Delete / Backspace did nothing.** They clear the selection now. With no selection they
+      deliberately do nothing — clearing a whole layer by accident is not a keystroke's job.
+- [x] **Navigator was a dead box.** It renders a scaled thumbnail (through the mip pyramid, so
+      it costs about one viewport frame), outlines the visible area in red — as a rotated quad,
+      so it stays right when the canvas is rotated — and click/drag pans. Zoom field and slider
+      work.
+- [x] **"Filter by layer kind" and the Move tool's Align buttons** are still not built (M11,
+      M9), but disabled controls now visibly look disabled.
+- [x] **Menu enablement.** ⚠ *The original entry here was wrong.* It said 387 menu items were
+      "silently inert rather than disabled". In fact leaf items without `done:` were already
+      greyed and unclickable — I had counted handlers, not clickability. The real problems were
+      narrower: **submenu parents were always enabled** even when every child was dead (why
+      Image ▸ Adjustments looked live), **keyboard shortcuts bypassed the check** and silently
+      ran dead commands, and the **hand-maintained `done:` flags had drifted** in both
+      directions. All three are fixed, and a test now enforces flag ⇔ handler.
+- [x] **`layer.rename`** — the one item enabled with no handler. Also Window ▸ Options and
+      Window ▸ Tools, which the new test found were enabled and dead.
+- [x] **Double-click a layer name to rename it** in place; Enter or clicking away commits,
+      Escape abandons.
+
+### Found while clearing §1
+
+These were not on the list. Most were found by verifying the fixes in the browser rather than
+by tests — which is itself the recurring lesson of this project.
+
+- [x] **Cropped PSD masks hid everything outside their rectangle.** Photoshop stores a mask
+      cropped to its painted area with a white default ("reveal the rest"); the GPU drew only
+      stored tiles, so the mask target stayed at 0 outside them. The CPU reference was right
+      (`tileAt()` returns the default tile), which is why parity never caught it.
+- [ ] **Follow-up: add a parity case for a cropped, white-default mask.** The fix above is
+      verified by reasoning and the mask tests, not by the GPU≡CPU suite, which has no such case.
+- [x] **Edit ▸ Transform ▸ Rotate 90° CW rotated the whole canvas.** That is Image ▸ Image
+      Rotation's job; Edit ▸ Transform acts on the layer.
+- [x] **Transform ▸ Again opened a fresh Free Transform** instead of repeating the last one.
+- [x] **New layers were named "Layer"**, not "Layer 7". Photoshop numbers one past the highest in
+      use and does not refill gaps; that is what happens now.
+- [x] **Grouping twice could select the older group** — the new group was found afterwards by
+      `name.startsWith('Group')`, which matched the first group in tree order.
+- [x] **Startup could fit to a 0×0 viewport** and leave the document as a dot at 0.1%. The
+      client sends `init` with the canvas size before layout can guarantee one. A fit against
+      an unusable viewport is now completed by the first real resize. *Only ever observed in the
+      automation browser, whose hidden pane delays layout — not confirmed in Electron.*
+- [x] **Crash recovery could destroy work.** The prompt appeared *after* the default document,
+      seconds into a session, and said recovering would leave the current document untouched.
+      It replaced it — there is only one document. It is now asked before any document exists.
+- [x] **A recovered journal was never cleared**, so the same autosave was offered on every
+      launch.
+- [x] **The journal snapshotted untouched documents** — about 1.9 s of worker time per snapshot
+      for a 2400×1600 six-layer document, spent on something with nothing to recover. It now
+      waits for the first edit.
+- [ ] **A journal write failed with a `DOMException` once, cause not established.** It was logged
+      as `[object DOMException]`; it now logs the name and message. Leading suspect: two windows
+      writing the one journal — there is one per origin, not per window. Needs a real repro.
 
 ## 2. Rough edges in things that DO work
 
@@ -75,15 +110,19 @@ the feature is complete.
 | Menu | Wired | Chiefly waiting on |
 |---|---|---|
 | File | 8 / 50 | export & automation (M11), place/linked (M5) |
-| Edit | 21 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
-| Image | 12 / 56 | **all 22 adjustments (M4, in progress)**, colour modes (M10) |
-| Layer | 10 / 137 | layer styles (M6), smart objects (M5), adjustment/fill layers (M4), masks (M4), align & distribute (M9) |
-| Type | 0 / 39 | all of type (M7) |
-| Select | 14 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
+| Edit | 25 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
+| Image | 10 / 56 | **all 22 adjustments (M4, in progress)**, colour modes (M10) |
+| Layer | 21 / 137 | layer styles (M6), smart objects (M5), adjustment/fill layers (M4), align & distribute (M9) |
+| Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
+| Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
 | Filter | 0 / 8 | all filters (M5) |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
-| Window | 3 / 56 | multi-document window arrangement (M11) |
+| Window | 32 / 56 | multi-document window arrangement (M11) |
 | Help | 4 / 5 | — |
+
+"Wired" counts a `runCommand` case or a generated panel toggle. An earlier version of this table
+counted every `case` in `Workspace.tsx`, which included `isChecked`'s — a tick mark is not an
+implementation.
 
 ### Specifically, in the menus you are most likely to reach for
 
@@ -94,14 +133,20 @@ the feature is complete.
       nothing changes. Grayscale, CMYK, Lab, 16/32-bit are M10.
 - [ ] **Image ▸ Auto Tone / Auto Contrast / Auto Color** — greyed, correctly; M4.
 - [ ] **Image ▸ Duplicate, Apply Image, Calculations** — M4.
-- [ ] **Layer ▸ New ▸ Layer Via Copy / Via Cut** — the clipboard exists; these two are a
-      trivial composition of it and are worth doing early.
-- [ ] **Layer ▸ Layer Mask ▸ …** — 0 of 9. Masks render and transform correctly; nothing can
-      create one from the UI. Reveal All / Hide All / Reveal Selection / Hide Selection are
-      each a few lines against machinery that already exists.
-- [ ] **Select ▸ Reselect** — history keeps the previous selection; nothing restores it.
-- [ ] **Edit ▸ Transform ▸ Rotate 180 / 90 CCW / Flip H / Flip V** — the matrix kernel does all
-      four; only "Rotate 90° CW" is wired.
+- [x] **Layer ▸ New ▸ Layer Via Copy / Via Cut** (Ctrl+J / Ctrl+Shift+J). They do not touch
+      the clipboard, as Photoshop's do not.
+- [x] **Layer ▸ Layer Mask ▸ …** — 7 of 9: Reveal All, Hide All, Reveal Selection, Hide
+      Selection, From Transparency, Delete, Apply, and Enable/Disable (also Shift-click on the
+      mask thumbnail, which shows Photoshop's red cross when disabled).
+- [ ] **Layer ▸ Layer Mask ▸ Link** — `linked` exists on the mask, but transforms always move
+      mask and layer together, so the toggle would currently be a lie.
+- [x] **Select ▸ Reselect** (Ctrl+Shift+D) — restores what the last Deselect dropped, and refuses
+      after a crop or resize, when it would describe pixels that are no longer there.
+- [x] **Edit ▸ Transform ▸ Rotate 180 / 90 CW / 90 CCW / Flip H / Flip V** — on the layer, about
+      its own centre. Lossless: nearest-neighbour about a half-pixel-rounded pivot, and a test
+      proves four quarter turns and two flips return the exact original pixels.
+- [x] **Edit ▸ Transform ▸ Again** (Ctrl+Shift+T) — repeats the last Free Transform, pivot
+      included, so rotate-then-Again continues round the same point.
 - [ ] **Edit ▸ Preferences ▸ …** — 2 of 13.
 - [ ] **View ▸ Show ▸ …** and **View ▸ Snap To ▸ …** — the store has `extras` flags for rulers,
       grid, guides, pixel grid, selection edges and layer edges; only selection edges is
@@ -128,16 +173,28 @@ Zoom.
 
 ## 5. Panels
 
-Working: Layers, Color, Swatches, Info, Properties, History, Channels.
+Working: Layers, Color, Swatches, Info, Properties, History, Channels, Navigator.
 
 - [ ] **Adjustments** — placeholder (M4)
 - [ ] **Histogram** — placeholder (M4)
 - [ ] **Brushes** — placeholder; was scoped to M3 and did not land
 - [ ] **Brush Settings** — placeholder (M8)
 - [ ] **Paths** — placeholder (M7)
-- [ ] **Navigator** — renders, but see §1: it is not interactive
+- [x] **Navigator** — thumbnail, view rectangle, click/drag to pan, zoom field and slider
 
 ---
+
+## Verifying in the automation browser
+
+The built-in browser pane is usually **hidden**, and a hidden pane throttles
+`requestAnimationFrame` hard — measured at 5 callbacks in 2 s, sometimes none. Umbra renders on
+rAF ticks, so in that pane the canvas can sit unrendered for a minute and `__umbraStats` stays
+frozen at whatever it last said. That produced at least four false alarms in this project
+("blank canvas", "stuck at 0 tiles", "60 fps" that was a stale reading).
+
+What stays trustworthy there is anything driven by **worker messages**, which are not
+frame-bound: the Layers panel, dialogs, document summaries, thumbnails. Verify through the DOM,
+and treat any canvas screenshot or timing taken in a hidden pane as unconfirmed.
 
 ## Keeping this file honest
 
@@ -149,7 +206,8 @@ cd packages/app && node --input-type=module -e "
 import { readFileSync } from 'node:fs';
 const menus = readFileSync('src/menus/menus.ts', 'utf8');
 const ws = readFileSync('src/workspace/Workspace.tsx', 'utf8');
-const handled = new Set([...ws.matchAll(/case '([^']+)':/g)].map(m => m[1]));
+const body = ws.slice(ws.indexOf('function runCommand('), ws.indexOf('\\n  }\\n', ws.indexOf('function runCommand(')));
+const handled = new Set([...body.matchAll(/case '([^']+)':/g)].map(m => m[1]));
 const rows = [...menus.matchAll(/\{\s*label:\s*'([^']*)'\s*,\s*cmd:\s*'([^']*)'/g)];
 const missing = rows.filter(r => !handled.has(r[2]) && !r[2].startsWith('panel.'));
 console.log(\`\${rows.length - missing.length} of \${rows.length} wired\`);

@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, type JSX } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount, type JSX } from 'solid-js';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
@@ -118,13 +118,24 @@ function LayersPanel() {
       <div class="layers-locks">
         <span class="locks-label">Lock:</span>
         <For each={[
-          ['lockTransparency', 'Lock transparent pixels'],
-          ['lockPixels', 'Lock image pixels'],
-          ['lockPosition', 'Lock position'],
-          ['lock', 'Lock all'],
+          ['lockTransparency', 'Lock transparent pixels', 'transparency'],
+          ['lockPixels', 'Lock image pixels', 'pixels'],
+          ['lockPosition', 'Lock position', 'position'],
+          ['lock', 'Lock all', 'all'],
         ] as const}>
-          {([icon, title]) => (
-            <button type="button" class="mini-icon" title={title} disabled>
+          {([icon, title, key]) => (
+            <button
+              type="button"
+              class="mini-icon"
+              classList={{ active: !!selected()?.locks?.[key] }}
+              title={title}
+              disabled={!selected()}
+              onClick={() => {
+                const l = selected();
+                if (!l) return;
+                store.engine?.({ t: 'setLayerLocks', id: l.id, locks: { [key]: !l.locks?.[key] } });
+              }}
+            >
               <Icon name={icon} size={13} />
             </button>
           )}
@@ -178,15 +189,38 @@ function LayersPanel() {
                 </div>
 
                 <Show when={l.hasMask}>
-                  <div class="layer-mask-thumb" title="Layer mask" aria-hidden="true" />
+                  <div
+                    class="layer-mask-thumb"
+                    classList={{ disabled: !l.maskEnabled }}
+                    title={l.maskEnabled ? 'Layer mask (Shift-click to disable)' : 'Layer mask — disabled (Shift-click to enable)'}
+                    onClick={(e) => {
+                      if (!e.shiftKey) return;
+                      e.stopPropagation();
+                      store.engine?.({ t: 'maskCommand', command: 'toggle', id: l.id });
+                    }}
+                  />
                 </Show>
 
-                <span class="layer-name">
-                  <Show when={l.clipped}>
-                    <span class="layer-clip" title="Clipped to the layer below">↳</span>
-                  </Show>
-                  {l.name}
-                </span>
+                <Show
+                  when={store.renamingLayerId() === l.id}
+                  fallback={
+                    <span
+                      class="layer-name"
+                      title="Double-click to rename"
+                      onDblClick={(e) => {
+                        e.stopPropagation();
+                        store.setRenamingLayerId(l.id);
+                      }}
+                    >
+                      <Show when={l.clipped}>
+                        <span class="layer-clip" title="Clipped to the layer below">↳</span>
+                      </Show>
+                      {l.name}
+                    </span>
+                  }
+                >
+                  <LayerNameEditor id={l.id} name={l.name} />
+                </Show>
 
                 <Show when={l.blendMode !== 'normal' && l.blendMode !== 'passThrough'}>
                   <span class="layer-badge" title={`Blend mode: ${l.blendMode}`}>
@@ -210,23 +244,101 @@ function LayersPanel() {
       </Show>
 
       <div class="panel-footer">
-        <For each={[
-          ['linkChain', 'Link layers'],
-          ['fx', 'Add a layer style'],
-          ['addMask', 'Add layer mask'],
-          ['adjustment', 'Create new fill or adjustment layer'],
-          ['folder', 'Create a new group'],
-          ['newLayer', 'Create a new layer'],
-          ['trash', 'Delete layer'],
-        ] as const}>
-          {([icon, title]) => (
-            <button type="button" class="mini-icon" title={title} disabled>
-              <Icon name={icon} size={15} />
-            </button>
-          )}
-        </For>
+        {/* Link, layer styles and fill/adjustment layers are not built yet (M6, M4); they stay
+            visibly disabled and SAY so, rather than looking live and doing nothing. */}
+        <button type="button" class="mini-icon" title="Link layers — not available yet" disabled>
+          <Icon name="linkChain" size={15} />
+        </button>
+        <button type="button" class="mini-icon" title="Add a layer style — arrives in M6" disabled>
+          <Icon name="fx" size={15} />
+        </button>
+        <button
+          type="button"
+          class="mini-icon"
+          title="Add layer mask (Alt: hide instead of reveal)"
+          disabled={!selected() || !!selected()?.hasMask}
+          onClick={(e) => {
+            const id = selected()?.id;
+            if (id === undefined) return;
+            const hasSel = !!store.doc()?.hasSelection;
+            // Photoshop: click reveals (the selection, or everything); Alt-click hides.
+            const command = e.altKey
+              ? hasSel ? 'hideSelection' : 'hideAll'
+              : hasSel ? 'revealSelection' : 'revealAll';
+            store.engine?.({ t: 'maskCommand', command, id });
+          }}
+        >
+          <Icon name="addMask" size={15} />
+        </button>
+        <button type="button" class="mini-icon" title="Create new fill or adjustment layer — arrives in M4" disabled>
+          <Icon name="adjustment" size={15} />
+        </button>
+        <button
+          type="button"
+          class="mini-icon"
+          title="Create a new group from the selected layers"
+          disabled={active().length === 0}
+          onClick={() => store.engine?.({ t: 'layerCommand', command: 'group', ids: [...active()] })}
+        >
+          <Icon name="folder" size={15} />
+        </button>
+        <button
+          type="button"
+          class="mini-icon"
+          title="Create a new layer"
+          onClick={() => store.engine?.({ t: 'layerCommand', command: 'add' })}
+        >
+          <Icon name="newLayer" size={15} />
+        </button>
+        <button
+          type="button"
+          class="mini-icon"
+          title="Delete layer"
+          disabled={!selected()}
+          onClick={() => {
+            const id = selected()?.id;
+            if (id !== undefined) store.engine?.({ t: 'layerCommand', command: 'delete', id });
+          }}
+        >
+          <Icon name="trash" size={15} />
+        </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Inline rename, as Photoshop does it: the name becomes a field in place, Enter or clicking
+ * away commits, Escape abandons. Blank is refused by the engine rather than stored.
+ */
+function LayerNameEditor(props: { id: number; name: string }) {
+  let input!: HTMLInputElement;
+  let done = false;
+  const finish = (commit: boolean) => {
+    if (done) return;
+    done = true;
+    if (commit) store.engine?.({ t: 'renameLayer', id: props.id, name: input.value });
+    store.setRenamingLayerId(null);
+  };
+  onMount(() => {
+    input.focus();
+    input.select();
+  });
+  return (
+    <input
+      ref={input}
+      class="layer-name-edit"
+      value={props.name}
+      spellcheck={false}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        // Keep the shell's shortcuts out: a letter typed here is part of the name, not a tool.
+        e.stopPropagation();
+        if (e.key === 'Enter') finish(true);
+        else if (e.key === 'Escape') finish(false);
+      }}
+      onBlur={() => finish(true)}
+    />
   );
 }
 
@@ -446,23 +558,116 @@ function SwatchesPanel() {
 
 // ---- Navigator ------------------------------------------------------------------------
 
+/**
+ * Navigator — spec 01 §4. A thumbnail of the whole document with the visible area outlined in
+ * red; click or drag on it to pan, and the field and slider set the zoom.
+ *
+ * The thumbnail is requested rather than pushed: it only costs anything while this panel is
+ * open, and requests are coalesced so a burst of edits renders it once.
+ */
+const NAV_SIZE = 200;
+
 function NavigatorPanel() {
+  let canvas!: HTMLCanvasElement;
   const zoom = () => (store.stats()?.zoom ?? 1) * 100;
+  const send = (msg: unknown) => store.engine?.(msg);
+
+  // Coalesce: many document updates in quick succession become one render.
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const request = () => {
+    if (pending) return;
+    pending = setTimeout(() => {
+      pending = undefined;
+      send({ t: 'requestThumbnail', size: NAV_SIZE });
+    }, 150);
+  };
+  createEffect(() => {
+    store.doc();
+    store.engineReady();
+    request();
+  });
+  onCleanup(() => pending && clearTimeout(pending));
+
+  const draw = () => {
+    const t = store.thumbnail();
+    const s = store.stats();
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    if (!t) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+    canvas.width = t.width;
+    canvas.height = t.height;
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(t.pixels), t.width, t.height), 0, 0);
+    if (!s) return;
+
+    // The viewport's four corners, taken back into document space through the view's zoom and
+    // rotation, then down to thumbnail scale. A rotated canvas gives a rotated box.
+    const k = t.width / t.docWidth;
+    const cos = Math.cos(-s.viewRotation);
+    const sin = Math.sin(-s.viewRotation);
+    const corner = (sx: number, sy: number) => {
+      const dx = (sx - s.viewWidth / 2) / s.zoom;
+      const dy = (sy - s.viewHeight / 2) / s.zoom;
+      return [(s.centreX + dx * cos - dy * sin) * k, (s.centreY + dx * sin + dy * cos) * k] as const;
+    };
+    const pts = [corner(0, 0), corner(s.viewWidth, 0), corner(s.viewWidth, s.viewHeight), corner(0, s.viewHeight)];
+    ctx.strokeStyle = '#e03030';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pts[0]![0], pts[0]![1]);
+    for (const p of pts.slice(1)) ctx.lineTo(p[0], p[1]);
+    ctx.closePath();
+    ctx.stroke();
+  };
+  createEffect(draw);
+
+  const panTo = (e: PointerEvent) => {
+    const t = store.thumbnail();
+    if (!t) return;
+    const r = canvas.getBoundingClientRect();
+    const x = ((e.clientX - r.left) / r.width) * t.docWidth;
+    const y = ((e.clientY - r.top) / r.height) * t.docHeight;
+    send({ t: 'setCentre', x, y });
+  };
+
   return (
     <div class="navigator-panel">
       <div class="navigator-thumb">
         <Show when={store.doc()} fallback={<span class="dim">No document</span>}>
-          {(d) => (
-            <div
-              class="navigator-doc"
-              style={{ 'aspect-ratio': `${d().width} / ${d().height}` }}
-            />
-          )}
+          <canvas
+            ref={canvas}
+            class="navigator-canvas"
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              panTo(e);
+            }}
+            onPointerMove={(e) => {
+              if (e.buttons & 1) panTo(e);
+            }}
+          />
         </Show>
       </div>
       <div class="navigator-controls">
-        <NumberField value={zoom()} onChange={() => {}} precision={1} suffix="%" width={52} />
-        <Slider value={Math.log2(Math.max(zoom() / 100, 0.001))} min={-10} max={7} step={0.01} onChange={() => {}} width={110} />
+        <NumberField
+          value={zoom()}
+          onChange={(v) => send({ t: 'setZoom', zoom: Math.max(0.1, v) / 100 })}
+          min={0.1}
+          max={12800}
+          precision={1}
+          suffix="%"
+          width={52}
+        />
+        <Slider
+          value={Math.log2(Math.max(zoom() / 100, 0.001))}
+          min={-5}
+          max={6}
+          step={0.01}
+          onChange={(v) => send({ t: 'setZoom', zoom: Math.pow(2, v) })}
+          width={110}
+        />
       </div>
     </div>
   );

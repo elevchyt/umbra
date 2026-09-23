@@ -79,11 +79,11 @@ export function Workspace() {
           // Headless harnesses: the shell opens the page with a hash and waits for a report.
           if (location.hash === '#spikes') client!.send({ t: 'runSpikes' });
           else if (location.hash === '#parity') client!.send({ t: 'runParity' });
-          else {
-            client!.send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
-            // Offer whatever the last crash left behind, once the editor is usable.
-            client!.send({ t: 'checkRecovery' });
-          }
+          // Ask about a crashed session BEFORE making any document. Recovering replaces the
+          // open document — there is only one — so the prompt must only ever appear when there
+          // is nothing yet to lose. It used to arrive after the default document, seconds into
+          // a session, claiming the current work would be untouched; it would not have been.
+          else client!.send({ t: 'checkRecovery' });
         },
         onStats: (s) => {
           // Dev aid: the live engine stats are awkward to inspect from the UI thread
@@ -104,7 +104,9 @@ export function Workspace() {
         onParity: (pass, text) => reportToShell(pass, text),
         onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
         onTransform: setTransforming,
+        onThumbnail: store.setThumbnail,
         onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
+        onNoRecovery: () => startDefaultDocument(),
         onSampled: (color, toBackground) => {
           // @umbra/core/color works in 0…1, which is also what the engine samples in.
           const rgb = { r: color[0], g: color[1], b: color[2] };
@@ -419,13 +421,50 @@ export function Workspace() {
         send({ t: 'beginTransform', transient: false, selectionOnly: true });
         break;
       case 'transform.again':
+        send({ t: 'transformAgain' });
+        break;
       case 'transform.scale':
       case 'transform.rotate':
       case 'transform.skew':
         send({ t: 'beginTransform', transient: false });
         break;
+      // Edit ▸ Transform acts on the LAYER; Image ▸ Image Rotation is the one that turns the
+      // canvas. These were once crossed, so a layer rotate spun the whole document.
+      case 'transform.rotate180':
+        send({ t: 'transformLayerFixed', op: 'rotate180' });
+        break;
       case 'transform.rotate90cw':
-        send({ t: 'imageCommand', command: 'rotate', angle: 90 });
+        send({ t: 'transformLayerFixed', op: 'rotate90cw' });
+        break;
+      case 'transform.rotate90ccw':
+        send({ t: 'transformLayerFixed', op: 'rotate90ccw' });
+        break;
+      case 'transform.flipH':
+        send({ t: 'transformLayerFixed', op: 'flipH' });
+        break;
+      case 'transform.flipV':
+        send({ t: 'transformLayerFixed', op: 'flipV' });
+        break;
+      case 'layer.viaCopy':
+        send({ t: 'layerVia', cut: false });
+        break;
+      case 'layer.viaCut':
+        send({ t: 'layerVia', cut: true });
+        break;
+      case 'select.reselect':
+        send({ t: 'reselect' });
+        break;
+      case 'mask.revealAll':
+      case 'mask.hideAll':
+      case 'mask.revealSelection':
+      case 'mask.hideSelection':
+      case 'mask.fromTransparency':
+      case 'mask.delete':
+      case 'mask.apply':
+        send({ t: 'maskCommand', command: cmd.slice(5) });
+        break;
+      case 'mask.enable':
+        send({ t: 'maskCommand', command: 'toggle' });
         break;
       case 'edit.cut':
         send({ t: 'clipboard', op: 'cut' });
@@ -494,6 +533,21 @@ export function Workspace() {
         promptAmount('Border Selection', 'Width', 4, (v) =>
           send({ t: 'selectCommand', command: 'border', amount: v }),
         );
+        break;
+      case 'layer.rename': {
+        const id = store.doc()?.activeLayerIds[0];
+        if (id !== undefined) {
+          // Rename happens in place in the Layers panel, so make sure that panel is showing.
+          store.openPanel('layers');
+          store.setRenamingLayerId(id);
+        }
+        break;
+      }
+      case 'panel.options':
+        store.setOptionsVisible(!store.optionsVisible());
+        break;
+      case 'panel.tools':
+        store.setToolsVisible(!store.toolsVisible());
         break;
       case 'edit.toggleLastState':
         send({ t: 'toggleLastState' });
@@ -615,6 +669,11 @@ export function Workspace() {
     setAmountPrompt({ title, label, value, apply });
   }
 
+  /** The document a session starts with when there is nothing to recover. */
+  function startDefaultDocument(): void {
+    send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
+  }
+
   /** Resolve a Fill dialog's Contents choice to a 0…1 RGB triple. */
   function fillColor(contents: string): [number, number, number] {
     const toUnit = (c: { r: number; g: number; b: number }): [number, number, number] => [c.r, c.g, c.b];
@@ -709,6 +768,16 @@ export function Workspace() {
           return;
         }
       }
+      // Delete / Backspace clear the selection's pixels, as Photoshop's do. (Photoshop's
+      // Backspace on a Background layer fills with the background colour instead; with no
+      // locked Background layer here yet, both keys clear.) With nothing selected they do
+      // nothing — clearing a whole layer by accident is not a keystroke's job.
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (store.doc()?.hasSelection) runCommand('edit.clear');
+        return;
+      }
+
       const arrow = ARROW_NUDGE[e.key];
       if (arrow && (transforming() || store.activeTool() === 'move')) {
         e.preventDefault();
@@ -756,6 +825,13 @@ export function Workspace() {
       const binding = keymap.lookup(e);
       if (binding) {
         e.preventDefault();
+        // A shortcut must obey the same rule as the menu: a disabled command does nothing,
+        // and says so, rather than being swallowed silently.
+        if (!isEnabled(binding.target)) {
+          const label = COMMAND_BY_ID.get(binding.target)?.label;
+          if (label) store.setStatusMessage(`${label.replace(/…$/, '')} is not available yet.`);
+          return;
+        }
         runCommand(binding.target);
       }
     };
@@ -812,7 +888,11 @@ export function Workspace() {
   const isEnabled = (cmd: string): boolean => {
     if (PANEL_BY_COMMAND[cmd]) return true;
     if (cmd.startsWith('workspace.') && WORKSPACE_BY_ID.has(cmd.slice(10))) return true;
-    return !!COMMAND_BY_ID.get(cmd)?.done;
+    const entry = COMMAND_BY_ID.get(cmd);
+    // Keyboard-only commands (D, X, Q, [ and ], Tab…) are not menu items and are always
+    // live; only a MENU command can be "not built yet".
+    if (!entry) return true;
+    return !!entry.done;
   };
 
   const shortcutRows = () =>
@@ -1011,6 +1091,7 @@ export function Workspace() {
             onCancel={() => {
               setRecovery(null);
               send({ t: 'discardRecovery' });
+              startDefaultDocument();
             }}
             onOk={() => {
               setRecovery(null);
@@ -1022,7 +1103,9 @@ export function Workspace() {
                 “{r().name}” was left unsaved when Umbra last closed, autosaved at{' '}
                 {new Date(r().savedAt).toLocaleString()}.
               </p>
-              <p class="dim">Recovering opens it as a new document; the current one is untouched.</p>
+              <p class="dim">
+                Cancel starts a new document instead and discards the autosave.
+              </p>
             </div>
           </Dialog>
         )}
