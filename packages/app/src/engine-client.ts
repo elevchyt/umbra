@@ -403,8 +403,18 @@ export class EngineClient {
         }
         return;
       }
+      if (this.clickAction && e.button === 0) {
+        const p = toLocal(e);
+        this.send(this.clickAction(p.x, p.y) as never);
+        return;
+      }
+      if (this.paintMode && e.button === 0 && this.altSamples && e.altKey) {
+        const p = toLocal(e);
+        this.send({ t: 'setCloneSource', x: p.x, y: p.y });
+        return;
+      }
       if (this.paintMode && e.button === 0) {
-        this.send({ t: 'strokeBegin', brush: this.brush, color: this.brushColor, bg: this.brushBg, mode: this.paintBlendMode });
+        this.send({ t: 'strokeBegin', brush: this.brush, color: this.brushColor, bg: this.brushBg, mode: this.paintBlendMode, ...(this.retouch ? { retouch: this.retouch as never } : {}) });
         write(e, FLAG_DOWN);
       } else {
         this.panning = true;
@@ -535,6 +545,12 @@ export class EngineClient {
 
   brushColor: [number, number, number] = [0, 0, 0];
   brushBg: [number, number, number] = [1, 1, 1];
+  /** A retouching tool's stroke settings (sent with each stroke), or null for plain painting. */
+  retouch: { tool: string; options: unknown } | null = null;
+  /** Clone Stamp / Healing: Alt-click sets the source instead of painting. */
+  altSamples = false;
+  /** A tool that acts on a click (Magic Eraser): its message, given the click point. */
+  clickAction: ((x: number, y: number) => unknown) | null = null;
   brush: BrushParams = { ...DEFAULT_BRUSH };
   /** Paint blend mode, which unlike a layer's may also be 'behind' or 'clear'. */
   paintBlendMode = 'normal';

@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, DEFAULT_RETOUCH, type RetouchOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -149,6 +149,19 @@ export interface Histogram {
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
 /** The vector tools' options bar: Auto Add/Delete, Curve Fit, the path operation. */
 const [vectorOptions, setVectorOptions] = createSignal<{ autoAddDelete: boolean; curveFit: number; op: 'add' | 'subtract' | 'intersect' | 'exclude' }>({ autoAddDelete: true, curveFit: 2, op: 'add' });
+/** The retouching tools' options bars (one bag for all of them, as the engine takes them). */
+const [retouchOptions, setRetouchOptions] = createSignal<RetouchOptions>({ ...DEFAULT_RETOUCH });
+/** Clone Source panel: five slots (a source point, and the transform applied to it), and which is active. */
+export interface CloneSlot {
+  point: { x: number; y: number } | null;
+  scaleX: number;
+  scaleY: number;
+  angle: number;
+  flipX: boolean;
+  flipY: boolean;
+}
+const [cloneSlots, setCloneSlots] = createSignal<CloneSlot[]>(Array.from({ length: 5 }, () => ({ point: null, scaleX: 100, scaleY: 100, angle: 0, flipX: false, flipY: false })));
+const [cloneSlot, setCloneSlot] = createSignal(0);
 /** The brush library as the engine last sent it, and the preset last chosen. */
 const [brushLibrary, setBrushLibrary] = createSignal<{ groups: BrushGroup[]; tips: Record<string, TipBitmap> } | null>(null);
 const [brushPresetId, setBrushPresetId] = createSignal<string | null>(null);
@@ -378,6 +391,12 @@ export const store = {
   setTypeOptions,
   brushLibrary,
   setBrushLibrary,
+  retouchOptions,
+  setRetouchOptions,
+  cloneSlots,
+  setCloneSlots,
+  cloneSlot,
+  setCloneSlot,
   brushPresetId,
   setBrushPresetId,
   fonts,

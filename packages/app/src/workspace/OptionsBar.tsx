@@ -4,12 +4,13 @@ import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID } from '../tools/registry';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, type SymmetryMode } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, RETOUCH_TOOLS, type SymmetryMode } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
 import { TypeToolOptions } from '../type/TypePanels';
 import { BrushPicker } from '../brush/BrushesPanel';
 import { ToolPresetPicker } from '../brush/ToolPresets';
+import { RetouchToolOptions } from '../brush/RetouchOptions';
 
 /**
  * Options bar — spec 01 §1. Contents are contextual on the active tool, and the leftmost slot
@@ -386,6 +387,10 @@ export function OptionsBar(props: OptionsBarProps) {
           <span class="options-label">Make:</span>
           <IconButton icon="marqueeRect" title="Make Selection from the path" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'toSelection', op: 'new' } as never)} />
           <IconButton icon="pen" title="Make a Work Path from the selection" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 } as never)} />
+        </Match>
+
+        <Match when={[...RETOUCH_TOOLS, 'magicEraser'].includes(store.activeTool() as never)}>
+          <RetouchToolOptions />
         </Match>
 
         <Match when={['typeHorizontal', 'typeVertical', 'typeMaskHorizontal', 'typeMaskVertical'].includes(store.activeTool())}>

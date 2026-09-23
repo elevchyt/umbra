@@ -1229,3 +1229,6 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .tool-preset-del { margin-left: auto; opacity: 0.5; }
 .tool-preset-del:hover { opacity: 1; }
 .tool-preset-pop { height: 260px; }
+.history-source { width: 18px; height: 18px; padding: 0; background: none; border: 1px solid transparent; color: var(--text-disabled); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.history-source.on { color: var(--text); border-color: var(--border-dark); }
+.options-hint { font-size: 11px; }

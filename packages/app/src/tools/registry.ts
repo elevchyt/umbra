@@ -91,7 +91,7 @@ export const TOOL_GROUPS: ToolGroup[] = [
     tools: [
       { id: 'spotHealing', name: 'Spot Healing Brush Tool', icon: 'spotHealing', key: 'j' },
       { id: 'removeTool', name: 'Remove Tool', icon: 'removeTool', key: 'j' },
-      { id: 'healingBrush', name: 'Healing Brush Tool', icon: 'healingBrush', key: 'j' },
+      { id: 'healingBrush', name: 'Healing Brush Tool', icon: 'healingBrush', key: 'j', implemented: true, hint: 'Alt-click a source, then paint: the source is cloned and blended into the destination.' },
       { id: 'patch', name: 'Patch Tool', icon: 'patch', key: 'j' },
       { id: 'contentAwareMove', name: 'Content-Aware Move Tool', icon: 'contentAwareMove', key: 'j' },
       { id: 'redEye', name: 'Red Eye Tool', icon: 'redEye', key: 'j' },
@@ -103,24 +103,24 @@ export const TOOL_GROUPS: ToolGroup[] = [
     tools: [
       { id: 'brush', name: 'Brush Tool', icon: 'brush', key: 'b', implemented: true, hint: 'Drag to paint. [ and ] change the brush size.' },
       { id: 'pencil', name: 'Pencil Tool', icon: 'pencil', key: 'b', implemented: true, hint: 'Drag for a hard-edged stroke.' },
-      { id: 'colorReplacement', name: 'Color Replacement Tool', icon: 'colorReplacement', key: 'b' },
-      { id: 'mixerBrush', name: 'Mixer Brush Tool', icon: 'mixerBrush', key: 'b' },
+      { id: 'colorReplacement', name: 'Color Replacement Tool', icon: 'colorReplacement', key: 'b', implemented: true, hint: 'Paint to recolour pixels near the sampled colour with the foreground (Mode, Sampling, Limits, Tolerance).' },
+      { id: 'mixerBrush', name: 'Mixer Brush Tool', icon: 'mixerBrush', key: 'b', implemented: true, hint: 'Mixes the loaded colour with the canvas: Wet, Load, Mix, Flow.' },
     ],
   },
   {
     id: 'stamp',
     key: 's',
     tools: [
-      { id: 'cloneStamp', name: 'Clone Stamp Tool', icon: 'cloneStamp', key: 's' },
-      { id: 'patternStamp', name: 'Pattern Stamp Tool', icon: 'patternStamp', key: 's' },
+      { id: 'cloneStamp', name: 'Clone Stamp Tool', icon: 'cloneStamp', key: 's', implemented: true, hint: 'Alt-click to set the source, then paint to copy it. Aligned keeps the offset between strokes.' },
+      { id: 'patternStamp', name: 'Pattern Stamp Tool', icon: 'patternStamp', key: 's', implemented: true, hint: 'Paint with the chosen pattern; Aligned keeps it fixed to the document.' },
     ],
   },
   {
     id: 'history',
     key: 'y',
     tools: [
-      { id: 'historyBrush', name: 'History Brush Tool', icon: 'historyBrush', key: 'y' },
-      { id: 'artHistoryBrush', name: 'Art History Brush Tool', icon: 'artHistoryBrush', key: 'y' },
+      { id: 'historyBrush', name: 'History Brush Tool', icon: 'historyBrush', key: 'y', implemented: true, hint: 'Paints back the History source state (click a state\'s brush icon in the History panel).' },
+      { id: 'artHistoryBrush', name: 'Art History Brush Tool', icon: 'artHistoryBrush', key: 'y', implemented: true, hint: 'Stylised strokes coloured from the History source state.' },
     ],
   },
   {
@@ -128,8 +128,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
     key: 'e',
     tools: [
       { id: 'eraser', name: 'Eraser Tool', icon: 'eraser', key: 'e', implemented: true, hint: 'Drag to erase. Clear is the brush with the Clear paint mode.' },
-      { id: 'backgroundEraser', name: 'Background Eraser Tool', icon: 'backgroundEraser', key: 'e' },
-      { id: 'magicEraser', name: 'Magic Eraser Tool', icon: 'magicEraser', key: 'e' },
+      { id: 'backgroundEraser', name: 'Background Eraser Tool', icon: 'backgroundEraser', key: 'e', implemented: true, hint: 'Erases the sampled colour to transparency within the brush (Sampling, Limits, Tolerance).' },
+      { id: 'magicEraser', name: 'Magic Eraser Tool', icon: 'magicEraser', key: 'e', implemented: true, hint: 'Click to erase the region of similar colour, as the Magic Wand would select it.' },
     ],
   },
   {
@@ -143,18 +143,18 @@ export const TOOL_GROUPS: ToolGroup[] = [
   {
     id: 'focus',
     tools: [
-      { id: 'blurTool', name: 'Blur Tool', icon: 'blurTool' },
-      { id: 'sharpenTool', name: 'Sharpen Tool', icon: 'sharpenTool' },
-      { id: 'smudgeTool', name: 'Smudge Tool', icon: 'smudgeTool' },
+      { id: 'blurTool', name: 'Blur Tool', icon: 'blurTool', implemented: true, hint: 'Paint to soften; Strength sets how much each dab blurs.' },
+      { id: 'sharpenTool', name: 'Sharpen Tool', icon: 'sharpenTool', implemented: true, hint: 'Paint to sharpen; Protect Detail stops halos.' },
+      { id: 'smudgeTool', name: 'Smudge Tool', icon: 'smudgeTool', implemented: true, hint: 'Drag to push paint along; Finger Painting starts with the foreground.' },
     ],
   },
   {
     id: 'tone',
     key: 'o',
     tools: [
-      { id: 'dodgeTool', name: 'Dodge Tool', icon: 'dodgeTool', key: 'o' },
-      { id: 'burnTool', name: 'Burn Tool', icon: 'burnTool', key: 'o' },
-      { id: 'spongeTool', name: 'Sponge Tool', icon: 'spongeTool', key: 'o' },
+      { id: 'dodgeTool', name: 'Dodge Tool', icon: 'dodgeTool', key: 'o', implemented: true, hint: 'Paint to lighten the chosen tonal range; Exposure is the strength.' },
+      { id: 'burnTool', name: 'Burn Tool', icon: 'burnTool', key: 'o', implemented: true, hint: 'Paint to darken the chosen tonal range; Exposure is the strength.' },
+      { id: 'spongeTool', name: 'Sponge Tool', icon: 'spongeTool', key: 'o', implemented: true, hint: 'Paint to saturate or desaturate; Vibrance protects skin and extremes.' },
     ],
   },
   {

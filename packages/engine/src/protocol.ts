@@ -12,6 +12,7 @@ import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
 import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp } from './engine.js';
 import type { BrushGroup, BrushPreset, TipBitmap } from '@umbra/kernels/brush';
+import type { RetouchOptions, RetouchToolId } from './retouch.js';
 import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
 import type { ShapeOptions, ShapeToolId } from './shape-tool.js';
 import type { Path } from '@umbra/kernels/vector/path';
@@ -132,6 +133,11 @@ export interface DocSummary {
   /** The Paths panel: saved paths and the Work Path, and the one selected. */
   paths: { id: number; name: string; work: boolean; path: Path }[];
   activePathId: number | null;
+  /** Clone Stamp / Healing Brush: the source point and the offset aligned strokes keep. */
+  cloneSource: { x: number; y: number } | null;
+  cloneOffset: { dx: number; dy: number } | null;
+  /** The History Brush's source state. */
+  historyBrushSource: number;
   /** The type engine has loaded (HarfBuzz and the bundled fonts). */
   typeReady: boolean;
   /** An open type editing session: the caret and selection, and the styles there. */
@@ -291,6 +297,9 @@ export type ToEngine =
   | { t: 'requestFonts' }
   /** The brush library (answered with `brushes`), .abr import/export and edits. */
   | { t: 'requestBrushes' }
+  | { t: 'setCloneSource'; x: number; y: number; /** Document coordinates (a Clone Source slot), not screen. */ doc?: boolean }
+  | { t: 'magicErase'; x: number; y: number; tolerance: number; contiguous: boolean; antiAlias: boolean; sampleAll: boolean; opacity: number }
+  | { t: 'setHistoryBrushSource'; index: number }
   | { t: 'importAbr'; bytes: Uint8Array; name: string }
   | { t: 'exportAbr'; group?: string; ids?: string[]; name: string }
   | { t: 'editBrushLibrary'; op: BrushLibraryOp }
@@ -411,6 +420,8 @@ export type ToEngine =
       /** The background colour, for Colour Dynamics. */
       bg?: [number, number, number];
       mode: string;
+      /** A retouching tool's stroke: the tool and its options. */
+      retouch?: { tool: RetouchToolId; options: RetouchOptions };
     }
   | { t: 'strokeEnd' }
   | { t: 'loseContext' }

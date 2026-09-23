@@ -11,6 +11,7 @@ import { PathsPanel } from '../paths/PathsPanel';
 import { BrushSettingsPanel } from '../brush/BrushSettings';
 import { BrushesPanel } from '../brush/BrushesPanel';
 import { ToolPresetsPanel } from '../brush/ToolPresets';
+import { CloneSourcePanel } from '../brush/RetouchOptions';
 import { pathSvg } from '../workspace/ShapeOptions';
 import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
 import { CharacterStylesPanel, GlyphsPanel, ParagraphStylesPanel } from '../type/GlyphsPanel';
@@ -72,6 +73,8 @@ export function renderPanel(id: string): JSX.Element {
       return <BrushesPanel />;
     case 'toolPresets':
       return <ToolPresetsPanel />;
+    case 'cloneSource':
+      return <CloneSourcePanel />;
     case 'histogram':
       return <HistogramPanel />;
     case 'styles':
@@ -1543,6 +1546,18 @@ function HistoryPanel() {
               onClick={() => send({ t: 'historyGoto', index: i() })}
               title={new Date(s.time).toLocaleTimeString()}
             >
+              <button
+                type="button"
+                class="history-source"
+                classList={{ on: store.doc()?.historyBrushSource === i() }}
+                title="Set the source for the History Brush"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  send({ t: 'setHistoryBrushSource', index: i() });
+                }}
+              >
+                <Icon name="historyBrush" size={12} />
+              </button>
               <Icon name={s.snapshot ? 'snapshot' : 'historyBrush'} size={14} />
               <span>{s.name}</span>
             </div>

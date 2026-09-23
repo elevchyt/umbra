@@ -330,6 +330,19 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'replaceFonts':
         if (engine?.replaceFonts(msg.map)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'magicErase':
+        if (engine?.magicErase(msg.x, msg.y, msg)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setCloneSource':
+        engine?.setCloneSource(msg.x, msg.y, msg.doc);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'setHistoryBrushSource':
+        if (engine) {
+          engine.historyBrushSource = msg.index;
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
       case 'requestBrushes':
         if (engine) post({ t: 'brushes', ...engine.brushLibrary() });
         break;
@@ -768,7 +781,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'strokeBegin':
-        engine?.requestStroke(msg.brush, msg.color, msg.mode as never, msg.bg);
+        engine?.requestStroke(msg.brush, msg.color, msg.mode as never, msg.bg, msg.retouch);
         break;
       case 'strokeEnd':
         engine?.endStroke();

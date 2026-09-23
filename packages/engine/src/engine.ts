@@ -152,6 +152,7 @@ import {
   type BrushPreset,
 } from '@umbra/kernels/brush';
 import { readAbrFile, writeAbrFile } from './abr.js';
+import { RetouchStroke, readPixel, type RetouchOptions, type RetouchToolId, type Rgba } from './retouch.js';
 import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
@@ -190,6 +191,24 @@ export interface PathCommand {
   brush?: BrushParams;
   simulatePressure?: boolean;
 }
+/** History names of the retouching tools' strokes. */
+export const RETOUCH_NAMES: Record<RetouchToolId, string> = {
+  cloneStamp: 'Clone Stamp',
+  patternStamp: 'Pattern Stamp',
+  historyBrush: 'History Brush',
+  artHistoryBrush: 'Art History Brush',
+  colorReplacement: 'Color Replacement',
+  backgroundEraser: 'Background Eraser',
+  dodgeTool: 'Dodge',
+  burnTool: 'Burn',
+  spongeTool: 'Sponge',
+  blurTool: 'Blur',
+  sharpenTool: 'Sharpen',
+  smudgeTool: 'Smudge',
+  mixerBrush: 'Mixer Brush',
+  healingBrush: 'Healing Brush',
+};
+
 export type BrushLibraryOp =
   | { op: 'newPreset'; name: string; params: BrushPreset['params']; group?: string }
   | { op: 'rename'; id: string; name: string }
@@ -241,6 +260,16 @@ export class Engine {
    * `@umbra/kernels/brush` for why that order matters.
    */
   private strokeWriter: PlaneWriter | null = null;
+  /** A retouching stroke (Clone Stamp, Dodge, Blur…): its CPU dabs, and for direct tools the working layer. */
+  private retouch: RetouchStroke | null = null;
+  private retouchLayer: PlaneWriter | null = null;
+  private retouchDirty = false;
+  private retouchTool: RetouchToolId | null = null;
+  /** Clone Stamp / Healing: the Alt-clicked source point, and the offset the first aligned stroke fixed. */
+  cloneSource: { x: number; y: number } | null = null;
+  private cloneOffset: { dx: number; dy: number } | null = null;
+  /** The History Brush's source state (its index in the History panel). */
+  historyBrushSource = 0;
   private strokeState: StrokeState | null = null;
   brush: BrushParams = { ...DEFAULT_BRUSH };
   paintMode: PaintMode = 'normal';
@@ -3537,6 +3566,38 @@ export class Engine {
     );
   }
 
+  /**
+   * Magic Eraser: the Magic Wand's region under the click, erased — on the active layer, from
+   * the layer's own pixels or (Sample All Layers) the composite; through the selection.
+   */
+  magicErase(x: number, y: number, opts: { tolerance: number; contiguous: boolean; antiAlias: boolean; sampleAll: boolean; opacity: number }): boolean {
+    const layer = this.activePixelLayer();
+    if (!layer) return false;
+    const p = docPointAtScreen(this.view, x, y);
+    const doc = opts.sampleAll ? this.doc : { ...this.doc, layers: [{ ...layer, visible: true, opacity: 1, blendMode: 'normal' as const, effects: undefined, mask: undefined, clipped: false }] };
+    const { pixels, width, height } = this.renderer.renderToBuffer(doc, this.caps.maxTextureSize);
+    const mask = magicWand(pixels, { width, height }, Math.floor(p.x), Math.floor(p.y), { tolerance: Math.round(opts.tolerance * 255), contiguous: opts.contiguous, antialias: opts.antiAlias });
+    const sel = this.doc.selection;
+    const w = layer.plane.base.writer();
+    let any = false;
+    for (let py = 0; py < this.doc.height; py++) {
+      for (let px = 0; px < this.doc.width; px++) {
+        const i = py * this.doc.width + px;
+        let m = (mask[i] ?? 0) / 255;
+        if (sel) m *= sel.mask[i]! / 255;
+        if (m <= 0) continue;
+        const d = w.mutable(px >> TILE_SHIFT, py >> TILE_SHIFT);
+        const o = ((py & (TILE_SIZE - 1)) * TILE_SIZE + (px & (TILE_SIZE - 1))) * 4 + 3;
+        if (!d[o]) continue;
+        d[o] = Math.round(d[o]! * (1 - m * opts.opacity));
+        any = true;
+      }
+    }
+    if (!any) return false;
+    this.commit({ ...this.doc, layers: updateLayer(this.doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(w.commit()) }) as typeof l) }, 'Magic Eraser');
+    return true;
+  }
+
   /** Gradient tool. The drag is in screen space; the gradient is drawn in document space. */
   drawGradient(opts: {
     gradient: Gradient;
@@ -3865,11 +3926,16 @@ export class Engine {
     return { id: def.id, pattern: lum };
   }
 
-  beginStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg: [number, number, number] = [1, 1, 1]): void {
+  beginStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg: [number, number, number] = [1, 1, 1], retouch?: { tool: RetouchToolId; options: RetouchOptions }): void {
+    this.retouch = null;
+    this.retouchLayer = null;
+    this.retouchTool = null;
     // Each stroke gets its own seed unless one is given, so jitter differs stroke to stroke
     // but a stroke can be replayed exactly.
     const seed = params.seed ?? 1 + Math.floor(Math.random() * 0x7ffffffe);
-    this.brush = { ...params, seed };
+    // Tools that carry or blend the pixels they pass over step closely, or each dab's rim shows.
+    const close = retouch && ['smudgeTool', 'blurTool', 'sharpenTool', 'mixerBrush'].includes(retouch.tool);
+    this.brush = { ...params, seed, ...(close ? { spacing: Math.min(params.spacing, 0.1) } : {}) };
     params = this.brush;
     this.paintMode = mode;
     this.strokeColor = color;
@@ -3932,6 +3998,127 @@ export class Engine {
     // The stroke goes into its own empty plane, not into the layer.
     this.strokeWriter = Plane.empty(RGBA8).writer();
     this.painting = true;
+    if (retouch) this.beginRetouch(retouch.tool, retouch.options, target, color, bg, seed);
+  }
+
+  /** Set up a retouching stroke on the pixel layer being painted. */
+  private beginRetouch(tool: RetouchToolId, options: RetouchOptions, target: PixelLayer, fg: [number, number, number], bg: [number, number, number], seed: number): void {
+    const orig = target.plane.base;
+    const W = this.doc.width;
+    const H = this.doc.height;
+    const clampRead = (plane: Plane) => (x: number, y: number, out: Rgba) => readPixel(plane, Math.min(W - 1, Math.max(0, x)), Math.min(H - 1, Math.max(0, y)), out);
+    // A composite of the document (or of the target and what is under it) as a sampler.
+    const compositeSampler = (belowOnly: boolean) => {
+      let doc = this.doc;
+      if (belowOnly) {
+        const i = doc.layers.findIndex((l) => l.id === target.id);
+        if (i >= 0) doc = { ...doc, layers: doc.layers.slice(0, i + 1) };
+      }
+      const { pixels, width } = this.renderer.renderToBuffer(doc, this.caps.maxTextureSize);
+      return (x: number, y: number, out: Rgba) => {
+        const o = (Math.min(H - 1, Math.max(0, y)) * width + Math.min(W - 1, Math.max(0, x))) * 4;
+        out[0] = pixels[o]! / 255;
+        out[1] = pixels[o + 1]! / 255;
+        out[2] = pixels[o + 2]! / 255;
+        out[3] = pixels[o + 3]! / 255;
+        return out;
+      };
+    };
+    let source: ((x: number, y: number, out: Rgba) => Rgba) | undefined;
+    let map: ((x: number, y: number) => { x: number; y: number }) | undefined;
+    if (tool === 'cloneStamp' || tool === 'healingBrush') {
+      const src = this.cloneSource;
+      if (!src && !(tool === 'healingBrush' && options.healSource === 'pattern')) {
+        this.statusNote = 'Alt-click to define a source point to clone from.';
+        this.strokeWriter = null;
+        this.painting = false;
+        return;
+      }
+      source = options.sample === 'current' ? clampRead(orig) : compositeSampler(options.sample === 'currentBelow');
+      if (src) {
+        // Aligned: the first stroke fixes the offset from source to paint; unaligned, every
+        // stroke starts over at the source point.
+        this.pendingCloneAnchor = true;
+        const t = options.clone;
+        map = (x, y) => {
+          const off = this.cloneOffset ?? { dx: 0, dy: 0 };
+          // Clone Source transform: about the source point, scale, rotate, flip.
+          const px = x - (src.x + off.dx);
+          const py = y - (src.y + off.dy);
+          const a = (-(t?.angle ?? 0) * Math.PI) / 180;
+          let qx = px * Math.cos(a) - py * Math.sin(a);
+          let qy = px * Math.sin(a) + py * Math.cos(a);
+          qx /= (t?.scaleX ?? 100) / 100;
+          qy /= (t?.scaleY ?? 100) / 100;
+          if (t?.flipX) qx = -qx;
+          if (t?.flipY) qy = -qy;
+          return { x: src.x + qx, y: src.y + qy };
+        };
+      }
+    } else if (tool === 'historyBrush' || tool === 'artHistoryBrush') {
+      const states = this.history.list();
+      const state = states[Math.min(states.length - 1, Math.max(0, this.historyBrushSource))];
+      const layer = state ? findLayer(state.doc.layers, target.id) : undefined;
+      if (layer?.kind === 'pixel') source = clampRead(layer.plane.base);
+      else if (state) {
+        // The layer did not exist in that state: its composite, as Photoshop falls back to.
+        const doc = this.doc;
+        this.doc = state.doc;
+        source = compositeSampler(false);
+        this.doc = doc;
+      }
+    } else if (options.sampleAll && (tool === 'blurTool' || tool === 'sharpenTool' || tool === 'smudgeTool' || tool === 'mixerBrush')) {
+      source = compositeSampler(false);
+    }
+    const pat = tool === 'patternStamp' || (tool === 'healingBrush' && options.healSource === 'pattern') ? (this.findPattern(options.patternId ?? '') ?? this.patternLibrary[0] ?? null) : null;
+    const direct = ['dodgeTool', 'burnTool', 'spongeTool', 'blurTool', 'sharpenTool', 'smudgeTool', 'mixerBrush'].includes(tool);
+    this.retouchLayer = direct ? orig.writer() : null;
+    this.retouchTool = tool;
+    this.retouch = new RetouchStroke({
+      tool,
+      options,
+      width: W,
+      height: H,
+      orig,
+      stroke: this.strokeWriter ?? undefined,
+      layer: this.retouchLayer ?? undefined,
+      source,
+      map,
+      pattern: pat ? { width: pat.width, height: pat.height, data: pat.data } : undefined,
+      fg,
+      bg,
+      flow: this.brush.flow,
+      seed,
+    });
+    // Stroke-buffer tools composite like a brush stroke: normal, or clear for the Background Eraser.
+    if (!direct) this.paintMode = this.retouch.mode === 'clear' ? 'clear' : this.paintMode === 'clear' ? 'normal' : this.paintMode;
+  }
+
+  /** The document before a direct retouch stroke swapped its working plane in. */
+  private docBeforeRetouch: Doc | null = null;
+
+  private finishRetouch(): void {
+    this.retouch = null;
+    this.retouchLayer = null;
+    this.retouchTool = null;
+    this.retouchDirty = false;
+    this.docBeforeRetouch = null;
+    this.strokeWriter = null;
+    this.strokeState = null;
+    this.strokeLayerId = null;
+    this.painting = false;
+    this.lastDab = null;
+  }
+
+  /** Clone Stamp / Healing: an aligned stroke's first dab fixes the offset. */
+  private pendingCloneAnchor = false;
+
+  /** Alt-click with the Clone Stamp or Healing Brush: the source point (screen coordinates). */
+  setCloneSource(x: number, y: number, doc = false): void {
+    const p = doc ? { x, y } : docPointAtScreen(this.view, x, y);
+    this.cloneSource = { x: p.x, y: p.y };
+    this.cloneOffset = null;
+    this.statusNote = `Clone source set at ${Math.round(p.x)}, ${Math.round(p.y)}`;
   }
 
   // ---- mask targeting ---------------------------------------------------------------------
@@ -4031,6 +4218,19 @@ export class Engine {
     }
     this.dabs.gpuDirty.clear();
 
+    if (this.retouch && this.retouch.family === 'direct' && this.retouchLayer) {
+      // Direct tools: the working copy is the result.
+      const id = this.strokeLayerId;
+      const before = this.docBeforeRetouch ?? this.doc;
+      const plane = this.retouchLayer.commit();
+      const layers = updateLayer(before.layers, id, (l) => (l.kind === 'pixel' ? { ...l, plane: new MipPlane(plane) } : l));
+      const name = RETOUCH_NAMES[this.retouchTool!];
+      this.doc = before;
+      this.commit({ ...before, layers }, name);
+      this.fadeState = { before, after: this.doc, name, layerId: id, mask: false };
+      this.finishRetouch();
+      return;
+    }
     const strokePlane = this.strokeWriter.commit();
     const id = this.strokeLayerId;
     const before = this.doc;
@@ -4040,9 +4240,10 @@ export class Engine {
       this.strokeIntoMask
         ? this.onTarget({ id, filter: intoFilterMask }, (d) => MaskPaint.compositeStrokeIntoMask(d, id, strokePlane, this.brush.opacity, !!this.brush.wetEdges))
         : FillCmd.compositeStroke(this.doc, id, strokePlane, this.brush.opacity, this.paintMode, !!this.brush.wetEdges),
-      this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
+      this.retouchTool ? RETOUCH_NAMES[this.retouchTool] : this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool',
     );
-    this.fadeState = intoFilterMask ? null : { before, after: this.doc, name: this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
+    this.fadeState = intoFilterMask ? null : { before, after: this.doc, name: this.retouchTool ? RETOUCH_NAMES[this.retouchTool] : this.paintMode === 'clear' ? 'Eraser' : 'Brush Tool', layerId: id, mask: intoMask };
+    this.finishRetouch();
     this.strokeIntoMask = false;
     this.strokeIntoFilterMask = false;
     this.strokeWriter = null;
@@ -4053,7 +4254,7 @@ export class Engine {
   }
 
   /** A stroke asked for while the last one's samples are still in the ring. */
-  private pendingStroke: [BrushParams, [number, number, number], PaintMode, [number, number, number] | undefined] | null = null;
+  private pendingStroke: [BrushParams, [number, number, number], PaintMode, [number, number, number] | undefined, { tool: RetouchToolId; options: RetouchOptions } | undefined] | null = null;
 
   /**
    * Start a stroke from the pointer. The request arrives by message, at once, but the last
@@ -4061,9 +4262,9 @@ export class Engine {
    * stroke is still open, the new one waits for its own pointer-down in the ring — otherwise a
    * quick second stroke during a slow frame would inherit the first one's tail.
    */
-  requestStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg?: [number, number, number]): void {
-    if (this.painting && !this.quickMask) this.pendingStroke = [params, color, mode, bg];
-    else this.beginStroke(params, color, mode, bg);
+  requestStroke(params: BrushParams, color: [number, number, number], mode: PaintMode, bg?: [number, number, number], retouch?: { tool: RetouchToolId; options: RetouchOptions }): void {
+    if (this.painting && !this.quickMask) this.pendingStroke = [params, color, mode, bg, retouch];
+    else this.beginStroke(params, color, mode, bg, retouch);
   }
 
   private processInput(): void {
@@ -4074,9 +4275,9 @@ export class Engine {
     for (const s of samples) {
       if (s.flags & FLAG_DOWN && this.pendingStroke) {
         if (this.painting) this.endStroke();
-        const [p, c, m, bg] = this.pendingStroke;
+        const [p, c, m, bg, rt] = this.pendingStroke;
         this.pendingStroke = null;
-        this.beginStroke(p, c, m, bg);
+        this.beginStroke(p, c, m, bg, rt);
       }
       if (!this.painting || !this.strokeState) continue;
       if (oldest === null) oldest = s.timeAbs;
@@ -4128,6 +4329,10 @@ export class Engine {
       this.stampQuickMaskDab(dab);
       return;
     }
+    if (this.retouch) {
+      this.stampRetouchDab(dab);
+      return;
+    }
     const writer = this.strokeWriter;
     if (!writer) return;
     // Colour Dynamics give a dab its own colour; into a mask it is the colour's grey.
@@ -4157,6 +4362,33 @@ export class Engine {
       this.dabStyle,
       (id) => this.brushTips.get(id),
     );
+  }
+
+  private stampRetouchDab(dab: Dab): void {
+    const r = this.retouch!;
+    if (this.pendingCloneAnchor && this.cloneSource) {
+      // The first dab of the stroke: an unaligned stroke (or the first aligned one) anchors the
+      // source point here.
+      const aligned = this.retouchOptionsAligned;
+      if (!aligned || !this.cloneOffset) this.cloneOffset = { dx: dab.x - this.cloneSource.x, dy: dab.y - this.cloneSource.y };
+      this.pendingCloneAnchor = false;
+    }
+    const sel = this.doc.selection;
+    const ctx = this.coverageCtx;
+    r.dab(dab, (x, y) => {
+      const a = dabAlpha(dab, x, y, ctx);
+      if (!sel || a <= 0) return a;
+      return a * (sel.mask[Math.floor(y) * sel.width + Math.floor(x)] ?? 0) / 255;
+    });
+    // Refresh what the dab wrote on the GPU.
+    const writer = r.family === 'direct' ? this.retouchLayer : this.strokeWriter;
+    for (const [tx, ty] of r.takeTouched()) if (writer) this.atlas.invalidate(writer.mutableTile(tx, ty));
+    if (r.family === 'direct') this.retouchDirty = true;
+  }
+
+  /** The Aligned option of the stroke in progress. */
+  private get retouchOptionsAligned(): boolean {
+    return this.retouch?.s.options.aligned ?? true;
   }
 
   /**
@@ -4225,6 +4457,13 @@ export class Engine {
       this.outlineFor = outlineFrom;
     }
 
+    // A direct retouch stroke shows by swapping its working plane into the layer.
+    if (this.retouch?.family === 'direct' && this.retouchDirty && this.retouchLayer && this.strokeLayerId !== null) {
+      this.docBeforeRetouch ??= this.doc;
+      const plane = new MipPlane(this.retouchLayer.preview(), 0);
+      this.doc = { ...this.docBeforeRetouch, layers: updateLayer(this.docBeforeRetouch.layers, this.strokeLayerId, (l) => (l.kind === 'pixel' ? { ...l, plane } : l)) };
+      this.retouchDirty = false;
+    }
     this.atlas.beginFrame();
     // The live stroke is drawn from the base level only: it is small, and a mip built from the
     // stroke buffer would be a frame behind the dabs the GPU is still laying down.
@@ -4339,6 +4578,9 @@ export class Engine {
       paths: (this.doc.paths ?? []).map((p) => ({ id: p.id, name: p.name, work: p.work, path: p.path })),
       activePathId: this.targetPath()?.id ?? null,
       typeReady: textReady(),
+      cloneSource: this.cloneSource,
+      cloneOffset: this.cloneOffset,
+      historyBrushSource: this.historyBrushSource,
       typeEdit: (() => {
         const e = this.typeEdit;
         const l = this.typeLayer();

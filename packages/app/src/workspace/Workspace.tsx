@@ -4,7 +4,7 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -138,6 +138,11 @@ export function Workspace() {
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraDoc = d;
           store.setDoc(d);
           if (d.statusNote) store.setStatusMessage(d.statusNote);
+          // Alt-click set a clone source: the active Clone Source slot keeps it.
+          const slot = store.cloneSlots()[store.cloneSlot()];
+          if (d.cloneSource && slot && (slot.point?.x !== d.cloneSource.x || slot.point?.y !== d.cloneSource.y)) {
+            store.setCloneSlots(store.cloneSlots().map((s, i) => (i === store.cloneSlot() ? { ...s, point: d.cloneSource } : s)));
+          }
           // While a smart object's contents are open, the tab keeps the outer document's name.
           const name = d.editingContents?.path[0] ?? d.name;
           if (store.tabs.length === 0) {
@@ -385,6 +390,8 @@ export function Workspace() {
     };
     const mode = b.mode;
     const bgColor = store.background();
+    const ro = store.retouchOptions();
+    const slot = store.cloneSlots()[store.cloneSlot()]!;
     const g = store.gradientOptions;
     const gradientArgs = {
       style: g.style,
@@ -422,6 +429,15 @@ export function Workspace() {
     client.brush = tool === 'pencil' ? { ...params, hardness: 1 } : params;
     client.brushColor = [c.r, c.g, c.b];
     client.brushBg = [bgColor.r, bgColor.g, bgColor.b];
+    // Retouching tools send their options with each stroke.
+    client.retouch = (RETOUCH_TOOLS as readonly string[]).includes(tool)
+      ? { tool, options: { ...ro, clone: { scaleX: slot.scaleX, scaleY: slot.scaleY, angle: slot.angle, flipX: slot.flipX, flipY: slot.flipY } } }
+      : null;
+    client.altSamples = tool === 'cloneStamp' || tool === 'healingBrush';
+    client.clickAction =
+      tool === 'magicEraser'
+        ? (x, y) => ({ t: 'magicErase', x, y, tolerance: ro.tolerance, contiguous: ro.limits !== 'discontiguous', antiAlias: ro.antiAlias, sampleAll: ro.sampleAll, opacity: b.opacity })
+        : null;
     // The Eraser is the Clear paint mode with the brush's own settings.
     client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
   });
