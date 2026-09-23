@@ -13,8 +13,8 @@ looks like it does. Tick things off as they land.
   where they expect it. They should be *disabled* rather than silently inert, which is itself
   an entry in §1.
 
-First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted when M4 and again
-when M7 finished the same day. By the script at the bottom, **249 of 504 menu commands are
+First audited 2026-09-21; §1 cleared and recounted 2026-09-23; recounted when M4, M7 and
+M8 finished the same day. By the script at the bottom, **251 of 504 menu commands are
 wired** (panel toggles included); the rest are not built — greyed out, correctly. (The script
 reads `case` labels, so it cannot see the Filter menu, whose filters go through one generic
 handler; the table below counts those by hand.) Regenerate
@@ -160,7 +160,7 @@ the feature is complete.
 | Menu | Wired | Chiefly waiting on |
 |---|---|---|
 | File | 10 / 50 | export & automation (M11), linked smart objects (M11) |
-| Edit | 28 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
+| Edit | 30 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
 | Image | 37 / 56 | colour modes (M10), Duplicate and Arbitrary rotation (M11), variables (M11) |
 | Layer | 82 / 137 | linked smart objects (M11), align & distribute (M9), Vector Mask ▸ Link, Rasterize ▸ Layer / All Layers |
 | Type | 27 / 39 | Match Font (a non-goal), font preview size, language options, Update All Text Layers, default type styles |
@@ -175,6 +175,33 @@ counted every `case` in `Workspace.tsx`, which included `isChecked`'s — a tick
 implementation.
 
 ### Specifically, in the menus you are most likely to reach for
+
+- [x] **The brush engine and retouching (M8).** Brush Settings with every section — Brush Tip
+      Shape (computed and sampled tips, flips), Shape Dynamics, Scattering, Texture, Dual
+      Brush, Color Dynamics, Transfer, Brush Pose, Noise, Wet Edges, Build-up, Smoothing (with
+      Pulled String and Catch-Up), Protect Texture — and symmetry painting (vertical,
+      horizontal, dual axis, diagonal, radial, mandala) about the canvas centre; the Brushes panel with groups and live stroke previews; `.abr` import and
+      export (v1/v2 and v6+); Edit ▸ Define Brush Preset; tool presets. Retouching: Clone
+      Stamp with the Clone Source panel (5 sources, offset, scale, rotation, flips), Pattern
+      Stamp, Healing Brush, Spot Healing (Content-Aware, Create Texture, Proximity Match),
+      Remove, Patch (Normal / Content-Aware, Source / Destination), Content-Aware Move (Move /
+      Extend), Red Eye, Edit ▸ Content-Aware Fill, Dodge / Burn / Sponge, Blur / Sharpen /
+      Smudge, Mixer Brush, Color Replacement, Background and Magic Eraser, History and Art
+      History Brush.
+- [ ] **Bristle and erodible tips are drawn as round tips** (the preset's other settings are
+      kept, and importing says which): 135 of the 643 presets in Photoshop 2020's own `.abr`
+      files use them.
+- [ ] **Symmetry has 6 of Photoshop's 11 types** (no wavy, circle, spiral, parallel lines or
+      path-based symmetry) and its axis is always the canvas centre, with no on-canvas path.
+- [ ] **Tool presets (`.tpl`) are not read**; tool presets are kept with the app, not in a
+      file, and the Clone Source panel's overlay (a ghost of the source under the brush) is
+      not drawn.
+- [ ] **Content-Aware Fill is a dialog, not Photoshop's workspace**: sampling is Auto,
+      Rectangular or the whole image, with no painted sampling area or live preview panel.
+      Healing, Spot Healing, Patch, Content-Aware Move and Remove all run when the stroke or
+      drag ends (≈0.1–0.5 s for a blemish-sized area), not live while painting.
+- [ ] **Magic Eraser renders the document per click** to sample all layers; fine for a click,
+      but it is the slowest tool on a big document.
 
 - [x] **Vector: the Pen tools, Paths panel and shape layers (M7).** Pen, Freeform (Curve Fit),
       Curvature, Add/Delete/Convert Anchor, Path and Direct Selection; Fill/Stroke Path, Make
@@ -301,29 +328,25 @@ implementation.
       grid, guides, pixel grid, selection edges and layer edges; only selection edges is
       honoured by the renderer.
 
-## 4. Tools — 19 of 69 implemented
+## 4. Tools — 57 of 69 implemented
 
-Working: Move, Rectangular/Elliptical/Single Row/Single Column Marquee, Lasso, Polygonal Lasso,
-Magic Wand, Crop, Eyedropper, Color Sampler, Brush, Pencil, Eraser, Gradient, Paint Bucket,
-Hand, Rotate View, Zoom.
+Working: Move, the marquees, lassos (not Magnetic), Magic Wand, Crop, Eyedropper, Color
+Sampler, Brush, Pencil, Eraser, Gradient, Paint Bucket, Hand, Rotate View, Zoom (M0–M3); the
+Pen family, Path/Direct Selection, the six shape tools and the four type tools (M7); and the
+M8 retouching set — Spot Healing, Remove, Healing Brush, Patch, Content-Aware Move, Red Eye,
+Clone Stamp, Pattern Stamp, History and Art History Brush, Blur, Sharpen, Smudge, Dodge,
+Burn, Sponge, Background and Magic Eraser, Color Replacement, Mixer Brush.
 
-- [ ] Healing family — Spot Healing, Healing Brush, Patch, Content-Aware Move, Red Eye, Remove (M8)
-- [ ] Clone Stamp, Pattern Stamp (M8)
-- [ ] History Brush, Art History Brush (M8)
-- [ ] Blur, Sharpen, Smudge, Dodge, Burn, Sponge (M8)
-- [ ] Background Eraser, Magic Eraser (M8)
-- [ ] Color Replacement, Mixer Brush (M8)
-- [ ] Pen family and Path/Direct Selection (M7)
-- [ ] Type family — 4 tools (M7)
-- [ ] Shape family — 6 tools (M7)
+- [x] Type family — 4 tools (M7; the toolbar showed them dimmed until M8 fixed the flags)
 - [ ] Object Selection, Quick Selection, Magnetic Lasso, Selection Brush (M9)
 - [ ] Perspective Crop, Slice, Slice Select (M11)
 - [ ] Artboard, Frame, Ruler, Note, Count (M11)
 
 ## 5. Panels
 
-Working: Layers, Color, Swatches, Info, Properties, History, Channels, Navigator, Adjustments,
-Histogram, Patterns.
+Working: 22 of 28 — Layers, Color, Swatches, Info, Properties, History, Channels, Navigator,
+Adjustments, Histogram, Patterns, Styles, Paths, the five type panels, Brushes, Brush
+Settings, Tool Presets, Clone Source.
 
 - [x] **Adjustments** — one button per adjustment-layer kind (Color Lookup missing)
 - [x] **Properties** — edits the active adjustment layer; one history step per gesture
@@ -335,9 +358,10 @@ Histogram, Patterns.
       readout's colour model) are not built.
 - [x] **Properties** — adjustment layers and fill layers.
 - [x] **Patterns** — the pattern library; clicking one applies it to an active pattern fill.
-- [ ] **Brushes** — placeholder; was scoped to M3 and did not land
-- [ ] **Brush Settings** — placeholder (M8)
-- [ ] **Paths** — placeholder (M7)
+- [x] **Brushes**, **Brush Settings**, **Tool Presets**, **Clone Source** (M8)
+- [x] **Paths**, **Character**, **Paragraph**, **Glyphs**, **Character/Paragraph Styles** (M7);
+      **Styles** (M6)
+- [ ] **Gradients**, **Shapes**, **Actions**, **Layer Comps**, **Notes**, **Timeline** — placeholders
 - [x] **Navigator** — thumbnail, view rectangle, click/drag to pan, zoom field and slider
 
 ---

@@ -69,6 +69,14 @@ function shapeParams(shape: AgShape, tipPrefix: string): Partial<BrushParams> & 
   return { ...base, hardness: shape.hardness ?? 1, tip: { kind: 'computed' } };
 }
 
+/**
+ * Adobe's own presets name themselves by localisation key: `$$$/Presets/Brushes/Pencil=Pencil`.
+ * The text after `=` is the English name.
+ */
+export function displayName(name: string): string {
+  return name.startsWith('$$$/') && name.includes('=') ? name.slice(name.indexOf('=') + 1) : name;
+}
+
 function fromAgBrush(b: Record<string, unknown>, tipPrefix: string, lost: string[]): BrushPreset {
   const br = b as {
     name: string;
@@ -85,7 +93,8 @@ function fromAgBrush(b: Record<string, unknown>, tipPrefix: string, lost: string
     protectTexture?: boolean;
     toolOptions?: { flow: number; opacity: number; smoothing: boolean; smoothingValue: number; smoothingRadiusMode: boolean; smoothingCatchup: boolean; smoothingCatchupAtEnd: boolean; smoothingZoomCompensation: boolean; usePressureOverridesSize: boolean; usePressureOverridesOpacity: boolean };
   };
-  if (br.shape.type === 'dynamic' || br.shape.type === 'tips') lost.push(`${br.name}: ${br.shape.type === 'dynamic' ? 'bristle' : 'erodible/airbrush'} tip drawn as a round tip`);
+  const name = displayName(br.name);
+  if (br.shape.type === 'dynamic' || br.shape.type === 'tips') lost.push(`${name}: ${br.shape.type === 'dynamic' ? 'bristle' : 'erodible/airbrush'} tip drawn as a round tip`);
   const p: Partial<BrushParams> & { size: number } = shapeParams(br.shape, tipPrefix);
   const sd = br.shapeDynamics;
   if (sd)
@@ -154,7 +163,7 @@ function fromAgBrush(b: Record<string, unknown>, tipPrefix: string, lost: string
     p.pressureSize = !!to.usePressureOverridesSize;
     p.pressureOpacity = !!to.usePressureOverridesOpacity;
   }
-  return { id: `abr:${tipPrefix}${br.name}`, name: br.name, params: p };
+  return { id: `abr:${tipPrefix}${br.name}`, name, params: p };
 }
 
 // ---- v1 and v2 ---------------------------------------------------------------------------
@@ -382,8 +391,11 @@ function presetDV(pr: BrushPreset, tipName: (id: string) => string): DV {
       ]),
     ]);
   }
-  items.push([
-    'toolOptions',
+  // Tool options only when the preset has them: a tip-only preset leaves the tool's own.
+  const hasToolOptions = ['flow', 'opacity', 'smoothing', 'smoothingOptions', 'pressureSize', 'pressureOpacity'].some((k) => k in pr.params);
+  if (hasToolOptions)
+    items.push([
+      'toolOptions',
     obj('PbTl', [
       ['brushPreset', bool(true)],
       ['flow', long(Math.round(p.flow * 100))],

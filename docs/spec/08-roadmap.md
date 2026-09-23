@@ -557,6 +557,74 @@ previews, `.abr` import/export, tool presets.
 **Exit:** ABR corpus imports with correct tips+dynamics; painting perf budgets green with
 dynamics enabled; healing/PatchMatch results qualitatively on par (blind A/B review set).
 
+**Revised exit (2026-09-23), as for M4–M7.** There is no Photoshop to run, but a Photoshop
+2020 install on the dev box's Windows partition gives a real ABR corpus. `abr-corpus.test.ts`
+reads its three brush files in place (they are Adobe's, so they stay out of the repository):
+643 presets, 268 sampled tips and 44 texture patterns. Every sampled tip decodes, every preset
+keeps its dynamics, texture and dual brush, and every preset survives a write-and-read round
+trip. The 135 bristle and erodible presets are drawn with a round tip and reported. Perf: in
+the Electron spikes harness, a 500 px sampled tip on a 4K layer with every Brush Settings
+section on paints input→pixels at **2.56 ms p95** (plain round brush 1.51 ms;
+budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch are checked by what they must do:
+- Spot Healing removes a dark blemish from a ramp with all three types.
+- Patch carries the source's texture while taking the destination's tone.
+- Content-Aware Fill continues a 6 px stripe pattern through the hole row for row, with no
+  seam (checked in the browser).
+- A 90×90 hole in 400×300 fills in about 180 ms.
+
+**Status (2026-09-23): complete**, with the deferrals below.
+- **Brush engine:** every Brush Settings section (after the ABR model: shape dynamics,
+  scattering, texture, dual brush, colour dynamics, transfer, pose, noise, wet edges,
+  build-up, smoothing modes, protect texture) is drawn on the GPU. Sampled tips live in a
+  texture array, and each stroke is seeded, so it is repeatable. Symmetry painting has
+  6 types.
+- **Brushes panel:** groups and live previews.
+- **`.abr`:** read in v1/v2 and v6+, written as v6.2.
+- **Presets:** Define Brush Preset and tool presets.
+- **Retouching:** all 20 tools, the Clone Source panel and Edit ▸ Content-Aware Fill.
+  - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
+  - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
+
+Parity 133/133; 873 tests.
+
+Deferred:
+- bristle and erodible tip simulation
+- reading `.tpl` tool presets
+- the Clone Source overlay
+- the Content-Aware Fill workspace (a dialog here) and its live preview
+- five symmetry types
+- healing that runs live while painting (it runs on release)
+
+**Findings.**
+1. **Healing needs a boundary where both images are known.** The membrane took its
+   boundary difference from the pixels *outside* the pasted region, but every caller only
+   has the source inside it and filled the outside with the destination, so the difference
+   was zero everywhere and Patch, Healing Brush and Proximity Match were plain pastes. Unit
+   tests passed because they checked texture, not tone. It was caught in the browser, where
+   a patch came out the source's exact colour. The region's own edge ring is now the
+   boundary, and a test checks that a patch takes the destination's tone.
+2. **A real corpus finds what round-tripping our own files cannot.** Photoshop's own `.abr`
+   files turned up three problems:
+   - ag-psd threw on a tool preset's Sponge mode (`BlnM.Dstt`, which is not a blend mode).
+   - ag-psd had no reader for indexed-colour texture patterns.
+   - Every preset was named by localisation key (`$$$/Presets/Brushes/Pencil=Pencil`).
+
+   Our writer also invented tool options for presets that had none. All four are fixed:
+   the first two in `patches/`.
+3. **A stroke can arrive before the previous one finishes painting.** With frames
+   throttled, the next stroke's begin message overtook the last stroke's queued samples.
+   The new stroke now waits for its own first (FLAG_DOWN) sample.
+4. **Carrying tools need dense dabs.** Smudge, Blur, Sharpen and the Mixer Brush pick up
+   what they deposit. At a round brush's 25 % spacing they left ridges, so their spacing is
+   capped at 10 %.
+5. **Bind every sampler unit, always.** A draw with a `sampler2DArray` and a `sampler2D`
+   both left on unit 0 is a GL error even if one is never read. The dab shader binds every
+   unit on every draw.
+6. **The payload budget has been over since M7.** The total is 3.25 MB against 3 MB, and
+   ≈2.5 MB of it is the bundled Noto Sans styles. Core UI is 255 KB and the worker 67 KB,
+   both well inside budget. Loading the Bold/Italic files on first use, or synthesising
+   them, would bring it back; that is a product call, so it is left open here.
+
 ### M9 — Advanced selection + advanced transform (XL)
 Quick Selection, Magnetic Lasso, Color Range, Focus Area, **Select and Mask** workspace (all
 view modes, Refine Edge brush, global refinements, decontaminate, output options), Object

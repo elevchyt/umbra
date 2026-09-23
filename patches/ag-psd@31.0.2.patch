@@ -1,3 +1,33 @@
+diff --git a/dist/abr.js b/dist/abr.js
+index 215f06983ebb8c474c20e8c6721cf5d1f182e2ab..62d75471049dbaa5a4886ed63539a94e6de5cff6 100644
+--- a/dist/abr.js
++++ b/dist/abr.js
+@@ -95,6 +95,16 @@ function parseHeightmap(array) {
+     // }
+     // return result;
+ }
++function decodeToolMode(value) {
++    if (!value)
++        return 'normal';
++    try {
++        return descriptor_1.BlnM.decode(value);
++    }
++    catch (_a) {
++        return String(value).split('.').pop();
++    }
++}
+ function readAbr(buffer, options = {}) {
+     var _a, _b, _c, _d;
+     const reader = (0, psdReader_1.createReader)(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+@@ -273,7 +283,7 @@ function readAbr(buffer, options = {}) {
+                                 brushPreset: to.brushPreset,
+                                 flow: (_a = to.flow) !== null && _a !== void 0 ? _a : 100,
+                                 smooth: (_b = to.Smoo) !== null && _b !== void 0 ? _b : 0,
+-                                mode: descriptor_1.BlnM.decode(to['Md  '] || 'BlnM.Nrml'), // sometimes mode is missing
++                                mode: decodeToolMode(to['Md  ']), // sometimes mode is missing; tools' own modes (Sponge's 'Dstt') are not blend modes
+                                 opacity: (_c = to.Opct) !== null && _c !== void 0 ? _c : 100,
+                                 smoothing: !!to.smoothing,
+                                 smoothingValue: to.smoothingValue || 0,
 diff --git a/dist/additionalInfo.js b/dist/additionalInfo.js
 index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc64393d31feb0 100644
 --- a/dist/additionalInfo.js
@@ -11,6 +41,61 @@ index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc6439
          target.channelBlendingRestrictions.push((0, psdReader_1.readInt32)(reader));
      }
  }, (writer, target) => {
+diff --git a/dist/psdReader.js b/dist/psdReader.js
+index 226178455f81c5a48207cadfea8aeac11ada8e2c..b5ca290749e293c4a95b932c52ceb2e3bdcf99eb 100644
+--- a/dist/psdReader.js
++++ b/dist/psdReader.js
+@@ -1374,9 +1374,17 @@ function readPattern(reader) {
+                 copyChannelToRGBA(tempData, pixelData, ox, oy, 0);
+                 setupGrayscale(pixelData);
+             }
+-            if (colorMode === 2 /* ColorMode.Indexed */) {
+-                // TODO:
+-                throw new Error('Indexed pattern color mode not implemented');
++            if (colorMode === 2 /* ColorMode.Indexed */ && ch < 1) {
++                readDataRLE(cdataReader, tempData, w, h, 8, 1, [0], false);
++                for (let y = 0; y < h; y++) {
++                    for (let x = 0; x < w; x++) {
++                        const color = palette[tempData.data[x + y * w]];
++                        const dst = (ox + x + (y + oy) * width) * 4;
++                        data[dst + 0] = color.r;
++                        data[dst + 1] = color.g;
++                        data[dst + 2] = color.b;
++                    }
++                }
+             }
+             recoverMemory(reader, w * h);
+         }
+diff --git a/dist-es/abr.js b/dist-es/abr.js
+index 215f06983ebb8c474c20e8c6721cf5d1f182e2ab..62d75471049dbaa5a4886ed63539a94e6de5cff6 100644
+--- a/dist-es/abr.js
++++ b/dist-es/abr.js
+@@ -95,6 +95,16 @@ function parseHeightmap(array) {
+     // }
+     // return result;
+ }
++function decodeToolMode(value) {
++    if (!value)
++        return 'normal';
++    try {
++        return descriptor_1.BlnM.decode(value);
++    }
++    catch (_a) {
++        return String(value).split('.').pop();
++    }
++}
+ function readAbr(buffer, options = {}) {
+     var _a, _b, _c, _d;
+     const reader = (0, psdReader_1.createReader)(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+@@ -273,7 +283,7 @@ function readAbr(buffer, options = {}) {
+                                 brushPreset: to.brushPreset,
+                                 flow: (_a = to.flow) !== null && _a !== void 0 ? _a : 100,
+                                 smooth: (_b = to.Smoo) !== null && _b !== void 0 ? _b : 0,
+-                                mode: descriptor_1.BlnM.decode(to['Md  '] || 'BlnM.Nrml'), // sometimes mode is missing
++                                mode: decodeToolMode(to['Md  ']), // sometimes mode is missing; tools' own modes (Sponge's 'Dstt') are not blend modes
+                                 opacity: (_c = to.Opct) !== null && _c !== void 0 ? _c : 100,
+                                 smoothing: !!to.smoothing,
+                                 smoothingValue: to.smoothingValue || 0,
 diff --git a/dist-es/additionalInfo.js b/dist-es/additionalInfo.js
 index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc64393d31feb0 100644
 --- a/dist-es/additionalInfo.js
@@ -24,6 +109,31 @@ index a12e7da4960a5dcf884739eebf59ba71ad5065f2..4c4350cb0c844ef5864b38c3cdfc6439
          target.channelBlendingRestrictions.push((0, psdReader_1.readInt32)(reader));
      }
  }, (writer, target) => {
+diff --git a/dist-es/psdReader.js b/dist-es/psdReader.js
+index 226178455f81c5a48207cadfea8aeac11ada8e2c..b5ca290749e293c4a95b932c52ceb2e3bdcf99eb 100644
+--- a/dist-es/psdReader.js
++++ b/dist-es/psdReader.js
+@@ -1374,9 +1374,17 @@ function readPattern(reader) {
+                 copyChannelToRGBA(tempData, pixelData, ox, oy, 0);
+                 setupGrayscale(pixelData);
+             }
+-            if (colorMode === 2 /* ColorMode.Indexed */) {
+-                // TODO:
+-                throw new Error('Indexed pattern color mode not implemented');
++            if (colorMode === 2 /* ColorMode.Indexed */ && ch < 1) {
++                readDataRLE(cdataReader, tempData, w, h, 8, 1, [0], false);
++                for (let y = 0; y < h; y++) {
++                    for (let x = 0; x < w; x++) {
++                        const color = palette[tempData.data[x + y * w]];
++                        const dst = (ox + x + (y + oy) * width) * 4;
++                        data[dst + 0] = color.r;
++                        data[dst + 1] = color.g;
++                        data[dst + 2] = color.b;
++                    }
++                }
+             }
+             recoverMemory(reader, w * h);
+         }
 diff --git a/src/additionalInfo.ts b/src/additionalInfo.ts
 index 67599d0b2af3ca2b81c2519fe1c341661b2efc53..20bc1f257a7bc3bc1a010fd6091be343ec6e1566 100644
 --- a/src/additionalInfo.ts

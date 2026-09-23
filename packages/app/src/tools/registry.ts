@@ -173,10 +173,10 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'type',
     key: 't',
     tools: [
-      { id: 'typeHorizontal', name: 'Horizontal Type Tool', icon: 'type', key: 't' },
-      { id: 'typeVertical', name: 'Vertical Type Tool', icon: 'typeVertical', key: 't' },
-      { id: 'typeMaskVertical', name: 'Vertical Type Mask Tool', icon: 'typeMask', key: 't' },
-      { id: 'typeMaskHorizontal', name: 'Horizontal Type Mask Tool', icon: 'typeMask', key: 't' },
+      { id: 'typeHorizontal', name: 'Horizontal Type Tool', icon: 'type', key: 't', implemented: true, hint: 'Click for point type, drag for a paragraph box. Click a path for type on it.' },
+      { id: 'typeVertical', name: 'Vertical Type Tool', icon: 'typeVertical', key: 't', implemented: true },
+      { id: 'typeMaskVertical', name: 'Vertical Type Mask Tool', icon: 'typeMask', key: 't', implemented: true },
+      { id: 'typeMaskHorizontal', name: 'Horizontal Type Mask Tool', icon: 'typeMask', key: 't', implemented: true, hint: 'Type makes a selection in the shape of the text.' },
     ],
   },
   {

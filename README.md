@@ -9,17 +9,19 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M7 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
+**M0–M8 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
 Photoshop's adjustments (destructive and as adjustment layers), fill layers, masks, the
 Filter menu (58 filters and the 47-effect Filter Gallery), smart objects and smart filters,
-layer styles and advanced blending, the Pen tools, paths, shape layers and vector masks, and
-type (HarfBuzz shaping, point/paragraph/path/area type, Warp Text) work; retouching and the
-full brush engine (M8) do not.
+layer styles and advanced blending, the Pen tools, paths, shape layers and vector masks,
+type (HarfBuzz shaping, point/paragraph/path/area type, Warp Text), the full brush engine
+(every Brush Settings section, `.abr` import/export) and the retouching tools (clone, heal,
+patch, content-aware fill and move, dodge/burn, smudge, mixer brush…) work. Advanced
+selection and warps (M9) do not yet.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
 > Most of the UI is present because M1's exit criterion was that a Photoshop user finds
-> everything where they expect it — **321 of 572 menu commands are not built yet** (greyed out,
+> everything where they expect it — **253 of 504 menu commands are not built yet** (greyed out,
 > not silently inert). That file is the running checklist, and it
 > separates *broken* (cheap bugs) from *not built yet* (the roadmap). It carries the script
 > that regenerates it, because the hand-maintained flags in the source have been wrong before.

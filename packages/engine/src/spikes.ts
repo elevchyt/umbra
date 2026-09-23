@@ -5,7 +5,7 @@
  */
 import { TILE_SIZE } from '@umbra/core/pixels';
 import type { Engine } from './engine.js';
-import { DEFAULT_BRUSH } from '@umbra/kernels/brush';
+import { DEFAULT_BRUSH, DEFAULT_COLOR_DYNAMICS, DEFAULT_DUAL, DEFAULT_SCATTERING, DEFAULT_SHAPE_DYNAMICS, DEFAULT_TEXTURE, DEFAULT_TRANSFER, NO_DYNAMIC, type BrushParams } from '@umbra/kernels/brush';
 import { PointerRing, FLAG_DOWN, FLAG_UP, nowAbs } from './input/ring.js';
 import { describeCaps } from './gpu/caps.js';
 import { Plane, Tile } from './tiles/plane.js';
@@ -32,6 +32,7 @@ export async function runSpikes(engine: Engine, ringSab: SharedArrayBuffer): Pro
   results.push(spikeTileStore());
   results.push(await spikeSyntheticPan(engine));
   results.push(await spikeInputLatency(engine, ringSab));
+  results.push(await spikeInputLatency(engine, ringSab, DYNAMICS_BRUSH, 'Engine-side input→pixels, every brush section on (500 px, 4K layer)'));
   results.push(await spikeContextLoss(engine));
 
   const pass = results.every((r) => r.pass);
@@ -229,8 +230,36 @@ function centrePixelIsPainted(engine: Engine): boolean {
   return px.slice(0, 3).some((v, i) => Math.abs(v - pasteboard[i]!) > 3);
 }
 
+/**
+ * M8's worst case: a sampled tip with every Brush Settings section on — shape jitter,
+ * scattering ×4 with count jitter, texture per tip, a scattered dual brush, colour dynamics
+ * per tip, transfer, noise and wet edges.
+ */
+const DYNAMICS_BRUSH: BrushParams = {
+  ...DEFAULT_BRUSH,
+  size: 500,
+  hardness: 0.5,
+  smoothing: 0,
+  pressureSize: false,
+  spacing: 0.1,
+  tip: { kind: 'sampled', id: 'builtin:chalk' },
+  shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, size: { ...NO_DYNAMIC, control: 'pressure', jitter: 0.4 }, angle: { ...NO_DYNAMIC, jitter: 1 }, roundness: { ...NO_DYNAMIC, jitter: 0.5 }, flipXJitter: true },
+  scattering: { ...DEFAULT_SCATTERING, enabled: true, scatter: { ...NO_DYNAMIC, jitter: 1 }, bothAxes: true, count: 4, countJitter: { ...NO_DYNAMIC, jitter: 0.5 } },
+  texture: { ...DEFAULT_TEXTURE, enabled: true, mode: 'colorBurn', depthJitter: { ...NO_DYNAMIC, jitter: 0.5 } },
+  dual: { ...DEFAULT_DUAL, enabled: true, tip: { kind: 'sampled', id: 'builtin:spatter' }, size: 200, scatter: 1, count: 3 },
+  colorDynamics: { ...DEFAULT_COLOR_DYNAMICS, enabled: true, fgBg: { ...NO_DYNAMIC, jitter: 0.5 }, hue: 0.2, saturation: 0.2, brightness: 0.2 },
+  transfer: { ...DEFAULT_TRANSFER, enabled: true, opacity: { ...NO_DYNAMIC, jitter: 0.3 }, flow: { ...NO_DYNAMIC, control: 'pressure' } },
+  noise: true,
+  wetEdges: true,
+};
+
 /** Spike 1: pointer sample → painted pixels within one frame. */
-async function spikeInputLatency(engine: Engine, ringSab: SharedArrayBuffer): Promise<SpikeResult> {
+async function spikeInputLatency(
+  engine: Engine,
+  ringSab: SharedArrayBuffer,
+  brush: BrushParams = { ...DEFAULT_BRUSH, size: 500, hardness: 0.5, smoothing: 0, pressureSize: false },
+  name = 'Engine-side input→pixels (500 px brush, 4K layer)',
+): Promise<SpikeResult> {
   engine.newDoc(3840, 2160);
   engine.resize(1600, 900, 1);
   engine.actualPixels();
@@ -238,11 +267,7 @@ async function spikeInputLatency(engine: Engine, ringSab: SharedArrayBuffer): Pr
   writer.drain();
 
   // A 500 px brush on a 4K layer is the budgeted worst case.
-  engine.beginStroke(
-    { ...DEFAULT_BRUSH, size: 500, hardness: 0.5, smoothing: 0, pressureSize: false },
-    [0.1, 0.4, 0.9],
-    'normal',
-  );
+  engine.beginStroke(brush, [0.1, 0.4, 0.9], 'normal', [0.9, 0.8, 0.1]);
   const latencies: number[] = [];
 
   for (let i = 0; i < 60; i++) {
@@ -271,7 +296,7 @@ async function spikeInputLatency(engine: Engine, ringSab: SharedArrayBuffer): Pr
   const median = latencies.length ? latencies[latencies.length >> 1]! : Infinity;
   const pass = p95 <= 16 && latencies.length > 0;
   return {
-    name: 'Engine-side input→pixels (500 px brush, 4K layer)',
+    name,
     pass,
     detail:
       `n=${latencies.length} median=${median.toFixed(2)} ms p95=${p95.toFixed(2)} ms ` +
