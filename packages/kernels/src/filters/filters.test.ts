@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FILTERS, FILTER_BY_ID } from './index.js';
 import { fromRgba8, toRgba8, makeRaster, type Raster } from './core.js';
+import { irisSpans } from './lensblur.js';
 import { defaultsOf, type FilterContext, type FilterDef, type FilterParams } from './types.js';
 
 const W = 40;
@@ -21,6 +22,28 @@ function image(): Raster {
   return fromRgba8(px, W, H);
 }
 
+/** A smooth opaque map for the 'layer' parameter (Displace, Lens Blur's depth). */
+function mapImage(): Raster {
+  const px = new Uint8ClampedArray(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const o = (y * W + x) * 4;
+      px[o] = Math.round((x / (W - 1)) * 255);
+      px[o + 1] = Math.round((y / (H - 1)) * 255);
+      px[o + 2] = 128;
+      px[o + 3] = 255;
+    }
+  }
+  return fromRgba8(px, W, H);
+}
+
+function crop(img: Raster, b: { x0: number; y0: number; x1: number; y1: number }): Raster {
+  const sw = b.x1 - b.x0;
+  const out = makeRaster(sw, b.y1 - b.y0);
+  for (let y = 0; y < out.height; y++) out.data.set(img.data.subarray(((b.y0 + y) * W + b.x0) * 4, ((b.y0 + y) * W + b.x1) * 4), y * sw * 4);
+  return out;
+}
+
 const ctx = (over: Partial<FilterContext> = {}): FilterContext => ({
   originX: 0,
   originY: 0,
@@ -29,7 +52,7 @@ const ctx = (over: Partial<FilterContext> = {}): FilterContext => ({
   foreground: [0, 0, 0],
   background: [1, 1, 1],
   coverage: null,
-  map: null,
+  map: mapImage(),
   ...over,
 });
 
@@ -47,6 +70,7 @@ function paramSets(def: FilterDef): FilterParams[] {
       else if (s.type === 'bool') p[s.key] = pick === 1;
       else if (s.type === 'seed') p[s.key] = 7 * pick;
       else if (s.type === 'point') p[s.key] = { x: 0.3 * pick, y: 0.25 * pick };
+      else if (s.type === 'layer') p[s.key] = pick;
     }
     sets.push(p);
   }
@@ -88,11 +112,7 @@ describe('every filter', () => {
         const region = { x0: 10, y0: 8, x1: 30, y1: 20 };
         const src = { x0: Math.max(0, region.x0 - pad), y0: Math.max(0, region.y0 - pad), x1: Math.min(W, region.x1 + pad), y1: Math.min(H, region.y1 + pad) };
         const sw = src.x1 - src.x0;
-        const sh = src.y1 - src.y0;
-        const img = image();
-        const crop = makeRaster(sw, sh);
-        for (let y = 0; y < sh; y++) crop.data.set(img.data.subarray(((src.y0 + y) * W + src.x0) * 4, ((src.y0 + y) * W + src.x1) * 4), y * sw * 4);
-        const part = toRgba8(def.run(crop, p, ctx({ originX: src.x0, originY: src.y0 })));
+        const part = toRgba8(def.run(crop(image(), src), p, ctx({ originX: src.x0, originY: src.y0, map: crop(mapImage(), src) })));
         let worst = 0;
         for (let y = region.y0; y < region.y1; y++) {
           for (let x = region.x0; x < region.x1; x++) {
@@ -216,5 +236,121 @@ describe('filter properties', () => {
       a += src.data[x * 4 + 3]!;
     }
     expect(out.data[(15 * W + 30) * 4]! / out.data[(15 * W + 30) * 4 + 3]!).toBeCloseTo(r / a, 5);
+  });
+
+  const same = (a: Raster, b: Raster, tol = 1) => {
+    const x = toRgba8(a);
+    const y = toRgba8(b);
+    let worst = 0;
+    for (let i = 0; i < x.length; i++) worst = Math.max(worst, Math.abs(x[i]! - y[i]!));
+    return worst <= tol;
+  };
+
+  it('Twirl, Pinch, Spherize and ZigZag at zero are the identity', () => {
+    expect(same(run('distort.twirl', { angle: 0 }), image())).toBe(true);
+    expect(same(run('distort.pinch', { amount: 0 }), image())).toBe(true);
+    expect(same(run('distort.spherize', { amount: 0 }), image())).toBe(true);
+    expect(same(run('distort.zigzag', { amount: 0 }), image())).toBe(true);
+    expect(same(run('distort.shear', { middle: 0 }), image())).toBe(true);
+  });
+
+  it('Twirl leaves everything outside the inscribed ellipse alone', () => {
+    const out = toRgba8(run('distort.twirl', { angle: 300 }));
+    const src = toRgba8(image());
+    for (const [x, y] of [[0, 0], [39, 0], [0, 27], [39, 27], [5, 2]] as const) {
+      const o = (y * W + x) * 4;
+      expect(Array.from(out.subarray(o, o + 4))).toEqual(Array.from(src.subarray(o, o + 4)));
+    }
+  });
+
+  it('Displace through a mid-grey map moves nothing; a bright red one moves right to left', () => {
+    const grey = flat([0.5, 0.5, 0.5, 1]);
+    const f = FILTER_BY_ID.get('distort.displace')!;
+    const p = { ...defaultsOf(f), map: 1, h: 50, v: 50 };
+    expect(same(f.run(image(), p, ctx({ map: grey })), image())).toBe(true);
+    // Red = 1 is (1 − ½)·2 of the scale, and 12.5% of 128 px is 16 px: pixel 10 reads pixel 26.
+    const ramp = makeRaster(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) ramp.data.set([x / W, 0, 0, 1], (y * W + x) * 4);
+    const red = flat([1, 0.5, 0.5, 1]);
+    const out = f.run(ramp, { ...p, h: 12.5, v: 0 }, ctx({ map: red }));
+    expect(out.data[(10 * W + 10) * 4]!).toBeCloseTo(26 / W, 2);
+  });
+
+  it('Polar Coordinates there and back again roughly restores the middle', () => {
+    const smooth = makeRaster(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) smooth.data.set([0.5 + 0.4 * Math.sin(x / 7), 0.5 + 0.4 * Math.cos(y / 5), 0.5, 1], (y * W + x) * 4);
+    const there = run('distort.polarcoordinates', { mode: 'toPolar' }, smooth);
+    const back = run('distort.polarcoordinates', { mode: 'toRect' }, there);
+    let err = 0;
+    let count = 0;
+    for (let y = 6; y < 22; y++) for (let x = 6; x < 34; x++) {
+      err += Math.abs(back.data[(y * W + x) * 4]! - smooth.data[(y * W + x) * 4]!);
+      count++;
+    }
+    expect(err / count).toBeLessThan(0.05);
+  });
+
+  it('De-Interlace replaces one field with the other', () => {
+    const out = run('video.deinterlace', { eliminate: 'odd', create: 'duplication' });
+    const src = image();
+    // Rows 0, 2, 4… are the odd field (numbered from 1): each is now a copy of the row above.
+    for (const y of [2, 10]) for (let x = 0; x < W * 4; x++) expect(out.data[y * W * 4 + x]).toBe(src.data[(y - 1) * W * 4 + x]);
+    for (let x = 0; x < W * 4; x++) expect(out.data[3 * W * 4 + x]).toBe(src.data[3 * W * 4 + x]);
+  });
+
+  it('NTSC Colors leaves greys alone and tames pure red', () => {
+    expect(px(run('video.ntsccolors', {}, flat([0.5, 0.5, 0.5, 1])), 5, 5)).toEqual([128, 128, 128, 255]);
+    const red = px(run('video.ntsccolors', {}, flat([1, 0, 0, 1])), 5, 5);
+    expect(red[0]!).toBeLessThan(255);
+    expect(red[1]! + red[2]!).toBeGreaterThan(0);
+  });
+
+  it('Lens Blur at radius 0 is the identity; with no depth map it keeps a flat image flat', () => {
+    expect(same(run('blur.lensblur', { radius: 0 }), image())).toBe(true);
+    expect(px(run('blur.lensblur', { radius: 6 }, flat([0.2, 0.6, 0.4, 1])), 20, 14)).toEqual(px(flat([0.2, 0.6, 0.4, 1]), 20, 14));
+  });
+
+  it('Lens Blur keeps the focal plane sharp', () => {
+    const f = FILTER_BY_ID.get('blur.lensblur')!;
+    // Depth: left half black (in focus at 0), right half white.
+    const depth = makeRaster(W, H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) depth.data.set(x < 20 ? [0, 0, 0, 1] : [1, 1, 1, 1], (y * W + x) * 4);
+    const out = f.run(image(), { ...defaultsOf(f), depth: 'layer', map: 1, focal: 0, radius: 5 }, ctx({ map: depth }));
+    expect(px(out, 8, 12)).toEqual(px(image(), 8, 12));
+    expect(px(out, 32, 12)).not.toEqual(px(image(), 32, 12));
+  });
+
+  it('the iris is the polygon asked for', () => {
+    // Rotation 0 puts a vertex at the top, so a square iris is a diamond: widest in the middle.
+    const spans = irisSpans(4, 10, 0, 0);
+    const width = (dy: number) => spans.filter((s) => s[0] === dy).reduce((n, s) => n + s[2] - s[1] + 1, 0);
+    expect(width(0)).toBeGreaterThan(width(-5));
+    expect(width(-5)).toBeGreaterThan(width(-9));
+    // Turned 45° it is upright: every row the same width.
+    const upright = irisSpans(4, 10, 45, 0);
+    expect(new Set(upright.map((s) => s[2] - s[1])).size).toBe(1);
+    expect(irisSpans(6, 10, 0, 1).length).toBe(21);
+  });
+
+  it('Clouds are the same pixel in a crop as in the full canvas, and differ by seed', () => {
+    const a = run('render.clouds', { seed: 3 });
+    const b = run('render.clouds', { seed: 4 });
+    expect(same(a, b, 0)).toBe(false);
+  });
+
+  it('Mosaic cells are flat', () => {
+    const out = toRgba8(run('pixelate.mosaic', { cell: 8 }));
+    const at = (x: number, y: number) => Array.from(out.subarray((y * W + x) * 4, (y * W + x) * 4 + 4));
+    expect(at(8, 8)).toEqual(at(15, 15));
+    expect(at(16, 8)).toEqual(at(23, 12));
+  });
+
+  it('Solarize inverts only the bright half', () => {
+    expect(px(run('stylize.solarize', {}, flat([0.2, 0.2, 0.2, 1])), 3, 3)).toEqual([51, 51, 51, 255]);
+    expect(px(run('stylize.solarize', {}, flat([0.8, 0.8, 0.8, 1])), 3, 3)).toEqual([51, 51, 51, 255]);
+  });
+
+  it('Find Edges turns a flat image white', () => {
+    expect(px(run('stylize.findedges', {}, flat([0.3, 0.7, 0.1, 1])), 20, 14)).toEqual([255, 255, 255, 255]);
   });
 });

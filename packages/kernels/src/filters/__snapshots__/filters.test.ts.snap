@@ -40,11 +40,43 @@ exports[`every filter > Box Blur: three parameter sets, sane output, golden chec
 ]
 `;
 
+exports[`every filter > Clouds: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "7edf627",
+  "46b9b65b",
+  "9db4d41a",
+]
+`;
+
+exports[`every filter > Color Halftone: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "4ef90f22",
+  "61c282e7",
+  "955041b8",
+]
+`;
+
+exports[`every filter > Crystallize: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "82c4dc34",
+  "9b35ec5",
+  "2f4712c5",
+]
+`;
+
 exports[`every filter > Custom: three parameter sets, sane output, golden checksum 1`] = `
 [
   "a2f741a3",
   "cdde5c05",
   "270ee2a5",
+]
+`;
+
+exports[`every filter > De-Interlace: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "858088b0",
+  "3e967b9c",
+  "e2eef77d",
 ]
 `;
 
@@ -56,11 +88,83 @@ exports[`every filter > Despeckle: three parameter sets, sane output, golden che
 ]
 `;
 
+exports[`every filter > Difference Clouds: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "fdf80d45",
+  "d67213a",
+  "f7ea0ffa",
+]
+`;
+
+exports[`every filter > Diffuse: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a6b0fdd7",
+  "758d37db",
+  "11ed5374",
+]
+`;
+
+exports[`every filter > Displace: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "597ba834",
+  "13853cc5",
+  "8c502cd8",
+]
+`;
+
 exports[`every filter > Dust & Scratches: three parameter sets, sane output, golden checksum 1`] = `
 [
   "6f9176f1",
   "79201c76",
   "5989e137",
+]
+`;
+
+exports[`every filter > Emboss: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "cd2a1f4a",
+  "bb5e1a56",
+  "8c31db77",
+]
+`;
+
+exports[`every filter > Extrude: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "532bb900",
+  "e3ec1b4",
+  "1ef4e8d5",
+]
+`;
+
+exports[`every filter > Facet: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "d9901d5a",
+  "d9901d5a",
+  "d9901d5a",
+]
+`;
+
+exports[`every filter > Fibers: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "b70f772a",
+  "50cab826",
+  "4edff033",
+]
+`;
+
+exports[`every filter > Find Edges: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "cc068005",
+  "cc068005",
+  "cc068005",
+]
+`;
+
+exports[`every filter > Fragment: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "848bad33",
+  "848bad33",
+  "848bad33",
 ]
 `;
 
@@ -88,6 +192,22 @@ exports[`every filter > High Pass: three parameter sets, sane output, golden che
 ]
 `;
 
+exports[`every filter > Lens Blur: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "dffad8fb",
+  "574f3f0f",
+  "924c48bd",
+]
+`;
+
+exports[`every filter > Lens Flare: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1e403e6",
+  "52807f00",
+  "c87c42d8",
+]
+`;
+
 exports[`every filter > Maximum: three parameter sets, sane output, golden checksum 1`] = `
 [
   "2c879d59",
@@ -104,11 +224,27 @@ exports[`every filter > Median: three parameter sets, sane output, golden checks
 ]
 `;
 
+exports[`every filter > Mezzotint: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "8fc43e43",
+  "a4c77d63",
+  "477f6a05",
+]
+`;
+
 exports[`every filter > Minimum: three parameter sets, sane output, golden checksum 1`] = `
 [
   "ce9dea6e",
   "4c09bae8",
   "265c8de8",
+]
+`;
+
+exports[`every filter > Mosaic: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "b09185c5",
+  "26459805",
+  "26459805",
 ]
 `;
 
@@ -120,11 +256,51 @@ exports[`every filter > Motion Blur: three parameter sets, sane output, golden c
 ]
 `;
 
+exports[`every filter > NTSC Colors: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "417871e7",
+  "417871e7",
+  "417871e7",
+]
+`;
+
 exports[`every filter > Offset: three parameter sets, sane output, golden checksum 1`] = `
 [
   "1c5a691d",
   "ac47e6c5",
   "76c82c1d",
+]
+`;
+
+exports[`every filter > Oil Paint: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "f760e852",
+  "932f9f8c",
+  "f4268de",
+]
+`;
+
+exports[`every filter > Pinch: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "30879365",
+  "7caba4f5",
+  "2ab84d65",
+]
+`;
+
+exports[`every filter > Pointillize: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "8912da58",
+  "88c357fa",
+  "760356c5",
+]
+`;
+
+exports[`every filter > Polar Coordinates: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e349492e",
+  "c10a6edc",
+  "e349492e",
 ]
 `;
 
@@ -141,6 +317,14 @@ exports[`every filter > Reduce Noise: three parameter sets, sane output, golden 
   "bb5c13f6",
   "7159ccc2",
   "4dfc85ae",
+]
+`;
+
+exports[`every filter > Ripple: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "716bbbb3",
+  "83b841b4",
+  "a22b065d",
 ]
 `;
 
@@ -176,6 +360,14 @@ exports[`every filter > Sharpen: three parameter sets, sane output, golden check
 ]
 `;
 
+exports[`every filter > Shear: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "9fe07b22",
+  "4df22ba5",
+  "9593d4ed",
+]
+`;
+
 exports[`every filter > Smart Blur: three parameter sets, sane output, golden checksum 1`] = `
 [
   "1b7e28f3",
@@ -192,6 +384,22 @@ exports[`every filter > Smart Sharpen: three parameter sets, sane output, golden
 ]
 `;
 
+exports[`every filter > Solarize: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "8aae09cc",
+  "8aae09cc",
+  "8aae09cc",
+]
+`;
+
+exports[`every filter > Spherize: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a8976db4",
+  "91ef3b88",
+  "7e5f9202",
+]
+`;
+
 exports[`every filter > Surface Blur: three parameter sets, sane output, golden checksum 1`] = `
 [
   "518ee428",
@@ -200,10 +408,58 @@ exports[`every filter > Surface Blur: three parameter sets, sane output, golden 
 ]
 `;
 
+exports[`every filter > Tiles: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "1c5a691d",
+  "1c5a691d",
+  "b57b5db9",
+]
+`;
+
+exports[`every filter > Trace Contour: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "e85124c9",
+  "c4728700",
+  "1135fbb5",
+]
+`;
+
+exports[`every filter > Twirl: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "a276a894",
+  "94a8c441",
+  "a59603d5",
+]
+`;
+
 exports[`every filter > Unsharp Mask: three parameter sets, sane output, golden checksum 1`] = `
 [
   "3d5c5d8f",
   "1c5a691d",
   "2eb0e706",
+]
+`;
+
+exports[`every filter > Wave: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "f2b66621",
+  "977e74a1",
+  "74b0999a",
+]
+`;
+
+exports[`every filter > Wind: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "92fc8f14",
+  "f529c58c",
+  "d025ca5b",
+]
+`;
+
+exports[`every filter > ZigZag: three parameter sets, sane output, golden checksum 1`] = `
+[
+  "83c595ab",
+  "d6772ea",
+  "4dc61c2a",
 ]
 `;

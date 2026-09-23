@@ -27,7 +27,9 @@ export type ParamSpec =
   /** Custom's 5×5 grid of integers. */
   | { key: string; label: string; type: 'kernel'; size: number; default: number[] }
   /** A Randomize button: an integer seed. */
-  | { key: string; label: string; type: 'seed'; default: number };
+  | { key: string; label: string; type: 'seed'; default: number }
+  /** Another layer of the document (Displace's map, Lens Blur's depth): its id, or -1 for none. */
+  | { key: string; label: string; type: 'layer'; default: number };
 
 export type ParamValue = number | string | boolean | { x: number; y: number } | number[];
 export type FilterParams = Record<string, ParamValue>;
@@ -44,8 +46,13 @@ export interface FilterContext {
   background: [number, number, number];
   /** Selection coverage over this raster (0…255), for Average; null means everywhere. */
   coverage: Uint8Array | null;
-  /** Another raster of the same size, for Displace's map; null when not provided. */
+  /** The 'layer' parameter's pixels, the same crop as the source; null when none is chosen. */
   map?: Raster | null;
+  /**
+   * The area the filter acts on, in document pixels: the selection's bounds, or the canvas.
+   * Pinch, Spherize, Twirl and friends are centred and sized on it, as in Photoshop.
+   */
+  bounds?: { x0: number; y0: number; x1: number; y1: number };
 }
 
 export type FilterCategory = 'Blur' | 'Distort' | 'Noise' | 'Pixelate' | 'Render' | 'Sharpen' | 'Stylize' | 'Video' | 'Other';

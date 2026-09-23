@@ -185,6 +185,14 @@ function ParamControl(props: { spec: ParamSpec; value: FilterParams[string]; onC
       return <PointParam label={s.label} value={props.value as { x: number; y: number }} onChange={props.onChange} />;
     case 'kernel':
       return <KernelParam size={s.size} value={props.value as number[]} onChange={props.onChange} />;
+    case 'layer': {
+      // Any pixel layer of this document; a separate file needs a second open document (M11).
+      const options = () => [
+        { value: '-1', label: 'None' },
+        ...(store.doc()?.layers ?? []).filter((l) => l.kind === 'pixel').map((l) => ({ value: String(l.id), label: l.name })),
+      ];
+      return <Select value={String(props.value)} label={s.label} width={150} options={options()} onChange={(v) => props.onChange(Number(v))} />;
+    }
   }
 }
 

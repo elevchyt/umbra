@@ -4,7 +4,7 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -345,9 +345,14 @@ export function Workspace() {
         flash(`Could not complete ${filter.label} because the target layer is not a pixel layer.`);
         return;
       }
-      // Filters with no settings run at once, as Blur and Find Edges do in Photoshop.
-      if (filter.params.length === 0) send({ t: 'applyFilter', id: cmd, params: {}, ...filterColours() });
-      else store.openDialog('filter', cmd);
+      // Filters with no settings run at once, as Blur and Find Edges do in Photoshop; so do
+      // Clouds and Difference Clouds, whose only settings are a seed (fresh every time) and
+      // a flag.
+      if (filter.params.every((s) => s.type === 'seed' || s.type === 'bool')) {
+        const params = defaultsOf(filter);
+        for (const s of filter.params) if (s.type === 'seed') params[s.key] = Math.floor(Math.random() * 1e9);
+        send({ t: 'applyFilter', id: cmd, params, ...filterColours() });
+      } else store.openDialog('filter', cmd);
       return;
     }
 

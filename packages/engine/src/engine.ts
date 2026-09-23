@@ -758,7 +758,8 @@ export class Engine {
 
   /** A scaled render of the whole document; null while the GPU context is lost. */
   thumbnail(maxSize: number): { pixels: Uint8Array; width: number; height: number } | null {
-    if (this.contextLost || this.doc.layers.length === 0) return null;
+    // A size that is not a positive number would make a zero-sized render target.
+    if (this.contextLost || this.doc.layers.length === 0 || !(maxSize >= 1)) return null;
     return this.renderer.renderThumbnail(this.doc, maxSize);
   }
 
@@ -1024,10 +1025,19 @@ export class Engine {
     return def ? { def, params, foreground: fg, background: bg } : null;
   }
 
+  /** A 'layer' parameter's pixels (Displace's map, Lens Blur's depth), as a canvas raster. */
+  private filterMap(run: FilterCmd.FilterRun): ArrayLike<number> | null {
+    const spec = run.def.params.find((s) => s.type === 'layer');
+    if (!spec) return null;
+    const id = run.params[spec.key] as number;
+    const layer = id >= 0 ? findLayer(this.doc.layers, id) : undefined;
+    return layer && layer.kind === 'pixel' ? SpatialCmd.layerRaster(this.doc, layer) : null;
+  }
+
   private filterDoc(run: FilterCmd.FilterRun): Doc | null {
     const target = this.paintTarget();
     if (!target) return null;
-    const next = FilterCmd.applyFilter(this.doc, target.id, target.mask, run);
+    const next = FilterCmd.applyFilter(this.doc, target.id, target.mask, run, this.filterMap(run));
     return next === this.doc ? null : next;
   }
 
@@ -1077,7 +1087,7 @@ export class Engine {
     const plane = target.mask ? layer.mask?.plane.base : layer.kind === 'pixel' ? layer.plane.base : undefined;
     if (!plane) return null;
     const canvas = bitmapFromPlane(plane, canvasRect).data;
-    const after = FilterCmd.filterRegion(this.doc, canvas, r, run, this.doc.selection?.mask ?? null);
+    const after = FilterCmd.filterRegion(this.doc, canvas, r, { ...run, bounds: FilterCmd.affectedRegion(this.doc) }, this.doc.selection?.mask ?? null, this.filterMap(run));
     const w = r.x1 - r.x0;
     const h = r.y1 - r.y0;
     const before = new Uint8Array(w * h * 4);

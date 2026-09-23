@@ -19,6 +19,8 @@ export interface FilterRun {
   params: FilterParams;
   foreground: [number, number, number];
   background: [number, number, number];
+  /** The area acted on (selection bounds or canvas) — set by `applyFilter`/the engine. */
+  bounds?: Rect;
 }
 
 /** Grow `r` by `pad`, clamped to the canvas; 'full' is the whole canvas. */
@@ -62,6 +64,7 @@ export function filterRegion(doc: Doc, canvas: ArrayLike<number>, region: Rect, 
     background: run.background,
     coverage: cov,
     map: cropMap ? fromRgba8(cropMap, sw, sh) : null,
+    bounds: run.bounds ?? affectedRegion(doc),
   };
   const out: Raster = run.def.run(fromRgba8(crop, sw, sh), run.params, ctx);
   const full = toRgba8(out);
@@ -102,6 +105,7 @@ export function applyFilter(doc: Doc, layerId: number, mask: boolean, run: Filte
   const rect = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };
   const region = affectedRegion(doc);
   if (region.x1 <= region.x0) return doc;
+  run = { ...run, bounds: region };
   const sel = doc.selection?.mask ?? null;
 
   if (mask) {

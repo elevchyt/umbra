@@ -163,7 +163,7 @@ the feature is complete.
 | Layer | 41 / 137 | layer styles (M6), smart objects (M5), align & distribute (M9), type & shapes (M7) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
-| Filter | 0 / 8 | all filters (M5) |
+| Filter | 59 / 74 | Filter Gallery & smart filters (M5), Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
 | Window | 32 / 56 | multi-document window arrangement (M11) |
 | Help | 4 / 5 | — |
@@ -173,6 +173,15 @@ counted every `case` in `Workspace.tsx`, which included `isChecked`'s — a tick
 implementation.
 
 ### Specifically, in the menus you are most likely to reach for
+
+- [x] **Filter ▸ Blur, Distort, Noise, Pixelate, Render (Clouds, Difference Clouds, Fibers,
+      Lens Flare), Sharpen, Stylize, Video and Other — 58 filters**, from one registry
+      (`kernels/src/filters/`), with Photoshop's preview box, on-canvas Preview, Last Filter
+      (Ctrl+Alt+F) and Edit ▸ Fade. Every one runs on the CPU; the proprietary ones
+      are `[fit]` models documented in each filter's `model`. Distort's centred filters act on
+      the selection's bounds; Displace and Lens Blur take their map from a layer of the same
+      document (a separate file waits on M11). Clouds' Alt-click for high contrast
+      is not wired: Clouds runs at once with a fresh seed.
 
 - [x] **Image ▸ Adjustments — all 22.** The per-pixel ones preview on the GPU (the adjustment
       drawn as a clipped layer); Shadows/Highlights, Replace Color, Match Color and HDR Toning
