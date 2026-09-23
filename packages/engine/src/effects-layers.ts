@@ -20,6 +20,7 @@ import { RGBA8 } from './tiles/import.js';
 import { planeFromBitmap } from './psd-open.js';
 import { bitmapFromPlane, tightBounds } from './psd-save.js';
 import { rasterize } from './commands/layers.js';
+import { VectorMaskCache, foldVectorMasks } from './shape-layers.js';
 
 export interface EffectsContext {
   width: number;
@@ -44,6 +45,8 @@ interface Entry {
 /** Per-layer effect renders, kept across frames. */
 export class EffectsCache {
   private entries = new Map<number, Entry>();
+  /** Vector masks folded into raster masks, kept across frames too. */
+  readonly masks = new VectorMaskCache();
   get(layer: Layer, ctx: EffectsContext): { below: EffectLayer[]; above: EffectLayer[] } | null {
     const fx = layer.effects;
     if (!hasVisibleEffects(fx)) return null;
@@ -203,4 +206,12 @@ export function expandEffects(layers: readonly Layer[], ctx: EffectsContext, cac
     i = j;
   }
   return any ? out : layers;
+}
+
+/**
+ * The layers as the compositors draw them: vector masks folded into masks, then effects
+ * spliced in (effects follow the masked shape, so the masks come first).
+ */
+export function prepareLayers(layers: readonly Layer[], ctx: EffectsContext, cache: EffectsCache = new EffectsCache()): readonly Layer[] {
+  return expandEffects(foldVectorMasks(layers, ctx, cache.masks), ctx, cache);
 }

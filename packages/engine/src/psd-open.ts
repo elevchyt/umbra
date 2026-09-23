@@ -22,6 +22,8 @@ import { Plane, Tile } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
 import { RGBA8 } from './tiles/import.js';
 import { fromPsdAdjustment, fromPsdFill } from './psd-adjust.js';
+import { liveFromPsd, strokeFromPsd, vectorMaskFromPsd } from './psd-vector.js';
+import { makeShapeLayer } from './shape-layers.js';
 import type { PatternDef } from '@umbra/kernels/fill';
 import {
   emptyDoc,
@@ -249,8 +251,14 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         features.push(`${(it.adjustment as { type?: string }).type ?? 'unknown'} adjustment layer`);
       }
       if (adjusted) features.push(...adjusted.lost);
+      // A vector fill with a vector mask is a shape layer; without one, a fill layer.
+      const shapeLayer = !!(it.vectorFill && it.vectorMask);
       const filled = it.vectorFill ? fromPsdFill(it.vectorFill, patterns) : null;
-      if (it.vectorFill && !filled) features.push('fill layer (noise gradient or missing pattern)');
+      if (it.vectorFill && !filled) features.push(`${shapeLayer ? 'shape' : 'fill'} layer (noise gradient or missing pattern)`);
+      const vmask = it.vectorMask ? vectorMaskFromPsd(it.vectorMask) : null;
+      if (vmask) features.push(...vmask.lost);
+      const stroke = shapeLayer && it.vectorStroke ? strokeFromPsd(it.vectorStroke, patterns) : null;
+      if (stroke) features.push(...stroke.lost);
       if (filled) features.push(...filled.lost);
       if (features.length) warnings.push({ layer: it.name, features });
 
@@ -275,6 +283,7 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         blending: it.blending ? blendingFromPsd(it.blending) : DEFAULT_BLENDING_STATE,
         seed: it.index,
         mask: masks.get(it.index),
+        vectorMask: shapeLayer ? undefined : vmask?.mask,
       };
 
       if (it.kind === 'group') {
@@ -299,6 +308,15 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
             defaultColor: 1,
           },
           psdExtra: { adjustment: it.adjustment },
+        });
+      }
+      if (shapeLayer && vmask) {
+        const path = vmask.mask.path;
+        const live = liveFromPsd(it.vectorOrigination, path);
+        return makeShapeLayer(it.name, path, stroke && !stroke.fillEnabled ? null : (filled?.content ?? { type: 'solid', color: [0, 0, 0] }), stroke?.stroke ?? null, info, {
+          ...common,
+          ...(live ? { live } : {}),
+          psdExtra: { vectorFill: it.vectorFill, vectorStroke: it.vectorStroke },
         });
       }
       if (filled) {

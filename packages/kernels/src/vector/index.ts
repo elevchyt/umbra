@@ -4,3 +4,4 @@ export * from './stroke.js';
 export * from './shapes.js';
 export * from './fit.js';
 export * from './trace.js';
+export * from './custom.js';

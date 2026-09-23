@@ -4,7 +4,7 @@
  * Used for export, for headless rendering, and by the tests that check a PSD renders the way
  * the spec says it should (spec 03 §5.3).
  */
-import { expandEffects } from '../effects-layers.js';
+import { prepareLayers } from '../effects-layers.js';
 import { TILE_SHIFT, TILE_SIZE, channelCount, maxValue } from '@umbra/core/pixels';
 import type { CompositeLayer, Sample } from '@umbra/kernels/composite';
 import { DEFAULT_BLENDING } from '@umbra/kernels/composite';
@@ -46,7 +46,7 @@ function sampleMask(plane: Plane, x: number, y: number): number {
  */
 export function toCompositeLayer(layer: Layer, size: { width: number; height: number } = { width: 0, height: 0 }): CompositeLayer {
   const base: CompositeLayer = {
-    kind: layer.kind === 'fill' || layer.kind === 'smart' ? 'pixel' : layer.kind,
+    kind: layer.kind === 'fill' || layer.kind === 'smart' || layer.kind === 'shape' ? 'pixel' : layer.kind,
     name: layer.name,
     visible: layer.visible,
     opacity: layer.opacity,
@@ -81,5 +81,5 @@ export function toCompositeLayer(layer: Layer, size: { width: number; height: nu
 }
 
 export function toCompositeLayers(doc: Doc): CompositeLayer[] {
-  return expandEffects(doc.layers, doc).map((l) => toCompositeLayer(l, doc));
+  return prepareLayers(doc.layers, doc).map((l) => toCompositeLayer(l, doc));
 }

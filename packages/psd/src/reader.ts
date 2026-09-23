@@ -57,8 +57,12 @@ export interface PsdLayerInfo {
   unsupported?: string[];
   /** Adjustment layers: ag-psd's decoded record, for the engine to map (it owns the model). */
   adjustment?: unknown;
-  /** Fill layers: ag-psd's decoded `vectorFill`. */
+  /** Fill and shape layers: ag-psd's decoded `vectorFill`. */
   vectorFill?: unknown;
+  /** Shape layers and vector masks: ag-psd's `vectorMask`, `vectorStroke` and `vectorOrigination`. */
+  vectorMask?: unknown;
+  vectorStroke?: unknown;
+  vectorOrigination?: unknown;
   /** Smart objects: ag-psd's `placedLayer` (transform, contents id, smart filters). */
   placed?: unknown;
   /** ag-psd's `effects` (the layer style), for the engine to map. */
@@ -95,9 +99,6 @@ export interface PsdReadCallbacks {
 function unsupportedFeatures(layer: AgLayer): string[] | undefined {
   const out: string[] = [];
   if (layer.text) out.push('type layer');
-  // A vector fill WITHOUT a vector mask is a fill layer, which the engine models; with one it
-  // is a shape layer, which it does not yet.
-  if (layer.vectorMask) out.push(layer.vectorFill ? 'shape layer' : 'vector mask');
   // Smart objects are modelled; only what they cannot carry is reported, by the engine.
   return out.length ? out : undefined;
 }
@@ -161,7 +162,10 @@ export function readPsdDocument(
         unsupported: unsupportedFeatures(layer),
       };
       if (layer.adjustment) info.adjustment = layer.adjustment;
-      if (layer.vectorFill && !layer.vectorMask) info.vectorFill = layer.vectorFill;
+      if (layer.vectorFill) info.vectorFill = layer.vectorFill;
+      if (layer.vectorMask) info.vectorMask = layer.vectorMask;
+      if (layer.vectorStroke) info.vectorStroke = layer.vectorStroke;
+      if (layer.vectorOrigination) info.vectorOrigination = layer.vectorOrigination;
       if (layer.placedLayer) info.placed = layer.placedLayer;
       if (layer.effects) info.effects = layer.effects;
       info.blending = {

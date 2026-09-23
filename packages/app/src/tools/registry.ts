@@ -191,12 +191,12 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'shape',
     key: 'u',
     tools: [
-      { id: 'rectangle', name: 'Rectangle Tool', icon: 'rectangle', key: 'u' },
-      { id: 'ellipse', name: 'Ellipse Tool', icon: 'ellipse', key: 'u' },
-      { id: 'triangle', name: 'Triangle Tool', icon: 'triangle', key: 'u' },
-      { id: 'polygon', name: 'Polygon Tool', icon: 'polygon', key: 'u' },
-      { id: 'line', name: 'Line Tool', icon: 'line', key: 'u' },
-      { id: 'customShape', name: 'Custom Shape Tool', icon: 'customShape', key: 'u' },
+      { id: 'rectangle', name: 'Rectangle Tool', icon: 'rectangle', key: 'u', implemented: true, hint: 'Drag to draw; Shift: square; Alt: from the centre. Mode: Shape layer, Path or Pixels.' },
+      { id: 'ellipse', name: 'Ellipse Tool', icon: 'ellipse', key: 'u', implemented: true, hint: 'Drag to draw; Shift: circle; Alt: from the centre.' },
+      { id: 'triangle', name: 'Triangle Tool', icon: 'triangle', key: 'u', implemented: true, hint: 'Drag to draw; Shift: equal sides of the box; Alt: from the centre.' },
+      { id: 'polygon', name: 'Polygon Tool', icon: 'polygon', key: 'u', implemented: true, hint: 'Drag from the centre: distance is the radius, direction turns it; Shift: 15° steps.' },
+      { id: 'line', name: 'Line Tool', icon: 'line', key: 'u', implemented: true, hint: 'Drag to draw; Shift: 45° steps; Alt: from the centre. Arrowheads in the options bar.' },
+      { id: 'customShape', name: 'Custom Shape Tool', icon: 'customShape', key: 'u', implemented: true, hint: 'Pick a shape in the options bar, then drag; Shift: keep proportions square; Alt: from the centre.' },
     ],
   },
   {

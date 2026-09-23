@@ -232,6 +232,16 @@ export const ICONS: Record<string, IconDef> = {
   newDocument: I(['M4 2.4h5l3 3v8.2H4z', 'M9 2.4v3h3']),
   reset: I(['M13.2 8a5.2 5.2 0 1 1-1.5-3.6', 'M13.6 2.8v3.4h-3.4']),
   warning: I(['M8 2.6 14 13H2z', 'M8 6.6v3.2M8 11.4h.01']),
+  // ---- path alignment and arrangement ------------------------------------------------
+  alignLeft: I(['M2.5 1.5v13', 'M4.5 3.5h8v3h-8z', 'M4.5 9.5h5v3h-5z']),
+  alignHCenter: I(['M8 1.5v13', 'M3 3.5h10v3H3z', 'M5 9.5h6v3H5z']),
+  alignRight: I(['M13.5 1.5v13', 'M3.5 3.5h8v3h-8z', 'M6.5 9.5h5v3h-5z']),
+  alignTop: I(['M1.5 2.5h13', 'M3.5 4.5h3v8h-3z', 'M9.5 4.5h3v5h-3z']),
+  alignVCenter: I(['M1.5 8h13', 'M3.5 3h3v10h-3z', 'M9.5 5h3v6h-3z']),
+  alignBottom: I(['M1.5 13.5h13', 'M3.5 3.5h3v8h-3z', 'M9.5 6.5h3v5h-3z']),
+  distributeH: I(['M2.5 2v12M13.5 2v12', 'M6.5 5h3v6h-3z']),
+  distributeV: I(['M2 2.5h12M2 13.5h12', 'M5 6.5h6v3H5z']),
+  arrange: I(['M2.5 6.5h7v7h-7z', 'M6.5 2.5h7v7h-7']),
 };
 
 export type IconName = keyof typeof ICONS;

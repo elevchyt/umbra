@@ -30,7 +30,8 @@ import { tilesInRect } from './tiles/plane.js';
 import { toCompositeLayers } from './render/cpu-composite.js';
 import { toPsdAdjustment, toPsdFill } from './psd-adjust.js';
 import { walkLayers } from './document.js';
-import type { PatternDef } from '@umbra/kernels/fill';
+import type { FillContent, PatternDef } from '@umbra/kernels/fill';
+import { liveToPsd, strokeToPsd, vectorMaskToPsd } from './psd-vector.js';
 
 /** Our mode ids → the names ag-psd writes. */
 const TO_PSD_MODE: Record<string, string> = Object.fromEntries(
@@ -199,6 +200,8 @@ function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
     }
   }
 
+  if (layer.vectorMask) common.vectorMask = vectorMaskToPsd(layer.vectorMask) as AgLayer['vectorMask'];
+
   if (layer.kind === 'group') {
     return { ...common, opened: layer.expanded, children: layer.children.map((c) => toAgLayer(c, doc, linked)) };
   }
@@ -211,6 +214,17 @@ function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
   if (layer.kind === 'fill') {
     const source = (layer.psdExtra as { vectorFill?: unknown } | undefined)?.vectorFill;
     return { ...common, left: 0, top: 0, right: 0, bottom: 0, vectorFill: toPsdFill(layer.content, source) as AgLayer['vectorFill'] };
+  }
+
+  if (layer.kind === 'shape') {
+    // A shape layer is a vector fill clipped by a vector mask, with its stroke and origination.
+    const extra = layer.psdExtra as { vectorFill?: unknown; vectorStroke?: unknown } | undefined;
+    const fill: FillContent = layer.fillContent ?? { type: 'solid', color: [0, 0, 0] };
+    common.vectorFill = toPsdFill(fill, extra?.vectorFill) as AgLayer['vectorFill'];
+    common.vectorStroke = strokeToPsd(layer.stroke, !!layer.fillContent, extra?.vectorStroke) as AgLayer['vectorStroke'];
+    common.vectorMask = vectorMaskToPsd({ path: layer.path, enabled: true }) as AgLayer['vectorMask'];
+    const origination = liveToPsd(layer.live);
+    if (origination) common.vectorOrigination = origination as AgLayer['vectorOrigination'];
   }
 
   if (layer.kind === 'smart') {

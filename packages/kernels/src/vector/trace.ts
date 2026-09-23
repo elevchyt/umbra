@@ -77,6 +77,9 @@ export function coverageToPath(v: ArrayLike<number>, w: number, h: number, toler
     subpaths: traceContours(v, w, h)
       .map((ring) => ring.map((p) => ({ x: p.x + originX, y: p.y + originY })))
       .map((ring) => cubicsToSubpath(fitCurve(ring, tolerance, true), true))
-      .filter((sp) => sp.knots.length > 1),
+      .filter((sp) => sp.knots.length > 1)
+      // Traced contours never cross, so XOR-ing them all is the even-odd fill: holes stay holes
+      // and islands inside holes stay filled, whatever order the rings came in.
+      .map((sp, i) => (i === 0 ? sp : { ...sp, op: 'exclude' as const })),
   };
 }

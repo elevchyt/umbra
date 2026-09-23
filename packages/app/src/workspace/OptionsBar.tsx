@@ -6,6 +6,7 @@ import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID } from '../tools/registry';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient } from '@umbra/engine';
 import { store } from '../state/store';
+import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
 
 /**
  * Options bar — spec 01 §1. Contents are contextual on the active tool, and the leftmost slot
@@ -363,10 +364,17 @@ export function OptionsBar(props: OptionsBarProps) {
           <Show when={store.activeTool() === 'freeformPen'}>
             <NumberField label="Curve Fit" value={store.vectorOptions().curveFit} min={0.5} max={10} step={0.5} precision={1} suffix="px" width={48} onChange={(v) => store.setVectorOptions({ ...store.vectorOptions(), curveFit: v })} />
           </Show>
+          <Show when={store.activeTool() === 'pathSelect'}>
+            <PathAlignOptions />
+          </Show>
           <Separator />
           <span class="options-label">Make:</span>
           <IconButton icon="marqueeRect" title="Make Selection from the path" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'toSelection', op: 'new' } as never)} />
           <IconButton icon="pen" title="Make a Work Path from the selection" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 } as never)} />
+        </Match>
+
+        <Match when={['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape'].includes(store.activeTool())}>
+          <ShapeToolOptions />
         </Match>
 
         <Match when={store.activeTool() === 'magicWand'}>

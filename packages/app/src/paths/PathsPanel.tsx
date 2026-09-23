@@ -1,9 +1,10 @@
 /**
  * Window ▸ Paths — spec 01 §5: the Work Path (italic, unsaved), saved paths, and the buttons
  * Photoshop puts along the bottom: fill with the foreground colour, stroke with the brush, load
- * as a selection, make a work path from the selection, add a vector mask (M7 stage 3), new
- * path, delete. Double-click a name to rename it (the Work Path: to save it). Clicking the
- * empty part of the list deselects, so the Pen starts a new Work Path.
+ * as a selection, make a work path from the selection, add a vector mask, new path, delete.
+ * Double-click a name to rename it (the Work Path: to save it). The active layer's own path —
+ * a shape layer's outline or its vector mask — is listed first, in italics, as Photoshop does;
+ * it is what the tools and buttons use while no saved path is selected.
  */
 import { For, Show, createEffect, createSignal } from 'solid-js';
 import { Icon } from '@umbra/ui/icons/Icon';
@@ -34,6 +35,12 @@ export function PathsPanel() {
   const [renaming, setRenaming] = createSignal<number | null>(null);
   const doc = () => store.doc();
   const active = () => doc()?.activePathId ?? null;
+  /** Something for the buttons to act on: a selected path, or the active layer's own. */
+  const hasTarget = () => active() !== null || !!doc()?.layerPath;
+  const activeLayer = () => {
+    const d = doc();
+    return d?.layers.find((l) => l.id === d.activeLayerIds[0]);
+  };
   const fg = (): [number, number, number] => {
     const f = store.foreground();
     return [f.r, f.g, f.b];
@@ -46,6 +53,22 @@ export function PathsPanel() {
   return (
     <div class="paths-panel">
       <div class="paths-list" onClick={() => send({ t: 'pathCommand', cmd: 'select' })}>
+        <Show when={doc()?.layerPath}>
+          {(lp) => (
+            <div
+              class="path-row layer-path"
+              classList={{ selected: active() === null }}
+              title={lp().kind === 'shape' ? "The shape layer's outline" : "The layer's vector mask"}
+              onClick={(e) => {
+                e.stopPropagation();
+                send({ t: 'pathCommand', cmd: 'select' });
+              }}
+            >
+              <PathThumb path={lp().path} docW={doc()!.width} docH={doc()!.height} />
+              <span class="path-name">{lp().name}</span>
+            </div>
+          )}
+        </Show>
         <For each={doc()?.paths ?? []}>
           {(p) => (
             <div
@@ -75,19 +98,19 @@ export function PathsPanel() {
             </div>
           )}
         </For>
-        <Show when={(doc()?.paths ?? []).length === 0}>
+        <Show when={(doc()?.paths ?? []).length === 0 && !doc()?.layerPath}>
           <div class="dim adjustments-note">Draw with the Pen tool to make a Work Path.</div>
         </Show>
       </div>
       <div class="panel-footer">
-        <button type="button" class="mini-icon" title="Fill path with foreground color" disabled={active() === null} onClick={() => send({ t: 'pathCommand', cmd: 'fill', color: fg() })}>
+        <button type="button" class="mini-icon" title="Fill path with foreground color" disabled={!hasTarget()} onClick={() => send({ t: 'pathCommand', cmd: 'fill', color: fg() })}>
           <Icon name="paintBucket" size={15} />
         </button>
         <button
           type="button"
           class="mini-icon"
           title="Stroke path with brush"
-          disabled={active() === null}
+          disabled={!hasTarget()}
           onClick={() => {
             const { mode, ...brush } = store.brush;
             send({ t: 'pathCommand', cmd: 'stroke', tool: 'brush', brush, color: fg(), mode });
@@ -95,19 +118,25 @@ export function PathsPanel() {
         >
           <Icon name="brush" size={15} />
         </button>
-        <button type="button" class="mini-icon" title="Load path as a selection" disabled={active() === null} onClick={() => send({ t: 'pathCommand', cmd: 'toSelection', op: 'new' })}>
+        <button type="button" class="mini-icon" title="Load path as a selection" disabled={!hasTarget()} onClick={() => send({ t: 'pathCommand', cmd: 'toSelection', op: 'new' })}>
           <Icon name="marqueeRect" size={15} />
         </button>
         <button type="button" class="mini-icon" title="Make work path from selection" disabled={!doc()?.hasSelection} onClick={() => send({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 })}>
           <Icon name="pen" size={15} />
         </button>
-        <button type="button" class="mini-icon" title="Add vector mask — arrives with shape layers (M7)" disabled>
+        <button
+          type="button"
+          class="mini-icon"
+          title="Add vector mask: the selected path, or reveal all"
+          disabled={!activeLayer() || !!activeLayer()?.vectorMask}
+          onClick={() => send({ t: 'pathCommand', cmd: 'toVectorMask' })}
+        >
           <Icon name="addMask" size={15} />
         </button>
         <button type="button" class="mini-icon" title="Create new path" onClick={() => send({ t: 'pathCommand', cmd: 'new' })}>
           <Icon name="newLayer" size={15} />
         </button>
-        <button type="button" class="mini-icon" title="Delete current path" disabled={active() === null} onClick={() => send({ t: 'pathCommand', cmd: 'delete' })}>
+        <button type="button" class="mini-icon" title="Delete current path" disabled={active() === null && doc()?.layerPath?.kind !== 'mask'} onClick={() => send({ t: 'pathCommand', cmd: 'delete' })}>
           <Icon name="trash" size={15} />
         </button>
       </div>

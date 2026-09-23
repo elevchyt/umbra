@@ -23,6 +23,7 @@ import {
   type Subpath,
 } from '@umbra/kernels/vector/index';
 import { rasterizePath } from '@umbra/kernels/vector/raster';
+import { coverageToPath } from '@umbra/kernels/vector/trace';
 
 export type VectorToolId = 'pen' | 'freeformPen' | 'curvaturePen' | 'addAnchor' | 'deleteAnchor' | 'convertPoint' | 'pathSelect' | 'directSelect';
 
@@ -537,4 +538,132 @@ export function overlayOutline(p: Path): Pt[][] {
     const pts = flattenSubpath(sp, 0.3);
     return sp.closed && pts.length ? [...pts, pts[0]!] : pts;
   });
+}
+
+// ---- path alignment, arrangement, component merging (options bar, Layer ▸ Combine Shapes) ----
+
+export type PathArrange =
+  | 'alignLeft'
+  | 'alignHCenter'
+  | 'alignRight'
+  | 'alignTop'
+  | 'alignVCenter'
+  | 'alignBottom'
+  | 'distributeH'
+  | 'distributeV'
+  | 'front'
+  | 'forward'
+  | 'backward'
+  | 'back';
+
+function subpathBounds(sp: Subpath): { x0: number; y0: number; x1: number; y1: number } {
+  const pts = flattenSubpath(sp, 0.1);
+  let x0 = Infinity;
+  let y0 = Infinity;
+  let x1 = -Infinity;
+  let y1 = -Infinity;
+  for (const q of pts) {
+    x0 = Math.min(x0, q.x);
+    y0 = Math.min(y0, q.y);
+    x1 = Math.max(x1, q.x);
+    y1 = Math.max(y1, q.y);
+  }
+  return { x0, y0, x1, y1 };
+}
+
+const moveSubpath = (sp: Subpath, dx: number, dy: number): Subpath => {
+  const m = (q: Pt): Pt => ({ x: q.x + dx, y: q.y + dy });
+  return { ...sp, knots: sp.knots.map((k) => ({ ...k, anchor: m(k.anchor), in: m(k.in), out: m(k.out) })) };
+};
+
+/**
+ * Align, distribute or restack the selected components. Alignment is to the selection's
+ * bounds, or to the canvas when one component is selected, as Photoshop's Path Alignment
+ * does; the order of components is their stacking order (later ones draw over).
+ */
+export function arrangeSubpaths(path: Path, selected: readonly number[], cmd: PathArrange, canvas: { width: number; height: number }): { path: Path; selected: number[] } {
+  const sel = [...new Set(selected)].filter((i) => i >= 0 && i < path.subpaths.length).sort((a, b) => a - b);
+  if (!sel.length) return { path, selected: [] };
+  const subpaths = [...path.subpaths];
+  if (cmd.startsWith('align') || cmd.startsWith('distribute')) {
+    const boxes = new Map(sel.map((i) => [i, subpathBounds(subpaths[i]!)]));
+    const all = [...boxes.values()];
+    const ref =
+      sel.length === 1
+        ? { x0: 0, y0: 0, x1: canvas.width, y1: canvas.height }
+        : { x0: Math.min(...all.map((b) => b.x0)), y0: Math.min(...all.map((b) => b.y0)), x1: Math.max(...all.map((b) => b.x1)), y1: Math.max(...all.map((b) => b.y1)) };
+    if (cmd === 'distributeH' || cmd === 'distributeV') {
+      if (sel.length < 3) return { path, selected: sel };
+      const h = cmd === 'distributeH';
+      const centre = (b: { x0: number; y0: number; x1: number; y1: number }) => (h ? (b.x0 + b.x1) / 2 : (b.y0 + b.y1) / 2);
+      const order = [...sel].sort((a, b) => centre(boxes.get(a)!) - centre(boxes.get(b)!));
+      const c0 = centre(boxes.get(order[0]!)!);
+      const c1 = centre(boxes.get(order[order.length - 1]!)!);
+      order.forEach((i, n) => {
+        const target = c0 + ((c1 - c0) * n) / (order.length - 1);
+        const d = target - centre(boxes.get(i)!);
+        subpaths[i] = moveSubpath(subpaths[i]!, h ? d : 0, h ? 0 : d);
+      });
+      return { path: { subpaths }, selected: sel };
+    }
+    for (const i of sel) {
+      const b = boxes.get(i)!;
+      let dx = 0;
+      let dy = 0;
+      if (cmd === 'alignLeft') dx = ref.x0 - b.x0;
+      if (cmd === 'alignRight') dx = ref.x1 - b.x1;
+      if (cmd === 'alignHCenter') dx = (ref.x0 + ref.x1) / 2 - (b.x0 + b.x1) / 2;
+      if (cmd === 'alignTop') dy = ref.y0 - b.y0;
+      if (cmd === 'alignBottom') dy = ref.y1 - b.y1;
+      if (cmd === 'alignVCenter') dy = (ref.y0 + ref.y1) / 2 - (b.y0 + b.y1) / 2;
+      subpaths[i] = moveSubpath(subpaths[i]!, dx, dy);
+    }
+    return { path: { subpaths }, selected: sel };
+  }
+  // Restacking: pull the selected out and put them back at the new place, keeping their order.
+  const picked = sel.map((i) => subpaths[i]!);
+  const rest = subpaths.filter((_, i) => !sel.includes(i));
+  let at: number;
+  if (cmd === 'front') at = rest.length;
+  else if (cmd === 'back') at = 0;
+  else if (cmd === 'forward') at = Math.min(rest.length, sel[0]! + 1);
+  else at = Math.max(0, sel[0]! - 1);
+  const next = [...rest.slice(0, at), ...picked, ...rest.slice(at)];
+  return { path: { subpaths: next }, selected: picked.map((_, n) => at + n) };
+}
+
+/**
+ * Merge Shape Components: the path's filled area as plain combined outlines. Photoshop
+ * computes the boolean exactly; this traces a 4× supersampled rasterisation and refits
+ * curves to it ([fit]: within ¼ px of the exact outline, with corners slightly softened).
+ */
+export function mergeComponents(path: Path): Path {
+  const S = 4;
+  const b = subpathsBounds(path);
+  if (!b) return path;
+  const x0 = Math.floor(b.x0) - 1;
+  const y0 = Math.floor(b.y0) - 1;
+  const w = (Math.ceil(b.x1) + 1 - x0) * S;
+  const h = (Math.ceil(b.y1) + 1 - y0) * S;
+  const scaled = { subpaths: path.subpaths.map((sp) => ({ ...sp, knots: sp.knots.map((k) => ({ ...k, anchor: sc(k.anchor), in: sc(k.in), out: sc(k.out) })) })) };
+  function sc(q: Pt): Pt {
+    return { x: (q.x - x0) * S, y: (q.y - y0) * S };
+  }
+  const cov = rasterizePath(scaled, { x0: 0, y0: 0, x1: w, y1: h });
+  const traced = coverageToPath(cov, w, h, 1);
+  return {
+    subpaths: traced.subpaths.map((sp) => ({
+      ...sp,
+      knots: sp.knots.map((k) => {
+        const u = (q: Pt): Pt => ({ x: q.x / S + x0, y: q.y / S + y0 });
+        return { ...k, anchor: u(k.anchor), in: u(k.in), out: u(k.out) };
+      }),
+    })),
+  };
+}
+
+function subpathsBounds(path: Path): { x0: number; y0: number; x1: number; y1: number } | null {
+  const bs = path.subpaths.filter((sp) => sp.knots.length > 1).map(subpathBounds);
+  if (!bs.length) return null;
+  return { x0: Math.min(...bs.map((b) => b.x0)), y0: Math.min(...bs.map((b) => b.y0)), x1: Math.max(...bs.map((b) => b.x1)), y1: Math.max(...bs.map((b) => b.y1)) };
 }

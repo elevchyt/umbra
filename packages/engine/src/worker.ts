@@ -273,6 +273,40 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setVectorTool':
         engine?.setVectorTool(msg.tool, msg.options);
         break;
+      case 'setShapeOptions':
+        engine?.setShapeOptions(msg.options);
+        break;
+      case 'setShape': {
+        const { t: _t, id, final, ...patch } = msg;
+        if (engine?.setShape(id, patch, final)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
+      case 'vectorMaskCommand':
+        if (engine?.vectorMaskCommand(msg.cmd)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestCustomShapes':
+        if (engine) post({ t: 'customShapes', list: engine.customShapes.map(({ id, name, path }) => ({ id, name, path })) });
+        break;
+      case 'defineCustomShape':
+        if (engine?.defineCustomShape(msg.name)) post({ t: 'customShapes', list: engine.customShapes.map(({ id, name, path }) => ({ id, name, path })) });
+        break;
+      case 'combineShapes':
+        if (engine?.combineShapes(msg.op)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'arrangePath':
+        if (engine?.arrangePath(msg.cmd)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'loadCustomShapes':
+        if (engine) {
+          let error: string | undefined;
+          try {
+            if (engine.loadCustomShapes(msg.buffer).length === 0) error = 'The file has no shapes.';
+          } catch (e) {
+            error = e instanceof Error ? e.message : String(e);
+          }
+          post({ t: 'customShapes', list: engine.customShapes.map(({ id, name, path }) => ({ id, name, path })), error });
+        }
+        break;
       case 'vectorPointer':
         // Moves only redraw the overlay; everything else can change the Paths panel.
         if (engine?.vectorPointer(msg) && msg.phase !== 'move') post({ t: 'doc', doc: engine.summary() });

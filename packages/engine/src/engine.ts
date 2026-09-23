@@ -2,11 +2,16 @@
  * Engine: owns the document, the history and the GL context. Lives in a worker so that
  * neither UI work nor engine work can stall the other (spec 03 §2).
  */
-import { VectorTool, overlayOutline, type VectorOptions, type VectorToolId } from './vector-tool.js';
+import { VectorTool, arrangeSubpaths, mergeComponents, overlayOutline, type PathArrange, type VectorOptions, type VectorToolId } from './vector-tool.js';
 import type { PathOverlay } from './render/path-overlay.js';
 import { flattenSubpath, type Path } from '@umbra/kernels/vector/path';
 import { rasterizePath } from '@umbra/kernels/vector/raster';
 import { coverageToPath } from '@umbra/kernels/vector/trace';
+import { BUILTIN_SHAPES, readCsh, type CustomShape } from '@umbra/kernels/vector/custom';
+import { DEFAULT_SHAPE_OPTIONS, SHAPE_NAMES, SHAPE_TOOLS, shapeFromDrag, type ShapeOptions, type ShapeToolId } from './shape-tool.js';
+import { liveAfterEdit, makeShapeLayer, reshaped, VectorMaskCache, withLive } from './shape-layers.js';
+import type { LiveShape } from '@umbra/kernels/vector/shapes';
+import { layerPathName } from './shape-tool.js';
 import { combine as combineMask, createMask } from '@umbra/kernels/selection';
 import { DEFAULT_GLOBAL_LIGHT, mapEffectPatterns, scaleEffects, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
 import { EffectsCache, type EffectLayer } from './effects-layers.js';
@@ -54,6 +59,7 @@ import {
   type SmartObjectLayer,
   type SmartSource,
   type SavedPath,
+  type ShapeLayer,
 } from './document.js';
 import { History } from './history.js';
 import {
@@ -102,7 +108,7 @@ import { bitmapFromPlane } from './psd-save.js';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
-import type { FillSummary, PatternSummary, ProbeReply, SmartSummary } from './protocol.js';
+import type { FillSummary, PatternSummary, ShapeStrokeSummary, ProbeReply, SmartSummary } from './protocol.js';
 import {
   IDENTITY,
   about,
@@ -152,7 +158,7 @@ function transformReadout(box: Rect, m: Mat) {
 const STROKE_SPACING = 0.25; // fraction of diameter, Photoshop's default
 
 export interface PathCommand {
-  cmd: 'select' | 'new' | 'save' | 'rename' | 'duplicate' | 'delete' | 'fill' | 'stroke' | 'toSelection' | 'fromSelection';
+  cmd: 'select' | 'new' | 'save' | 'rename' | 'duplicate' | 'delete' | 'fill' | 'stroke' | 'toSelection' | 'fromSelection' | 'toVectorMask';
   /** The path to act on; the selected one when absent. */
   id?: number;
   name?: string;
@@ -168,6 +174,7 @@ export interface PathCommand {
   brush?: BrushParams;
   simulatePressure?: boolean;
 }
+export type VectorMaskCommand = 'revealAll' | 'hideAll' | 'currentPath' | 'delete' | 'toggle' | 'rasterize' | 'rasterizeShape';
 export type StyleCommand = 'copy' | 'paste' | 'clear' | 'hideAll' | 'scale' | 'createLayers' | 'rasterize';
 export interface LayerStyleProps {
   opacity?: number;
@@ -728,14 +735,36 @@ export class Engine {
     return (this.doc.paths ?? []).find((p) => p.id === this.activePathId) ?? null;
   }
 
+  /** The active layer's own path: a shape layer's outline, or its vector mask. */
+  private layerPath(): { layer: Layer; kind: 'shape' | 'mask'; path: Path } | null {
+    const id = this.doc.activeLayerIds[0];
+    const l = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (!l) return null;
+    if (l.kind === 'shape') return { layer: l, kind: 'shape', path: l.path };
+    if (l.vectorMask) return { layer: l, kind: 'mask', path: l.vectorMask.path };
+    return null;
+  }
+
+  /** What the vector tools edit and the path commands use: the selected saved path, else the active layer's own. */
+  private editPath(): Path | null {
+    return this.targetPath()?.path ?? this.layerPath()?.path ?? null;
+  }
+
   /** The document with the target path replaced; with no target, a new Work Path (replacing any old one). */
   private withPath(path: Path): Doc {
     const paths = this.doc.paths ?? [];
     const cur = this.targetPath();
     if (cur) return { ...this.doc, paths: paths.map((p) => (p.id === cur.id ? { ...p, path } : p)) };
+    const lp = this.layerPath();
+    if (lp) return { ...this.doc, layers: replaceLayer(this.doc.layers, lp.layer.id, this.layerWithPath(lp.layer, path)) };
     const id = this.nextPathId++;
     this.activePathId = id;
     return { ...this.doc, paths: [...paths.filter((p) => !p.work), { id, name: 'Work Path', path, work: true }] };
+  }
+
+  private layerWithPath(l: Layer, path: Path): Layer {
+    if (l.kind === 'shape') return reshaped({ ...l, path, live: liveAfterEdit(l, path) }, this.doc);
+    return { ...l, vectorMask: { enabled: true, ...l.vectorMask, path } };
   }
 
   private applyVector(r: { path: Path | null; commit: string | null }): boolean {
@@ -748,9 +777,16 @@ export class Engine {
     return !!(r.path || r.commit);
   }
 
-  setVectorTool(tool: VectorToolId | null, options?: Partial<VectorOptions>): void {
+  setVectorTool(tool: VectorToolId | ShapeToolId | null, options?: Partial<VectorOptions>): void {
+    this.shapeDrag = null;
+    if (tool && (SHAPE_TOOLS as readonly string[]).includes(tool)) {
+      this.shapeTool = tool as ShapeToolId;
+      this.vectorToolActive = false;
+      return;
+    }
+    this.shapeTool = null;
     if (tool && tool !== this.vector.tool) {
-      this.vector.tool = tool;
+      this.vector.tool = tool as VectorToolId;
       this.vector.drawing = null;
     }
     this.vectorToolActive = !!tool;
@@ -760,20 +796,99 @@ export class Engine {
   /** A pointer event for the active vector tool, in screen coordinates. */
   vectorPointer(e: { phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; alt: boolean; ctrl: boolean; clicks: number }): boolean {
     const d = docPointAtScreen(this.view, e.x, e.y);
-    const r = this.vector.pointer(this.targetPath()?.path ?? null, { ...e, x: d.x, y: d.y });
+    if (this.shapeTool) return this.shapePointer(e.phase, d, e.shift, e.alt);
+    const r = this.vector.pointer(this.editPath(), { ...e, x: d.x, y: d.y });
     return this.applyVector(r) || e.phase !== 'move';
   }
 
   vectorKey(key: string): boolean {
-    return this.applyVector(this.vector.key(this.targetPath()?.path ?? null, key));
+    if (this.shapeTool) return false;
+    return this.applyVector(this.vector.key(this.editPath(), key));
+  }
+
+  // ---- the shape tools ------------------------------------------------------------------
+
+  shapeTool: ShapeToolId | null = null;
+  shapeOptions: ShapeOptions = DEFAULT_SHAPE_OPTIONS;
+  /** The built-in shapes and any loaded from .csh files. */
+  customShapes: CustomShape[] = [...BUILTIN_SHAPES];
+  private shapeDrag: { a: { x: number; y: number }; b: { x: number; y: number }; shift: boolean; alt: boolean } | null = null;
+
+  setShapeOptions(patch: Partial<ShapeOptions>): void {
+    this.shapeOptions = { ...this.shapeOptions, ...patch };
+  }
+
+  /** Load a .csh file into the custom shape set; returns the shapes added. */
+  loadCustomShapes(buf: ArrayBuffer): { id: string; name: string }[] {
+    const added = readCsh(buf).map((c) => ({ ...c, id: `${c.id}#${this.customShapes.length}` }));
+    this.customShapes = [...this.customShapes, ...added];
+    return added.map(({ id, name }) => ({ id, name }));
+  }
+
+  private dragShape(): ReturnType<typeof shapeFromDrag> {
+    const g = this.shapeDrag;
+    return g && this.shapeTool ? shapeFromDrag(this.shapeTool, g.a, g.b, g.shift, g.alt, this.shapeOptions, this.customShapes) : null;
+  }
+
+  private shapePointer(phase: 'down' | 'move' | 'up', d: { x: number; y: number }, shift: boolean, alt: boolean): boolean {
+    if (phase === 'down') {
+      this.shapeDrag = { a: d, b: d, shift, alt };
+      return true;
+    }
+    if (!this.shapeDrag) return false;
+    this.shapeDrag = { ...this.shapeDrag, b: d, shift, alt };
+    if (phase === 'move') return true;
+    const shape = this.dragShape();
+    const tool = this.shapeTool!;
+    this.shapeDrag = null;
+    if (shape) this.drawShape(tool, shape);
+    return true;
+  }
+
+  /** Commit a drawn shape as the tool mode says: a shape layer, path components, or pixels. */
+  drawShape(tool: ShapeToolId, shape: NonNullable<ReturnType<typeof shapeFromDrag>>): void {
+    const o = this.shapeOptions;
+    const op = o.op === 'new' ? 'add' : o.op;
+    const components = shape.path.subpaths.map((sp, i) => ({ ...sp, op: i === 0 ? op : sp.op === 'add' ? op : sp.op }));
+    if (o.mode === 'pixels') {
+      const sel = this.pathSelection(shape.path, 'new', 0, o.antiAlias);
+      const color = o.fill?.type === 'solid' ? o.fill.color : [0, 0, 0];
+      if (!sel) return;
+      const next = FillCmd.fill({ ...this.doc, selection: sel }, { color: color as [number, number, number], mode: 'normal', opacity: 1, preserveTransparency: false });
+      this.commit({ ...next, selection: this.doc.selection }, `${SHAPE_NAMES[tool]} Tool`);
+      return;
+    }
+    if (o.mode === 'path') {
+      const cur = this.editPath();
+      const created = !cur;
+      const path = { subpaths: [...(cur?.subpaths ?? []), ...components] };
+      this.vector.reset();
+      this.commit(this.withPath(path), created ? 'New Work Path' : 'Add Path Component');
+      return;
+    }
+    const lp = this.layerPath();
+    if (o.op !== 'new' && lp?.kind === 'shape') {
+      const l = lp.layer as ShapeLayer;
+      const next = reshaped({ ...l, path: { subpaths: [...l.path.subpaths, ...components] }, live: undefined }, this.doc);
+      this.commit({ ...this.doc, layers: replaceLayer(this.doc.layers, l.id, next) }, 'Combine Shapes');
+      return;
+    }
+    const name = LayerCmd.numberedName(this.doc, SHAPE_NAMES[tool]);
+    const layer = makeShapeLayer(name, shape.path, o.fill, o.stroke.enabled ? o.stroke : null, this.doc, shape.live ? { live: shape.live } : {});
+    const above = this.doc.activeLayerIds[0];
+    // A new shape layer takes the path focus from any saved path, as in Photoshop.
+    this.activePathId = null;
+    this.vector.reset();
+    this.commit({ ...this.doc, layers: insertLayer(this.doc.layers, layer, above), activeLayerIds: [layer.id] }, 'New Shape Layer');
   }
 
   /** The overlay the renderer draws for the vector tools. */
   private pathOverlay(): PathOverlay | null {
-    const t = this.targetPath();
+    const p = this.editPath();
     const trail = this.vector.trail;
-    if (!t) return trail ? { outlines: [], anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
-    const p = t.path;
+    const drawn = this.dragShape();
+    const extra = drawn ? overlayOutline(drawn.path) : [];
+    if (!p) return trail || drawn ? { outlines: extra, anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
     const tools = this.vectorToolActive;
     const selected = new Set(this.vector.selected.map((r) => `${r.s}:${r.k}`));
     const wholeSelected = new Set(this.vector.selectedSubpaths);
@@ -796,7 +911,7 @@ export class Engine {
       const knots = p.subpaths[drawing]?.knots;
       if (knots?.length) rubber = [knots[knots.length - 1]!.anchor, this.vector.hover];
     }
-    return { outlines: overlayOutline(p), anchors, handles, rubber, marquee: this.vector.marquee, trail };
+    return { outlines: [...overlayOutline(p), ...extra], anchors, handles, rubber, marquee: this.vector.marquee, trail };
   }
 
   /** Paths panel commands and Fill/Stroke Path, Make Selection, Make Work Path. */
@@ -807,6 +922,9 @@ export class Engine {
       return true;
     };
     const target = cmd.id !== undefined ? paths.find((p) => p.id === cmd.id) : this.targetPath();
+    // With no saved path selected, the commands act on the active layer's shape path or vector mask.
+    const lp = cmd.id === undefined && !target ? this.layerPath() : null;
+    const tpath = target?.path ?? lp?.path ?? null;
     switch (cmd.cmd) {
       case 'select':
         this.activePathId = cmd.id ?? null;
@@ -825,32 +943,40 @@ export class Engine {
         if (!target || !cmd.name) return false;
         return commitPaths(paths.map((p) => (p.id === target.id ? { ...p, name: cmd.name! } : p)), 'Rename Path');
       case 'duplicate': {
-        if (!target) return false;
+        if (!tpath) return false;
         const id = this.nextPathId++;
-        return commitPaths([...paths, { id, name: `${target.name} copy`, path: target.path, work: false }], 'Duplicate Path');
+        const base = target?.name ?? (lp ? layerPathName(lp.layer.name, lp.kind) : 'Path');
+        return commitPaths([...paths, { id, name: `${base} copy`, path: tpath, work: false }], 'Duplicate Path');
       }
       case 'delete':
+        if (lp) {
+          // Deleting a layer's path deletes the vector mask; a shape layer's path cannot go.
+          if (lp.kind !== 'mask') return false;
+          return this.vectorMaskCommand('delete');
+        }
         if (!target) return false;
         if (this.activePathId === target.id) this.activePathId = null;
         this.vector.reset();
         return commitPaths(paths.filter((p) => p.id !== target.id), 'Delete Path');
       case 'fill': {
-        if (!target) return false;
-        const sel = this.pathSelection(target.path, 'new', cmd.feather ?? 0, cmd.antiAlias !== false);
+        if (!tpath) return false;
+        const sel = this.pathSelection(tpath, 'new', cmd.feather ?? 0, cmd.antiAlias !== false);
         if (!sel) return false;
         const next = FillCmd.fill({ ...this.doc, selection: sel }, { color: cmd.color ?? [0, 0, 0], mode: (cmd.mode ?? 'normal') as never, opacity: cmd.opacity ?? 1, preserveTransparency: !!cmd.preserveTransparency });
         this.commit({ ...next, selection: this.doc.selection }, 'Fill Path');
         return true;
       }
       case 'stroke':
-        return target ? this.strokePath(target.path, cmd) : false;
+        return tpath ? this.strokePath(tpath, cmd) : false;
       case 'toSelection': {
-        if (!target) return false;
-        const sel = this.pathSelection(target.path, (cmd.op ?? 'new') as CombineOp, cmd.feather ?? 0, cmd.antiAlias !== false);
+        if (!tpath) return false;
+        const sel = this.pathSelection(tpath, (cmd.op ?? 'new') as CombineOp, cmd.feather ?? 0, cmd.antiAlias !== false);
         if (!sel) return false;
         this.setSelection(sel, 'Make Selection');
         return true;
       }
+      case 'toVectorMask':
+        return target ? this.vectorMaskCommand('currentPath') : this.vectorMaskCommand('revealAll');
       case 'fromSelection': {
         const sel = this.doc.selection;
         if (!sel) return false;
@@ -863,6 +989,92 @@ export class Engine {
         return commitPaths([...paths.filter((p) => !p.work), { id, name: 'Work Path', path, work: true }], 'Make Work Path');
       }
     }
+  }
+
+  /** Layer ▸ Vector Mask ▸ …, and Layer ▸ Rasterize ▸ Vector Mask / Shape, on the active layer. */
+  vectorMaskCommand(cmd: VectorMaskCommand): boolean {
+    const id = this.doc.activeLayerIds[0];
+    const layer = id === undefined ? undefined : findLayer(this.doc.layers, id);
+    if (!layer || layer.kind === 'group' && cmd === 'rasterizeShape') return false;
+    const put = (l: Layer, name: string) => {
+      this.vector.reset();
+      this.commit({ ...this.doc, layers: replaceLayer(this.doc.layers, layer.id, l) }, name);
+      return true;
+    };
+    const vm = layer.vectorMask;
+    switch (cmd) {
+      case 'revealAll':
+      case 'hideAll':
+        if (vm) return false;
+        return put({ ...layer, vectorMask: { path: { subpaths: [] }, enabled: true, hideAll: cmd === 'hideAll' } }, 'Add Vector Mask');
+      case 'currentPath': {
+        const saved = this.targetPath();
+        if (vm || !saved) return false;
+        this.activePathId = null;
+        return put({ ...layer, vectorMask: { path: saved.path, enabled: true } }, 'Add Vector Mask');
+      }
+      case 'delete':
+        if (!vm) return false;
+        return put({ ...layer, vectorMask: undefined }, 'Delete Vector Mask');
+      case 'toggle':
+        if (!vm) return false;
+        return put({ ...layer, vectorMask: { ...vm, enabled: !vm.enabled } }, vm.enabled ? 'Disable Vector Mask' : 'Enable Vector Mask');
+      case 'rasterize': {
+        if (!vm) return false;
+        const mask = vm.enabled ? new VectorMaskCache().effectiveMask(layer, this.doc) : layer.mask;
+        return put({ ...layer, vectorMask: undefined, mask }, 'Rasterize Vector Mask');
+      }
+      case 'rasterizeShape': {
+        if (layer.kind !== 'shape') return false;
+        const { path: _p, live: _l, fillContent: _f, stroke: _s, kind: _k, ...rest } = layer;
+        return put(makePixelLayer(layer.name, layer.plane.base, { ...rest, id: layer.id }), 'Rasterize Shape');
+      }
+    }
+  }
+
+  /**
+   * Layer ▸ Combine Shapes: the selected shape layers become one, the top one keeping its
+   * name and appearance; each upper layer's components join with the operation. 'merge' is
+   * Merge Shape Components on the active shape layer (or the selected path).
+   */
+  combineShapes(op: 'add' | 'subtract' | 'intersect' | 'exclude' | 'merge'): boolean {
+    if (op === 'merge') {
+      const path = this.editPath();
+      if (!path?.subpaths.length) return false;
+      this.vector.reset();
+      this.commit(this.withPath(mergeComponents(path)), 'Merge Shape Components');
+      return true;
+    }
+    const ids = new Set(this.doc.activeLayerIds);
+    const picked = [...walkLayers(this.doc.layers)].map((w) => w.layer).filter((l): l is ShapeLayer => l.kind === 'shape' && ids.has(l.id));
+    if (picked.length < 2) return false;
+    const top = picked[picked.length - 1]!;
+    const subpaths = picked.flatMap((l, n) => (n === 0 ? l.path.subpaths : l.path.subpaths.map((sp, i) => (i === 0 || sp.op === 'add' ? { ...sp, op } : sp))));
+    const merged = reshaped({ ...top, path: { subpaths }, live: undefined }, this.doc);
+    let layers = replaceLayer(this.doc.layers, top.id, merged);
+    for (const l of picked) if (l !== top) layers = LayerCmd.deleteLayer({ ...this.doc, layers }, l.id).layers as Layer[];
+    this.vector.reset();
+    this.commit({ ...this.doc, layers, activeLayerIds: [top.id] }, 'Combine Shapes');
+    return true;
+  }
+
+  /** Path Alignment and Path Arrangement on the components the Path Selection tool has selected. */
+  arrangePath(cmd: PathArrange): boolean {
+    const path = this.editPath();
+    if (!path) return false;
+    const r = arrangeSubpaths(path, this.vector.selectedSubpaths, cmd, this.doc);
+    if (r.path === path) return false;
+    this.vector.selectedSubpaths = r.selected;
+    this.commit(this.withPath(r.path), cmd.startsWith('align') || cmd.startsWith('distribute') ? 'Align Components' : 'Arrange Components');
+    return true;
+  }
+
+  /** Edit ▸ Define Custom Shape: the selected path (or the active layer's) joins the custom shapes. */
+  defineCustomShape(name: string): boolean {
+    const path = this.editPath();
+    if (!path?.subpaths.some((sp) => sp.knots.length > 1)) return false;
+    this.customShapes = [...this.customShapes, { id: `user-${this.customShapes.length}-${Date.now()}`, name: name || 'Shape', path }];
+    return true;
   }
 
   /** A path's fill as a selection combined with the current one. */
@@ -2006,6 +2218,35 @@ export class Engine {
     } else {
       this.doc = next;
     }
+    return true;
+  }
+
+  /**
+   * Properties for a shape layer: its live-shape parameters, fill and stroke. Non-final
+   * edits (a scrub) show without history; the final one commits.
+   */
+  setShape(id: number, patch: { live?: LiveShape; fill?: FillSummary | null; stroke?: ShapeStrokeSummary | null }, final: boolean): boolean {
+    const layer = findLayer(this.doc.layers, id);
+    if (layer?.kind !== 'shape') return false;
+    let next: ShapeLayer = layer;
+    let name = 'Edit Shape';
+    if (patch.live) next = withLive(next, patch.live, this.doc);
+    if (patch.fill !== undefined) {
+      const fillContent = patch.fill ? this.fillFromSummary(patch.fill) : null;
+      if (patch.fill && !fillContent) return false;
+      next = { ...next, fillContent: fillContent ?? null };
+      name = 'Change Shape Fill';
+    }
+    if (patch.stroke !== undefined) {
+      const content = patch.stroke ? this.fillFromSummary(patch.stroke.content) : null;
+      if (patch.stroke && !content) return false;
+      next = { ...next, stroke: patch.stroke && content ? { ...patch.stroke, content, blendMode: patch.stroke.blendMode as BlendMode } : null };
+      name = 'Change Shape Stroke';
+    }
+    if (patch.fill !== undefined || patch.stroke !== undefined) next = reshaped(next, this.doc);
+    const doc = { ...this.doc, layers: replaceLayer(this.doc.layers, id, next) };
+    if (final) this.commit(doc, name);
+    else this.doc = doc;
     return true;
   }
 
@@ -3193,6 +3434,10 @@ export class Engine {
       globalLight: this.doc.globalLight ?? DEFAULT_GLOBAL_LIGHT,
       paths: (this.doc.paths ?? []).map((p) => ({ id: p.id, name: p.name, work: p.work, path: p.path })),
       activePathId: this.targetPath()?.id ?? null,
+      layerPath: (() => {
+        const lp = this.layerPath();
+        return lp ? { kind: lp.kind, name: layerPathName(lp.layer.name, lp.kind), path: lp.path } : null;
+      })(),
       filterMaskTarget: this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
       fadeName: this.fadeName,
@@ -3218,6 +3463,16 @@ export class Engine {
         smart: layer.kind === 'smart' ? Engine.smartToSummary(layer) : undefined,
         effects: layer.effects ? Engine.effectsToSummary(layer.effects) : undefined,
         blending: layer.blending,
+        shape:
+          layer.kind === 'shape'
+            ? {
+                path: layer.path,
+                live: layer.live,
+                fill: layer.fillContent ? Engine.fillToSummary(layer.fillContent) : null,
+                stroke: layer.stroke ? { ...layer.stroke, content: Engine.fillToSummary(layer.stroke.content) } : null,
+              }
+            : undefined,
+        vectorMask: layer.vectorMask,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,
@@ -3230,7 +3485,7 @@ export class Engine {
         maskEnabled: layer.mask ? layer.mask.enabled : false,
         locks: layer.locks,
         expanded: layer.kind === 'group' ? layer.expanded : false,
-        tiles: layer.kind === 'pixel' || layer.kind === 'smart' ? layer.plane.base.tileCount : 0,
+        tiles: layer.kind === 'pixel' || layer.kind === 'smart' || layer.kind === 'shape' ? layer.plane.base.tileCount : 0,
       })),
     };
   }

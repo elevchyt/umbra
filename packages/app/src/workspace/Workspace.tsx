@@ -32,6 +32,8 @@ const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
 /** The tools the engine's vector state machine drives. */
 const VECTOR_TOOLS = new Set(['pen', 'freeformPen', 'curvaturePen', 'addAnchor', 'deleteAnchor', 'convertPoint', 'pathSelect', 'directSelect']);
+/** The shape tools: their drags go through the same pointer channel to the engine. */
+const SHAPE_TOOL_IDS = new Set(['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape']);
 
 /** Commands that only make sense on a smart object, and when. */
 const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
@@ -146,6 +148,10 @@ export function Workspace() {
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
+        onCustomShapes: (list, error) => {
+          store.setCustomShapes(list);
+          if (error) store.setStatusMessage(`Load Shapes: ${error}`);
+        },
         onFilterBox: (m) => window.dispatchEvent(new CustomEvent('umbra:filter-box', { detail: m })),
         onProbe: (m) => {
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraProbe = m;
@@ -235,9 +241,18 @@ export function Workspace() {
     client.moveTool = tool === 'move';
     client.fillTool = tool === 'paintBucket' ? 'bucket' : tool === 'gradient' ? 'gradient' : null;
     client.cropTool = tool === 'crop';
-    const vector = VECTOR_TOOLS.has(tool) ? tool : null;
+    const vector = VECTOR_TOOLS.has(tool) || SHAPE_TOOL_IDS.has(tool) ? tool : null;
     client.vectorTool = vector;
     client.send({ t: 'setVectorTool', tool: vector as never, options: store.vectorOptions() });
+  });
+
+  // Shape options follow the options bar; Pixels mode paints with the foreground colour.
+  createEffect(() => {
+    const o = store.shapeOptions();
+    const f = store.foreground();
+    if (!client || !store.engineReady()) return;
+    const fill = o.mode === 'pixels' ? { type: 'solid' as const, color: [f.r, f.g, f.b] as [number, number, number] } : o.fill;
+    client.send({ t: 'setShapeOptions', options: { ...o, fill } });
   });
 
   // An armed dialog eyedropper takes canvas clicks away from the tool. Read the signals
@@ -879,6 +894,45 @@ export function Workspace() {
       }
       case 'edit.definePattern':
         store.openDialog('definePattern');
+        break;
+      case 'edit.defineShape':
+        store.openDialog('defineShape');
+        break;
+      case 'vmask.revealAll':
+        send({ t: 'vectorMaskCommand', cmd: 'revealAll' });
+        break;
+      case 'vmask.hideAll':
+        send({ t: 'vectorMaskCommand', cmd: 'hideAll' });
+        break;
+      case 'vmask.currentPath':
+        send({ t: 'vectorMaskCommand', cmd: 'currentPath' });
+        break;
+      case 'vmask.delete':
+        send({ t: 'vectorMaskCommand', cmd: 'delete' });
+        break;
+      case 'vmask.enable':
+        send({ t: 'vectorMaskCommand', cmd: 'toggle' });
+        break;
+      case 'rasterize.vectorMask':
+        send({ t: 'vectorMaskCommand', cmd: 'rasterize' });
+        break;
+      case 'rasterize.shape':
+        send({ t: 'vectorMaskCommand', cmd: 'rasterizeShape' });
+        break;
+      case 'shape.unite':
+        send({ t: 'combineShapes', op: 'add' });
+        break;
+      case 'shape.subtract':
+        send({ t: 'combineShapes', op: 'subtract' });
+        break;
+      case 'shape.intersect':
+        send({ t: 'combineShapes', op: 'intersect' });
+        break;
+      case 'shape.exclude':
+        send({ t: 'combineShapes', op: 'exclude' });
+        break;
+      case 'shape.merge':
+        send({ t: 'combineShapes', op: 'merge' });
         break;
       case 'layer.clippingMask':
         // Toggles, as Ctrl+Alt+G does in Photoshop: create when unclipped, release when clipped.
@@ -1608,6 +1662,18 @@ export function Workspace() {
           initial={store.dialog()!.payload as FillSummary}
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'defineShape'}>
+        <NameDialog
+          title="Shape Name"
+          label="Name"
+          initial={`Shape ${store.customShapes().length + 1}`}
+          onCancel={store.closeDialog}
+          onApply={(name) => {
+            store.closeDialog();
+            send({ t: 'defineCustomShape', name });
+          }}
         />
       </Show>
       <Show when={store.dialog()?.id === 'definePattern'}>

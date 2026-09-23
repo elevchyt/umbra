@@ -18,6 +18,8 @@ import type { Mat } from '@umbra/kernels/matrix';
 import type { FilterParams } from '@umbra/kernels/filters/types';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { Path } from '@umbra/kernels/vector/path';
+import type { StrokeStyle } from '@umbra/kernels/vector/stroke';
+import type { LiveShape } from '@umbra/kernels/vector/shapes';
 
 export type LabelColor =
   | 'none'
@@ -83,6 +85,27 @@ export interface LayerBase {
   readonly psdExtra?: unknown;
   /** Layer effects (the layer style), spec 02 §3. */
   readonly effects?: LayerEffects;
+  /** A vector mask (spec 02 §2): a path whose fill limits the layer, with the raster mask. */
+  readonly vectorMask?: VectorMask;
+}
+
+export interface VectorMask {
+  readonly path: Path;
+  readonly enabled: boolean;
+  /**
+   * What an empty path shows: everything (Reveal All, the default) or nothing (Hide All) —
+   * the PSD's initial-fill record. A path with components fills from empty either way.
+   */
+  readonly hideAll?: boolean;
+}
+
+/** A shape layer's stroke: the style, and what it is painted with. */
+export interface VectorStroke {
+  readonly enabled: boolean;
+  readonly style: StrokeStyle;
+  readonly content: FillContent;
+  readonly opacity: number;
+  readonly blendMode: BlendMode;
 }
 
 export interface PixelLayer extends LayerBase {
@@ -168,7 +191,22 @@ export interface SmartObjectLayer extends LayerBase {
   readonly plane: MipPlane;
 }
 
-export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer | SmartObjectLayer;
+/**
+ * A shape layer (spec 02 §3): a path filled and stroked, with the live-shape parameters when
+ * it was drawn with a shape tool. Like a smart object it carries its rendered pixels, re-drawn
+ * whenever the path, fill or stroke change, so the compositor draws it as a pixel layer.
+ */
+export interface ShapeLayer extends LayerBase {
+  readonly kind: 'shape';
+  readonly path: Path;
+  readonly live?: LiveShape;
+  /** null: no fill (a stroke-only shape). */
+  readonly fillContent: FillContent | null;
+  readonly stroke: VectorStroke | null;
+  readonly plane: MipPlane;
+}
+
+export type Layer = PixelLayer | GroupLayer | AdjustmentLayer | FillLayer | SmartObjectLayer | ShapeLayer;
 
 /**
  * A stored alpha channel — Photoshop's "saved selection". It is a coverage plane with a
@@ -450,7 +488,7 @@ export function panelRows(layers: readonly Layer[], depth = 0): PanelRow[] {
 export function totalTiles(layers: readonly Layer[]): number {
   let n = 0;
   for (const { layer } of walkLayers(layers)) {
-    if (layer.kind === 'pixel' || layer.kind === 'smart') n += layer.plane.base.tileCount;
+    if (layer.kind === 'pixel' || layer.kind === 'smart' || layer.kind === 'shape') n += layer.plane.base.tileCount;
     if (layer.mask) n += layer.mask.plane.base.tileCount;
   }
   return n;

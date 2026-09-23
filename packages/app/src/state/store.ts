@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
+import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -149,6 +149,10 @@ export interface Histogram {
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
 /** The vector tools' options bar: Auto Add/Delete, Curve Fit, the path operation. */
 const [vectorOptions, setVectorOptions] = createSignal<{ autoAddDelete: boolean; curveFit: number; op: 'add' | 'subtract' | 'intersect' | 'exclude' }>({ autoAddDelete: true, curveFit: 2, op: 'add' });
+/** The shape tools' options bar (Shape/Path/Pixels, fill, stroke, radius, sides…). */
+const [shapeOptions, setShapeOptions] = createSignal<ShapeOptions>(DEFAULT_SHAPE_OPTIONS);
+/** The custom shapes the engine holds: built-ins, .csh imports and Define Custom Shape. */
+const [customShapes, setCustomShapes] = createSignal<{ id: string; name: string; path: Path }[]>([]);
 /** The Styles panel's library, as the engine last sent it. */
 const [styles, setStyles] = createSignal<StylePreset[]>([]);
 /**
@@ -274,7 +278,8 @@ export type DialogId =
   | 'globalLight'
   | 'fade'
   | 'calculations'
-  | 'definePattern';
+  | 'definePattern'
+  | 'defineShape';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {
@@ -350,6 +355,10 @@ export const store = {
   setStyles,
   vectorOptions,
   setVectorOptions,
+  shapeOptions,
+  setShapeOptions,
+  customShapes,
+  setCustomShapes,
   luts,
   setLuts,
   pickRequest,

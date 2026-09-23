@@ -211,7 +211,7 @@ function contentRect(layers: readonly Layer[], canvas: Rect): Rect {
   let r: Rect | null = null;
   for (const { layer } of walkLayers(layers)) {
     let b: Rect | null = null;
-    if (layer.kind === 'pixel' || layer.kind === 'smart') b = tightBounds(layer.plane.base);
+    if (layer.kind === 'pixel' || layer.kind === 'smart' || layer.kind === 'shape') b = tightBounds(layer.plane.base);
     else if (layer.kind === 'fill') b = canvas;
     if (b && !rectIsEmpty(b)) r = r ? rectUnion(r, b) : b;
   }

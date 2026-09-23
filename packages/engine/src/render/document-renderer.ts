@@ -7,7 +7,7 @@
  * against the CPU reference.
  */
 import { PathOverlayRenderer, type PathOverlay } from './path-overlay.js';
-import { EffectsCache, expandEffects } from '../effects-layers.js';
+import { EffectsCache, prepareLayers } from '../effects-layers.js';
 import type { Rect } from '@umbra/core/geom';
 import { Program } from '../gpu/program.js';
 import type { TileAtlas } from '../gpu/atlas.js';
@@ -277,7 +277,7 @@ export class DocumentRenderer {
 
   private toGpuLayer(layer: Layer, view: ViewState, clip: Rect): GpuLayer {
     const out: GpuLayer = {
-      kind: layer.kind === 'fill' || layer.kind === 'smart' ? 'pixel' : layer.kind,
+      kind: layer.kind === 'fill' || layer.kind === 'smart' || layer.kind === 'shape' ? 'pixel' : layer.kind,
       name: layer.name,
       visible: layer.visible,
       opacity: layer.opacity,
@@ -377,7 +377,7 @@ export class DocumentRenderer {
     this.compositor.resize(vw, vh);
     this.compositor.setOrigin(0, 0);
 
-    const layers = this.toGpuLayers(expandEffects(doc.layers, doc, this.fxCache), view, docRect);
+    const layers = this.toGpuLayers(prepareLayers(doc.layers, doc, this.fxCache), view, docRect);
 
     // Composite onto transparency; the present pass puts the checkerboard underneath.
     const composite = this.compositor.compositeOnTransparent(layers);
@@ -468,7 +468,7 @@ export class DocumentRenderer {
     };
 
     this.compositor.resize(width, height);
-    const layers = expandEffects(doc.layers, doc, this.fxCache).map((l) => this.toGpuLayer(l, view, { x0: 0, y0: 0, x1: doc.width, y1: doc.height }));
+    const layers = prepareLayers(doc.layers, doc, this.fxCache).map((l) => this.toGpuLayer(l, view, { x0: 0, y0: 0, x1: doc.width, y1: doc.height }));
     const composite = this.compositor.compositeOnTransparent(layers);
 
     const floats = new Float32Array(width * height * 4);
@@ -513,7 +513,7 @@ export class DocumentRenderer {
     const clip = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };
 
     this.compositor.resize(width, height);
-    const composite = this.compositor.compositeOnTransparent(this.toGpuLayers(expandEffects(doc.layers, doc, this.fxCache), view, clip));
+    const composite = this.compositor.compositeOnTransparent(this.toGpuLayers(prepareLayers(doc.layers, doc, this.fxCache), view, clip));
     const floats = new Float32Array(width * height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, composite.fbo);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, floats);

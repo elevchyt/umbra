@@ -24,6 +24,9 @@ import { RGBA8 } from './tiles/import.js';
 import { makeSelection } from './selection.js';
 import { addAdjustmentLayer, addFillLayer } from './commands/adjust.js';
 import type { ParityResult } from './parity.js';
+import { makeShapeLayer } from './shape-layers.js';
+import { liveShapePath } from '@umbra/kernels/vector/shapes';
+import { DEFAULT_STROKE } from '@umbra/kernels/vector/stroke';
 
 const W = 600;
 const H = 300;
@@ -167,6 +170,32 @@ function documents(): { name: string; doc: Doc }[] {
     {
       name: 'doc: pattern fill layer, full canvas',
       doc: addFillLayer(one([base()]), { type: 'pattern', pattern, scale: 100, phase: { x: 3, y: 5 } }),
+    },
+    {
+      name: 'doc: shape layers (rounded rect with dashed stroke, star) over pixels',
+      doc: one([
+        base(),
+        makeShapeLayer('Rect', liveShapePath({ kind: 'rect', x: 40.5, y: 30, w: 300, h: 160, radii: [30, 0, 60, 10], angle: 12 }), { type: 'solid', color: [0.2, 0.5, 1] }, { enabled: true, style: { ...DEFAULT_STROKE, width: 7, dashes: [3, 1] }, content: { type: 'solid', color: [0, 0, 0] }, opacity: 0.8, blendMode: 'multiply' }, { width: W, height: H }, { opacity: 0.7, blendMode: 'overlay' }),
+        makeShapeLayer('Star', liveShapePath({ kind: 'polygon', cx: 450, cy: 150, r: 120, sides: 5, star: 50, smoothCorners: false, smoothIndents: false, radius: 0, angle: 0 }), { type: 'solid', color: [1, 0.8, 0] }, null, { width: W, height: H }),
+      ]),
+    },
+    {
+      name: 'doc: vector mask with a subtracted component, over a raster mask',
+      doc: one([
+        base(),
+        makePixelLayer('Masked', colourful(), {
+          mask: maskWith(255, 0, { x0: 0, y0: 0, x1: 200, y1: H }),
+          vectorMask: {
+            enabled: true,
+            path: {
+              subpaths: [
+                ...liveShapePath({ kind: 'ellipse', cx: 300, cy: 150, rx: 250, ry: 120, angle: 0 }).subpaths,
+                { ...liveShapePath({ kind: 'rect', x: 250, y: 100, w: 100, h: 100, radii: [0, 0, 0, 0], angle: 0 }).subpaths[0]!, op: 'subtract' },
+              ],
+            },
+          },
+        }),
+      ]),
     },
   ];
 }

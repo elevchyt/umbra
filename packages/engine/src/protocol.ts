@@ -10,9 +10,12 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand } from './engine.js';
-import type { VectorOptions, VectorToolId } from './vector-tool.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, VectorMaskCommand } from './engine.js';
+import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
+import type { ShapeOptions, ShapeToolId } from './shape-tool.js';
 import type { Path } from '@umbra/kernels/vector/path';
+import type { LiveShape } from '@umbra/kernels/vector/shapes';
+import type { StrokeStyle } from '@umbra/kernels/vector/stroke';
 
 type Rgb3 = [number, number, number];
 
@@ -53,7 +56,11 @@ import type { GpuCaps } from './gpu/caps.js';
 export interface LayerSummary {
   id: number;
   name: string;
-  kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart';
+  kind: 'pixel' | 'group' | 'adjustment' | 'fill' | 'smart' | 'shape';
+  /** Shape layers: the path, live-shape parameters, fill and stroke, for Properties and the tools. */
+  shape?: { path: Path; live?: LiveShape; fill: FillContentSummary | null; stroke: ShapeStrokeSummary | null };
+  /** The layer's vector mask path, when it has one. */
+  vectorMask?: { path: Path; enabled: boolean };
   /** The layer style, when the layer has one. */
   effects?: LayerEffects;
   /** Advanced blending: channels, knockout, Blend If (Layer Style ▸ Blending Options). */
@@ -98,6 +105,14 @@ export interface SmartSummary {
   filters: SmartFilterSummary[];
 }
 
+export interface ShapeStrokeSummary {
+  enabled: boolean;
+  style: StrokeStyle;
+  content: FillContentSummary;
+  opacity: number;
+  blendMode: string;
+}
+
 export interface DocSummary {
   name: string;
   width: number;
@@ -112,6 +127,8 @@ export interface DocSummary {
   /** The Paths panel: saved paths and the Work Path, and the one selected. */
   paths: { id: number; name: string; work: boolean; path: Path }[];
   activePathId: number | null;
+  /** The active layer's own path (shape outline or vector mask), which the Paths panel lists first. */
+  layerPath: { kind: 'shape' | 'mask'; name: string; path: Path } | null;
   /** The smart object whose FILTER mask is the edit target. */
   filterMaskTarget: number | null;
   /** Set while a smart object's contents are open: the documents above them, and whether they changed since saved. */
@@ -245,7 +262,17 @@ export type ToEngine =
   | { t: 'previewLayerStyle'; id: number; effects: LayerEffects | null; props?: LayerStyleProps; globalLight?: GlobalLight }
   | { t: 'styleCommand'; cmd: StyleCommand; amount?: number }
   /** The active vector tool (null: none), and its options-bar settings. */
-  | { t: 'setVectorTool'; tool: VectorToolId | null; options?: Partial<VectorOptions> }
+  | { t: 'setVectorTool'; tool: VectorToolId | ShapeToolId | null; options?: Partial<VectorOptions> }
+  | { t: 'setShapeOptions'; options: Partial<ShapeOptions> }
+  | { t: 'vectorMaskCommand'; cmd: VectorMaskCommand }
+  /** Properties for a shape layer; non-final edits show without a history step. */
+  | { t: 'setShape'; id: number; live?: LiveShape; fill?: FillSummary | null; stroke?: ShapeStrokeSummary | null; final: boolean }
+  /** Custom shapes: the set (answered with `customShapes`), and a .csh file added to it. */
+  | { t: 'requestCustomShapes' }
+  | { t: 'defineCustomShape'; name: string }
+  | { t: 'combineShapes'; op: 'add' | 'subtract' | 'intersect' | 'exclude' | 'merge' }
+  | { t: 'arrangePath'; cmd: PathArrange }
+  | { t: 'loadCustomShapes'; buffer: ArrayBuffer }
   | { t: 'vectorPointer'; phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; alt: boolean; ctrl: boolean; clicks: number }
   | { t: 'vectorKey'; key: string }
   | ({ t: 'pathCommand' } & PathCommand)
@@ -359,6 +386,7 @@ export type FromEngine =
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
   | { t: 'styles'; list: StylePreset[] }
+  | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }
   | { t: 'filterBox'; seq: number; before: Uint8Array; after: Uint8Array; width: number; height: number; rect: { x0: number; y0: number; x1: number; y1: number } }
   | ({ t: 'probe'; tag?: string } & ProbeReply)
   | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }
@@ -375,3 +403,6 @@ export type FromEngine =
   | { t: 'thumbnail'; pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }
   | { t: 'recovery'; name: string; savedAt: number; width: number; height: number }
   | { t: 'noRecovery' };
+
+/** A fill as the UI sees it: patterns by id (their pixels stay in the engine). */
+export type FillContentSummary = FillSummary;

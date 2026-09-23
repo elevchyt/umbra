@@ -8,6 +8,7 @@ import { STYLE_ITEMS, type StyleKey } from '../fx/LayerStyleDialog';
 import { MENUS } from '../menus/menus';
 import { StylesPanel } from '../fx/StylesPanel';
 import { PathsPanel } from '../paths/PathsPanel';
+import { pathSvg } from '../workspace/ShapeOptions';
 import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
@@ -219,7 +220,7 @@ function LayersPanel() {
                   onDblClick={() => {
                     // Photoshop opens an adjustment layer's settings from its thumbnail, and a
                     // smart object's contents.
-                    if (l.kind === 'adjustment' || l.kind === 'fill') store.openPanel('properties');
+                    if (l.kind === 'adjustment' || l.kind === 'fill' || l.kind === 'shape') store.openPanel('properties');
                     if (l.kind === 'smart') store.engine?.({ t: 'editContents' });
                   }}
                 >
@@ -234,6 +235,19 @@ function LayersPanel() {
                   </Show>
                   <Show when={l.kind === 'smart'}>
                     <span class="layer-smart-badge" title={`Smart object — ${l.smart?.sourceName ?? ''}`} />
+                  </Show>
+                  <Show when={l.kind === 'shape' && l.shape}>
+                    {(sh) => (
+                      <svg class="layer-shape-thumb" viewBox="0 0 24 24" width="24" height="24">
+                        <path
+                          d={pathSvg(sh().path, 24)}
+                          fill-rule="evenodd"
+                          fill={sh().fill ? svgPaint(sh().fill!) : 'none'}
+                          stroke={sh().stroke?.enabled ? svgPaint(sh().stroke!.content) : sh().fill ? 'none' : 'currentColor'}
+                          stroke-width="1"
+                        />
+                      </svg>
+                    )}
                   </Show>
                 </div>
 
@@ -256,6 +270,30 @@ function LayersPanel() {
                       store.engine?.({ t: 'setMaskTarget', id: l.id, mask: true });
                     }}
                   />
+                </Show>
+
+                <Show when={l.vectorMask}>
+                  {(vm) => (
+                    <div
+                      class="layer-mask-thumb vector"
+                      classList={{ disabled: !vm().enabled }}
+                      title={vm().enabled ? 'Vector mask — click to edit its path, Shift-click to disable' : 'Vector mask — disabled (Shift-click to enable)'}
+                      onClick={(e) => {
+                        if (e.shiftKey) {
+                          e.stopPropagation();
+                          store.engine?.({ t: 'selectLayer', id: l.id });
+                          store.engine?.({ t: 'vectorMaskCommand', cmd: 'toggle' });
+                          return;
+                        }
+                        // The row selects the layer; clearing the path selection targets its vector mask.
+                        store.engine?.({ t: 'pathCommand', cmd: 'select' });
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path d={pathSvg(vm().path, 24)} fill-rule="evenodd" />
+                      </svg>
+                    </div>
+                  )}
                 </Show>
 
                 <Show
@@ -880,11 +918,16 @@ function PropertiesPanel() {
     return l && ((l.kind === 'adjustment' && l.adjustment) || (l.kind === 'fill' && l.fillContent)) ? l : null;
   };
   const activeKind = createMemo(() => activeAdjustment()?.kind);
+  const shapeId = createMemo(() => {
+    const doc = d();
+    const l = doc?.layers.find((r) => r.id === doc.activeLayerIds[0]);
+    return l?.kind === 'shape' ? l.id : undefined;
+  });
   // Keyed on the layer ID, not the layer: every document summary is a new object, and keying
   // on it re-mounted the editor on each one — replacing the slider being dragged.
   const adjustmentId = createMemo(() => activeAdjustment()?.id);
   return (
-    <Show when={adjustmentId()} keyed fallback={<DocumentProperties />}>
+    <Show when={adjustmentId()} keyed fallback={<Show when={shapeId()} keyed fallback={<DocumentProperties />}>{(id) => <ShapeProperties id={id} />}</Show>}>
       {(id) => (activeKind() === 'fill' ? <FillProperties id={id} /> : <AdjustmentProperties id={id} />)}
     </Show>
   );
@@ -984,6 +1027,189 @@ function AdjustmentProperties(props: { id: number }) {
       </Show>
     </div>
   );
+}
+
+type LiveShapeSummary = NonNullable<NonNullable<ReturnType<typeof shapeOf>>['live']>;
+function shapeOf(id: number) {
+  return store.doc()?.layers.find((l) => l.id === id)?.shape;
+}
+
+/** The box a live shape occupies, and the shape moved/resized to a new box. */
+function liveBox(s: LiveShapeSummary): { x: number; y: number; w: number; h: number } {
+  switch (s.kind) {
+    case 'rect':
+    case 'triangle':
+      return { x: s.x, y: s.y, w: s.w, h: s.h };
+    case 'ellipse':
+      return { x: s.cx - s.rx, y: s.cy - s.ry, w: s.rx * 2, h: s.ry * 2 };
+    case 'polygon':
+      return { x: s.cx - s.r, y: s.cy - s.r, w: s.r * 2, h: s.r * 2 };
+    case 'line':
+      return { x: Math.min(s.x0, s.x1), y: Math.min(s.y0, s.y1), w: Math.abs(s.x1 - s.x0), h: Math.abs(s.y1 - s.y0) };
+  }
+}
+function withBox(s: LiveShapeSummary, b: { x: number; y: number; w: number; h: number }): LiveShapeSummary {
+  switch (s.kind) {
+    case 'rect':
+    case 'triangle':
+      return { ...s, ...b };
+    case 'ellipse':
+      return { ...s, cx: b.x + b.w / 2, cy: b.y + b.h / 2, rx: b.w / 2, ry: b.h / 2 };
+    case 'polygon': {
+      const r = Math.max(0.5, Math.min(b.w, b.h) / 2);
+      return { ...s, cx: b.x + b.w / 2, cy: b.y + b.h / 2, r };
+    }
+    case 'line': {
+      const o = liveBox(s);
+      const sx = o.w ? b.w / o.w : 1;
+      const sy = o.h ? b.h / o.h : 1;
+      return { ...s, x0: b.x + (s.x0 - o.x) * sx, y0: b.y + (s.y0 - o.y) * sy, x1: b.x + (s.x1 - o.x) * sx, y1: b.y + (s.y1 - o.y) * sy };
+    }
+  }
+}
+
+const SHAPE_LABEL: Record<LiveShapeSummary['kind'], string> = { rect: 'Rectangle', ellipse: 'Ellipse', triangle: 'Triangle', polygon: 'Polygon', line: 'Line' };
+
+/**
+ * A shape layer in Properties: the live shape's box and its own parameters (corner radii,
+ * sides, star ratio, line weight), then fill and stroke. Colour wells commit when the
+ * picking pauses, so a drag through the colour picker is one history step.
+ */
+function ShapeProperties(props: { id: number }) {
+  const send = (m: unknown) => store.engine?.(m as never);
+  const sh = () => shapeOf(props.id);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const put = (patch: Record<string, unknown>, final = true) => {
+    clearTimeout(timer);
+    send({ t: 'setShape', id: props.id, ...patch, final });
+  };
+  const putSoon = (patch: Record<string, unknown>) => {
+    put(patch, false);
+    timer = setTimeout(() => put(patch, true), 400);
+  };
+  onCleanup(() => clearTimeout(timer));
+  const live = () => sh()?.live;
+  const setLive = (next: LiveShapeSummary) => put({ live: next });
+  const box = () => (live() ? liveBox(live()!) : null);
+  const setBox = (k: 'x' | 'y' | 'w' | 'h', v: number) => {
+    const l = live();
+    const b = box();
+    if (l && b) setLive(withBox(l, { ...b, [k]: k === 'w' || k === 'h' ? Math.max(0.5, v) : v }));
+  };
+  const fillRgb = (): [number, number, number] => (sh()?.fill?.type === 'solid' ? (sh()!.fill as { color: [number, number, number] }).color : [0, 0, 0]);
+  const stroke = () => sh()?.stroke ?? null;
+  const strokeRgb = (): [number, number, number] => (stroke()?.content.type === 'solid' ? (stroke()!.content as { color: [number, number, number] }).color : [0, 0, 0]);
+  const defaultStroke = () => ({ enabled: true, style: { width: 3, align: 'center', cap: 'butt', join: 'miter', miterLimit: 4, dashes: [], dashOffset: 0 }, content: { type: 'solid', color: [0, 0, 0] }, opacity: 1, blendMode: 'normal' });
+  const setStroke = (patch: Record<string, unknown>, soon = false) => {
+    const next = { ...(stroke() ?? defaultStroke()), ...patch };
+    if (soon) putSoon({ stroke: next });
+    else put({ stroke: next });
+  };
+  const hex = (c: [number, number, number]) => '#' + c.map((v) => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+  const unhex = (h: string): [number, number, number] => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 16) / 255, parseInt(h.slice(5, 7), 16) / 255];
+  return (
+    <div class="properties-panel">
+      <Show when={sh()}>
+        <div class="properties-head adjust-head">
+          <Icon name={live() ? (live()!.kind === 'rect' ? 'rectangle' : live()!.kind) as never : 'customShape'} size={15} />
+          <span>{live() ? `Live ${SHAPE_LABEL[live()!.kind]} Properties` : 'Shape Properties'}</span>
+        </div>
+        <div class="properties-adjust shape-props">
+          <Show when={box()}>
+            {(b) => (
+              <div class="shape-props-grid">
+                <NumberField label="W" value={b().w} min={0.5} max={30000} precision={1} suffix="px" width={56} onChange={(v) => setBox('w', v)} />
+                <NumberField label="H" value={b().h} min={0.5} max={30000} precision={1} suffix="px" width={56} onChange={(v) => setBox('h', v)} />
+                <NumberField label="X" value={b().x} min={-30000} max={30000} precision={1} suffix="px" width={56} onChange={(v) => setBox('x', v)} />
+                <NumberField label="Y" value={b().y} min={-30000} max={30000} precision={1} suffix="px" width={56} onChange={(v) => setBox('y', v)} />
+              </div>
+            )}
+          </Show>
+          <Show when={live()?.kind === 'rect' && (live() as Extract<LiveShapeSummary, { kind: 'rect' }>)}>
+            {(r) => (
+              <div class="shape-props-grid">
+                <For each={['Top left', 'Top right', 'Bottom right', 'Bottom left']}>
+                  {(label, i) => (
+                    <NumberField
+                      label={label.split(' ').map((w) => w[0]!.toUpperCase()).join('')}
+                      title={`${label} corner radius`}
+                      value={r().radii[i()]!}
+                      min={0}
+                      max={10000}
+                      precision={1}
+                      suffix="px"
+                      width={56}
+                      onChange={(v) => {
+                        const radii = [...r().radii] as [number, number, number, number];
+                        radii[i()] = v;
+                        setLive({ ...r(), radii });
+                      }}
+                    />
+                  )}
+                </For>
+              </div>
+            )}
+          </Show>
+          <Show when={live()?.kind === 'polygon' && (live() as Extract<LiveShapeSummary, { kind: 'polygon' }>)}>
+            {(p) => (
+              <div class="shape-props-grid">
+                <NumberField label="Sides" value={p().sides} min={3} max={100} width={44} onChange={(v) => setLive({ ...p(), sides: v })} />
+                <NumberField label="Star" title="Star ratio" value={100 - p().star} min={1} max={100} suffix="%" width={48} onChange={(v) => setLive({ ...p(), star: 100 - v })} />
+                <NumberField label="Radius" title="Corner radius" value={p().radius} min={0} max={10000} suffix="px" width={48} onChange={(v) => setLive({ ...p(), radius: v })} />
+                <NumberField label="Angle" value={p().angle} min={-360} max={360} suffix="°" width={48} onChange={(v) => setLive({ ...p(), angle: v })} />
+              </div>
+            )}
+          </Show>
+          <Show when={live()?.kind === 'line' && (live() as Extract<LiveShapeSummary, { kind: 'line' }>)}>
+            {(l) => (
+              <div class="shape-props-grid">
+                <NumberField label="Weight" value={l().weight} min={0.1} max={1000} precision={1} suffix="px" width={52} onChange={(v) => setLive({ ...l(), weight: v })} />
+                <Checkbox checked={l().arrowStart} label="Arrow start" onChange={(v) => setLive({ ...l(), arrowStart: v })} />
+                <Checkbox checked={l().arrowEnd} label="Arrow end" onChange={(v) => setLive({ ...l(), arrowEnd: v })} />
+              </div>
+            )}
+          </Show>
+          <Show when={live() && live()!.kind !== 'polygon' && live()!.kind !== 'line' && (live() as Extract<LiveShapeSummary, { angle: number }>)}>
+            {(a) => <NumberField label="Angle" value={a().angle} min={-360} max={360} precision={1} suffix="°" width={52} onChange={(v) => setLive({ ...a(), angle: v } as LiveShapeSummary)} />}
+          </Show>
+          <div class="shape-props-row">
+            <Checkbox checked={!!sh()?.fill} label="Fill" onChange={(v) => put({ fill: v ? { type: 'solid', color: fillRgb() } : null })} />
+            <Show when={sh()?.fill?.type === 'solid'}>
+              <input type="color" class="fx-swatch" title="Fill colour" value={hex(fillRgb())} onInput={(e) => putSoon({ fill: { type: 'solid', color: unhex(e.currentTarget.value) } })} />
+            </Show>
+          </div>
+          <div class="shape-props-row">
+            <Checkbox checked={!!stroke()?.enabled} label="Stroke" onChange={(v) => (v ? setStroke({ enabled: true }) : put({ stroke: null }))} />
+            <Show when={stroke()?.enabled}>
+              <Show when={stroke()!.content.type === 'solid'}>
+                <input type="color" class="fx-swatch" title="Stroke colour" value={hex(strokeRgb())} onInput={(e) => setStroke({ content: { type: 'solid', color: unhex(e.currentTarget.value) } }, true)} />
+              </Show>
+              <NumberField value={stroke()!.style.width} min={0.1} max={1000} step={0.5} precision={1} suffix="px" width={52} onChange={(v) => setStroke({ style: { ...stroke()!.style, width: v } })} />
+              <Select
+                value={stroke()!.style.align}
+                width={70}
+                title="Align"
+                options={[
+                  { value: 'inside', label: 'Inside' },
+                  { value: 'center', label: 'Center' },
+                  { value: 'outside', label: 'Outside' },
+                ]}
+                onChange={(v) => setStroke({ style: { ...stroke()!.style, align: v } })}
+              />
+            </Show>
+          </div>
+          <Show when={!live()}>
+            <div class="dim adjustments-note">Not a live shape: edit its path with the Direct Selection tool.</div>
+          </Show>
+        </div>
+      </Show>
+    </div>
+  );
+}
+
+/** An SVG paint for a shape's fill or stroke thumbnail: its colour, or grey for gradients and patterns. */
+function svgPaint(c: FillSummary): string {
+  return c.type === 'solid' ? `rgb(${c.color.map((v) => Math.round(v * 255)).join(',')})` : '#888';
 }
 
 /** CSS background standing in for a fill layer's content, for its Layers-panel thumbnail. */

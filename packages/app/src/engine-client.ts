@@ -34,6 +34,7 @@ export interface EngineClientEvents {
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
+  onCustomShapes?: (list: { id: string; name: string; path: import('@umbra/engine').Path }[], error?: string) => void;
   onParity?: (pass: boolean, text: string) => void;
   onContextLost?: () => void;
   onContextRestored?: () => void;
@@ -141,6 +142,9 @@ export class EngineClient {
         break;
       case 'styles':
         this.events.onStyles?.(msg.list);
+        break;
+      case 'customShapes':
+        this.events.onCustomShapes?.(msg.list, msg.error);
         break;
       case 'histogram':
         this.events.onHistogram?.(msg);

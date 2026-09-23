@@ -5,7 +5,7 @@
  * subtree and tile. That is what lets history keep 50 states cheaply and what makes these
  * trivially testable (spec 03 §6).
  */
-import { expandEffects } from '../effects-layers.js';
+import { prepareLayers } from '../effects-layers.js';
 import type { GlobalLight } from '@umbra/kernels/effects/types';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { compositeDocument } from '@umbra/kernels/composite';
@@ -221,7 +221,7 @@ export function rasterize(layers: readonly Layer[], rect: Rect, globalLight?: Gl
   // Fill layers are defined relative to the canvas, which is what `rect` is.
   const size = { width: rect.x1, height: rect.y1 };
   // Merging keeps what the effects look like: they are part of the result.
-  const composite = expandEffects(layers, { ...size, globalLight }).map((l) => toCompositeLayer(l, size));
+  const composite = prepareLayers(layers, { ...size, globalLight }).map((l) => toCompositeLayer(l, size));
 
   for (let y = rect.y0; y < rect.y1; y++) {
     for (let x = rect.x0; x < rect.x1; x++) {

@@ -140,3 +140,21 @@ describe('fitting and tracing', () => {
     expect(Math.abs(sum(again) - sum(disc)) / sum(disc)).toBeLessThan(0.01);
   });
 });
+
+describe('traced paths keep their holes', () => {
+  it('a ring selection traces to a ring path', () => {
+    const W = 60;
+    const cov = new Float32Array(W * W);
+    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
+      const d = Math.hypot(x + 0.5 - 30, y + 0.5 - 30);
+      cov[y * W + x] = d < 25 && d > 12 ? 1 : 0;
+    }
+    const path = coverageToPath(cov, W, W, 0.5);
+    const back = rasterizePath(path, { x0: 0, y0: 0, x1: W, y1: W });
+    expect(back[30 * W + 30]).toBe(0);
+    expect(back[30 * W + 10]).toBeGreaterThan(0.9);
+    const a = cov.reduce((s, v) => s + v, 0);
+    const b = back.reduce((s, v) => s + v, 0);
+    expect(Math.abs(a - b) / a).toBeLessThan(0.03);
+  });
+});

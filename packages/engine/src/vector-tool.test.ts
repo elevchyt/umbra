@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { liveShapePath } from '@umbra/kernels/vector/shapes';
+import { rasterizePath } from '@umbra/kernels/vector/raster';
 import type { Path } from '@umbra/kernels/vector/path';
-import { VectorTool, type VectorPointer } from './vector-tool.js';
+import { VectorTool, type VectorPointer, arrangeSubpaths, mergeComponents } from './vector-tool.js';
 
 const ev = (phase: VectorPointer['phase'], x: number, y: number, over: Partial<VectorPointer> = {}): VectorPointer => ({ phase, x, y, shift: false, alt: false, ctrl: false, clicks: 1, ...over });
 
@@ -158,5 +160,41 @@ describe('Freeform and Curvature Pens', () => {
     r = gesture(t, r.path, [[70, 10]]);
     const cornerKnot = r.path!.subpaths[0]!.knots[2]!;
     expect(cornerKnot.smooth).toBe(false);
+  });
+});
+
+describe('path alignment, arrangement and merging', () => {
+  const sq = (x: number, y: number, s: number, op: 'add' | 'subtract' = 'add') => ({ ...liveShapePath({ kind: 'rect', x, y, w: s, h: s, radii: [0, 0, 0, 0], angle: 0 }).subpaths[0]!, op });
+  const path = { subpaths: [sq(0, 0, 10), sq(30, 5, 10), sq(50, 20, 20)] };
+  const canvas = { width: 100, height: 100 };
+
+  it('aligns the selection to its bounds, and one component to the canvas', () => {
+    const r = arrangeSubpaths(path, [0, 2], 'alignRight', canvas);
+    expect(r.path.subpaths[0]!.knots[1]!.anchor.x).toBeCloseTo(70, 6);
+    expect(r.path.subpaths[1]).toBe(path.subpaths[1]);
+    const one = arrangeSubpaths(path, [1], 'alignVCenter', canvas);
+    expect(one.path.subpaths[1]!.knots[0]!.anchor.y).toBeCloseTo(45, 6);
+    const d = arrangeSubpaths(path, [0, 1, 2], 'distributeH', canvas);
+    // Centres 5 … 60: the middle one moves to 32.5.
+    expect(d.path.subpaths[1]!.knots[0]!.anchor.x).toBeCloseTo(27.5, 6);
+  });
+
+  it('restacks, keeping the selection', () => {
+    const f = arrangeSubpaths(path, [0], 'front', canvas);
+    expect(f.path.subpaths[2]).toBe(path.subpaths[0]);
+    expect(f.selected).toEqual([2]);
+    const b = arrangeSubpaths(path, [2], 'backward', canvas);
+    expect(b.path.subpaths[1]).toBe(path.subpaths[2]);
+    expect(b.selected).toEqual([1]);
+  });
+
+  it('merging components keeps the filled area', () => {
+    const p = { subpaths: [sq(10, 10, 40), sq(20, 20, 10, 'subtract'), sq(40, 40, 30)] };
+    const rect = { x0: 0, y0: 0, x1: 80, y1: 80 };
+    const a = rasterizePath(p, rect).reduce((s, v) => s + v, 0);
+    const merged = mergeComponents(p);
+    expect(merged.subpaths.every((sp, i) => sp.op === (i === 0 ? 'add' : 'exclude'))).toBe(true);
+    const b = rasterizePath(merged, rect).reduce((s, v) => s + v, 0);
+    expect(Math.abs(a - b) / a).toBeLessThan(0.01);
   });
 });

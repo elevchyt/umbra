@@ -13,7 +13,9 @@ import { rectUnion, rectIsEmpty, type Rect } from '@umbra/core/geom';
 import { Plane } from '../tiles/plane.js';
 import { MipPlane } from '../tiles/mip.js';
 import { tightBounds } from '../psd-save.js';
-import { walkLayers, type Doc, type Layer, type SmartObjectLayer } from '../document.js';
+import { walkLayers, type Doc, type Layer, type ShapeLayer, type SmartObjectLayer } from '../document.js';
+import { retransformShape } from '../shape-layers.js';
+import { transformPath } from '@umbra/kernels/vector/path';
 
 export type Resample =
   | 'nearest'
@@ -186,11 +188,12 @@ export function resamplePlane(plane: Plane, sx: number, sy: number, method: Resa
  * geometric commands compose their matrix into the object's transform and re-render it, so
  * the contents are never resampled twice.
  */
-export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane, smart?: (l: SmartObjectLayer) => Layer): Layer[] {
+export function mapLayers(layers: readonly Layer[], fn: (p: Plane) => Plane, smart?: (l: SmartObjectLayer) => Layer, shape?: (l: ShapeLayer) => Layer): Layer[] {
   return layers.map((l) => {
     if (l.kind === 'smart' && smart) return smart(l);
+    if (l.kind === 'shape' && shape) return shape(l);
     const mask = l.mask ? { ...l.mask, plane: new MipPlane(fn(l.mask.plane.base)) } : l.mask;
-    if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn, smart) };
+    if (l.kind === 'group') return { ...l, mask, children: mapLayers(l.children, fn, smart, shape) };
     if (l.kind === 'adjustment' || l.kind === 'fill') return { ...l, mask };
     if (l.kind === 'smart') {
       const filterMask = l.filterMask ? { ...l.filterMask, plane: new MipPlane(fn(l.filterMask.plane.base)) } : l.filterMask;
@@ -207,9 +210,17 @@ function scaleStyles(layers: readonly Layer[], k: number): Layer[] {
   });
 }
 
+/** Vector masks move with their layers: their paths transform exactly. */
+export function transformVectorMasks(layers: readonly Layer[], matrix: Mat): Layer[] {
+  return layers.map((l) => {
+    const vm = l.vectorMask && l.kind !== 'shape' ? { vectorMask: { ...l.vectorMask, path: transformPath(l.vectorMask.path, matrix) } } : {};
+    return l.kind === 'group' ? { ...l, ...vm, children: transformVectorMasks(l.children, matrix) } : { ...l, ...vm };
+  });
+}
+
 /** mapLayers for a geometric change: smart objects take `matrix` into their transform. */
 function mapGeometry(layers: readonly Layer[], fn: (p: Plane) => Plane, matrix: Mat, size: { width: number; height: number }): Layer[] {
-  return mapLayers(layers, fn, (l) => retransform(l, matrix, size, fn));
+  return transformVectorMasks(mapLayers(layers, fn, (l) => retransform(l, matrix, size, fn), (l) => retransformShape(l, matrix, size, fn)), matrix);
 }
 
 export function imageSize(doc: Doc, width: number, height: number, method: Resample = 'bicubic'): Doc {
@@ -332,7 +343,7 @@ function clipPlane(plane: Plane, clip: Rect): Plane {
 export function revealAll(doc: Doc): Doc {
   let bounds: Rect = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };
   for (const { layer } of walkLayers(doc.layers)) {
-    if (layer.kind === 'pixel') bounds = rectUnion(bounds, tightBounds(layer.plane.base));
+    if (layer.kind === 'pixel' || layer.kind === 'shape') bounds = rectUnion(bounds, tightBounds(layer.plane.base));
   }
   const dx = -bounds.x0;
   const dy = -bounds.y0;
