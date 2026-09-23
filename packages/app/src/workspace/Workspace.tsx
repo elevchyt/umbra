@@ -191,8 +191,10 @@ export function Workspace() {
   createEffect(() => {
     const req = store.pickRequest();
     const ready = store.engineReady();
+    const modal = !!store.dialog();
     if (!client || !ready) return;
     client.pickHandler = req ? (rgb) => req.onPick(rgb) : null;
+    client.modal = modal;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.

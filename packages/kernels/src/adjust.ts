@@ -150,7 +150,18 @@ export const NO_CMYK_SHIFT: CmykShift = { c: 0, m: 0, y: 0, k: 0 };
 export type Adjustment =
   | { kind: 'brightnessContrast'; brightness: number; contrast: number; legacy: boolean }
   | { kind: 'levels'; master: LevelsChannel; r: LevelsChannel; g: LevelsChannel; b: LevelsChannel }
-  | { kind: 'curves'; master: CurvePoint[]; r: CurvePoint[]; g: CurvePoint[]; b: CurvePoint[] }
+  | {
+      kind: 'curves';
+      master: CurvePoint[];
+      r: CurvePoint[];
+      g: CurvePoint[];
+      b: CurvePoint[];
+      /**
+       * Pencil mode: a channel drawn freehand is a 256-entry map (0…255) that replaces its
+       * points. Absent, or absent for a channel, means that channel uses its points.
+       */
+      maps?: Partial<Record<'master' | 'r' | 'g' | 'b', number[]>>;
+    }
   | { kind: 'exposure'; exposure: number; offset: number; gamma: number }
   | { kind: 'invert' }
   | { kind: 'posterize'; levels: number }
@@ -319,12 +330,16 @@ export function compile(adj: Adjustment): Applier {
       };
     }
     case 'curves': {
-      const master = curveToLut(adj.master);
+      const lut = (ch: 'master' | 'r' | 'g' | 'b') => {
+        const map = adj.maps?.[ch];
+        return map && map.length === 256 ? Uint8Array.from(map, (v) => clampByte(v)) : curveToLut(adj[ch]);
+      };
+      const master = lut('master');
       return {
         shape: 'lut',
-        r: through(curveToLut(adj.r), master),
-        g: through(curveToLut(adj.g), master),
-        b: through(curveToLut(adj.b), master),
+        r: through(lut('r'), master),
+        g: through(lut('g'), master),
+        b: through(lut('b'), master),
       };
     }
     case 'exposure':

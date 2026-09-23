@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import { DEFAULT_BRUSH, type DocSummary, type EngineStats, type PatternSummary } from '@umbra/engine';
+import { DEFAULT_BRUSH, DEFAULT_AUTO_OPTIONS, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
 
@@ -152,6 +152,13 @@ const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
  * reaching the tool. `id` lets the dialog show which of its droppers is armed.
  */
 const [pickRequest, setPickRequest] = createSignal<{ id: string; onPick: (rgb: [number, number, number]) => void } | null>(null);
+
+/** The last settings OK'd in each adjustment dialog this session — the presets' "Last Used". */
+// A plain signal, not a store: these values are posted to the worker, and a store proxy cannot
+// be structured-cloned.
+const [lastAdjustments, setLastAdjustments] = createSignal<Partial<Record<string, Adjustment>>>({});
+/** Auto Color Correction Options, shared by Levels, Curves and Image ▸ Auto *. */
+const [autoOptions, setAutoOptions] = createSignal<AutoOptions>(DEFAULT_AUTO_OPTIONS);
 
 /** 3-D LUTs registered in the worker, for Color Lookup. */
 const [luts, setLuts] = createSignal<{ id: string; name: string; size: number }[]>([]);
@@ -325,6 +332,10 @@ export const store = {
   setLuts,
   pickRequest,
   setPickRequest,
+  lastAdjustments,
+  setLastAdjustment: (a: Adjustment) => setLastAdjustments((prev) => ({ ...prev, [a.kind]: a })),
+  autoOptions,
+  setAutoOptions,
   get engine() {
     return engine();
   },

@@ -32,6 +32,7 @@ export {
   type HueRange,
   HUE_BANDS,
   defaultHueBands,
+  hueBandWeight,
   type HueBand,
   type HueBandName,
   type LevelsChannel,
@@ -42,3 +43,15 @@ export {
 export { evaluateCurve, normaliseCurve, type CurvePoint } from '@umbra/kernels/curve';
 export { FILL_LABEL, type FillType } from '@umbra/kernels/fill';
 export { SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment } from '@umbra/kernels/spatial';
+export {
+  autoLevelsWith,
+  DEFAULT_AUTO_OPTIONS,
+  levelsBlackPoint,
+  levelsGrayPoint,
+  levelsWhitePoint,
+  curvesEyedropper,
+  levelsToCurves,
+  mapToPoints,
+  type AutoOptions,
+  type AutoAlgorithm,
+} from '@umbra/kernels/auto';

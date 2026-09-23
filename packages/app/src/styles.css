@@ -1028,3 +1028,5 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .dropper .swatch { width: 12px; height: 12px; border: 1px solid var(--border-light); }
 .dropper-swatch { display: inline-block; width: 26px; height: 20px; border: 1px solid var(--border-dark); border-radius: var(--radius); }
 .replace-mask { display: block; max-width: 100%; border: 1px solid var(--border-dark); image-rendering: pixelated; }
+.auto-options { display: flex; flex-direction: column; gap: 6px; padding: 6px; border: 1px solid var(--border-dark); background: var(--panel-sunken); }
+.curves-graph.pencil { cursor: crosshair; }

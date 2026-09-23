@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { autoColor, autoContrast, autoTone, clipRange, equalizeLut } from './auto.js';
-import { applyToRgb } from './adjust.js';
+import {
+  autoColor,
+  autoContrast,
+  autoLevelsWith,
+  autoTone,
+  clipRange,
+  curvesEyedropper,
+  equalizeLut,
+  levelsBlackPoint,
+  levelsGrayPoint,
+  levelsToCurves,
+  levelsWhitePoint,
+  mapToPoints,
+} from './auto.js';
+import { applyToRgb, defaultAdjustment, type Adjustment } from './adjust.js';
 
 const hist = (fill: (i: number) => number) => Float64Array.from({ length: 256 }, (_, i) => fill(i));
 const band = (lo: number, hi: number) => hist((i) => (i >= lo && i <= hi ? 100 : 0));
@@ -51,5 +64,62 @@ describe('equalize', () => {
   it('leaves an already-flat histogram nearly unchanged', () => {
     const lut = equalizeLut({ r: [], g: [], b: [], lum: hist(() => 10) });
     for (let i = 0; i < 256; i++) expect(Math.abs(lut[i]! - i)).toBeLessThanOrEqual(1);
+  });
+});
+
+describe('Levels and Curves eyedroppers', () => {
+  const levels = () => defaultAdjustment('levels') as Extract<Adjustment, { kind: 'levels' }>;
+  const curves = () => defaultAdjustment('curves') as Extract<Adjustment, { kind: 'curves' }>;
+
+  it('black and white points send the sampled colour to black and white', () => {
+    const a = levelsWhitePoint(levelsBlackPoint(levels(), [30, 40, 20]), [220, 230, 200]);
+    expect(applyToRgb(a, 30, 40, 20)).toEqual([0, 0, 0]);
+    expect(applyToRgb(a, 220, 230, 200)).toEqual([255, 255, 255]);
+    const c = curvesEyedropper(curvesEyedropper(curves(), [30, 40, 20], 'black'), [220, 230, 200], 'white');
+    expect(applyToRgb(c, 30, 40, 20)).toEqual([0, 0, 0]);
+    expect(applyToRgb(c, 220, 230, 200)).toEqual([255, 255, 255]);
+  });
+
+  it('the grey point neutralises the sampled colour and keeps its brightness', () => {
+    for (const [r, g, b] of [[150, 120, 90], [60, 90, 140]] as const) {
+      for (const a of [levelsGrayPoint(levels(), [r, g, b]), curvesEyedropper(curves(), [r, g, b], 'gray')]) {
+        const out = applyToRgb(a, r, g, b);
+        expect(Math.max(...out) - Math.min(...out)).toBeLessThanOrEqual(2);
+        expect(Math.abs(out[0]! - (r + g + b) / 3)).toBeLessThan(4);
+      }
+    }
+  });
+});
+
+describe('Auto options and conversions', () => {
+  const warm = { r: band(100, 250), g: band(60, 200), b: band(20, 160), lum: band(60, 200) };
+
+  it('Monochromatic keeps the cast; Per Channel removes it', () => {
+    const mono = autoLevelsWith(warm, { algorithm: 'monochromatic', snapNeutral: false, shadowClip: 0.1, highlightClip: 0.1 });
+    const per = autoLevelsWith(warm, { algorithm: 'perChannel', snapNeutral: false, shadowClip: 0.1, highlightClip: 0.1 });
+    const [mr, , mb] = applyToRgb(mono, 175, 130, 90);
+    const [pr, , pb] = applyToRgb(per, 175, 130, 90);
+    expect(mr - mb).toBeGreaterThan(pr - pb);
+  });
+
+  it('a Levels setting and its Curves translation agree', () => {
+    const l = autoLevelsWith(warm, { algorithm: 'perChannel', snapNeutral: true, shadowClip: 0.1, highlightClip: 0.1 });
+    const c = levelsToCurves(l);
+    for (const px of [[120, 100, 60], [200, 150, 100], [110, 70, 30]] as const) {
+      const a = applyToRgb(l, ...px);
+      const b = applyToRgb(c, ...px);
+      // A spline through three points is not a gamma curve; they agree at the ends and middle.
+      a.forEach((v, i) => expect(Math.abs(v - b[i]!)).toBeLessThan(14));
+    }
+  });
+
+  it('a pencil map replaces the channel\'s points, and reduces to 16 points for saving', () => {
+    const map = Array.from({ length: 256 }, (_, i) => 255 - i);
+    const c: Adjustment = { ...(defaultAdjustment('curves') as Extract<Adjustment, { kind: 'curves' }>), maps: { master: map } };
+    expect(applyToRgb(c, 10, 128, 250)).toEqual([245, 127, 5]);
+    const pts = mapToPoints(map);
+    expect(pts.length).toBe(16);
+    expect(pts[0]).toEqual({ x: 0, y: 1 });
+    expect(pts[15]).toEqual({ x: 1, y: 0 });
   });
 });

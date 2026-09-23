@@ -24,6 +24,7 @@ import {
 import type { CurvePoint } from '@umbra/kernels/curve';
 import type { FillContent, PatternDef } from '@umbra/kernels/fill';
 import { getLut, parseLutFile, registerLut, toCube } from '@umbra/kernels/lut';
+import { mapToPoints } from '@umbra/kernels/auto';
 
 /** FNV-1a, so the same LUT file opened twice registers once. */
 function hashBytes(b: Uint8Array): string {
@@ -303,8 +304,11 @@ export function toPsdAdjustment(adj: Adjustment, source?: unknown): AgAdjustment
       return { ...base, type: 'brightness/contrast', brightness: adj.brightness, contrast: adj.contrast, useLegacy: adj.legacy } as AgAdjustment;
     case 'levels':
       return { ...base, type: 'levels', rgb: levelsTo(adj.master), red: levelsTo(adj.r), green: levelsTo(adj.g), blue: levelsTo(adj.b) } as AgAdjustment;
-    case 'curves':
-      return { ...base, type: 'curves', rgb: curveTo(adj.master), red: curveTo(adj.r), green: curveTo(adj.g), blue: curveTo(adj.b) } as AgAdjustment;
+    case 'curves': {
+      // A PSD's curves are points; a pencil-drawn channel is written as 16 samples of its map.
+      const ch = (c: 'master' | 'r' | 'g' | 'b') => curveTo(adj.maps?.[c] ? mapToPoints(adj.maps[c]!) : adj[c]);
+      return { ...base, type: 'curves', rgb: ch('master'), red: ch('r'), green: ch('g'), blue: ch('b') } as AgAdjustment;
+    }
     case 'exposure':
       return { ...base, type: 'exposure', exposure: adj.exposure, offset: adj.offset, gamma: adj.gamma } as AgAdjustment;
     case 'vibrance':

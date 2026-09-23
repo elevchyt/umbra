@@ -177,6 +177,8 @@ export class EngineClient {
    * colour here instead of reaching the active tool.
    */
   pickHandler: ((rgb: [number, number, number]) => void) | null = null;
+  /** A dialog is open: the canvas only answers an armed eyedropper, never the active tool. */
+  modal = false;
   /** True while the Crop tool is selected. */
   cropTool = false;
   private cropFrom: { x: number; y: number } | null = null;
@@ -260,6 +262,7 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      if (this.modal && !this.pickHandler) return;
       if (this.pickHandler && e.button === 0) {
         const p = toLocal(e);
         // Photoshop's adjustment eyedroppers default to a 3×3 average.

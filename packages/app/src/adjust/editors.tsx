@@ -28,6 +28,25 @@ import {
   type HueBandName,
 } from '@umbra/engine';
 import { store, type Histogram, type HistogramSource } from '../state/store';
+import {
+  autoLevelsWith,
+  curvesEyedropper,
+  levelsBlackPoint,
+  levelsGrayPoint,
+  levelsToCurves,
+  levelsWhitePoint,
+  mapToPoints,
+  defaultAdjustment,
+  hueBandWeight,
+  type AutoOptions,
+} from '@umbra/engine';
+import { Dropper } from './dropper';
+import { OnImageButton, type OnImageDrag } from './onimage';
+import { Icon } from '@umbra/ui/icons/Icon';
+import { PRESETS } from './presets';
+
+/** Distinguishes one editor's droppers from another's (dialog and Properties can both be up). */
+let editorSerial = 0;
 
 export type Change = (next: Adjustment, final: boolean) => void;
 type Of<K extends Adjustment['kind']> = Extract<Adjustment, { kind: K }>;
@@ -51,6 +70,7 @@ export function AdjustmentEditor(props: EditorProps): JSX.Element {
   const kind = createMemo(() => props.value.kind);
   return (
     <div class="adjust-editor" classList={{ compact: props.compact }}>
+      <PresetMenu value={props.value} onChange={props.onChange} />
       {(() => {
         switch (kind()) {
           case 'brightnessContrast':
@@ -90,6 +110,73 @@ export function AdjustmentEditor(props: EditorProps): JSX.Element {
     </div>
   );
 }
+
+// ---- presets ------------------------------------------------------------------------------
+
+/**
+ * The Preset menu: Default, the built-ins for this kind, "Last Used" (what OK last applied in
+ * this session), and Custom whenever the settings match none of them.
+ */
+function PresetMenu(props: { value: Adjustment; onChange: Change }) {
+  const options = createMemo(() => {
+    const kind = props.value.kind;
+    const list: { name: string; value: Adjustment }[] = [{ name: 'Default', value: defaultAdjustment(kind) }];
+    const last = store.lastAdjustments()[kind];
+    if (last) list.push({ name: 'Last Used', value: last });
+    list.push(...(PRESETS[kind] ?? []));
+    return list;
+  });
+  const current = () => {
+    const key = JSON.stringify(props.value);
+    return options().findIndex((o) => JSON.stringify(o.value) === key);
+  };
+  return (
+    <Show when={options().length > 1 || PRESETS[props.value.kind]}>
+      <Select
+        value={current()}
+        label="Preset"
+        width={170}
+        options={[
+          ...options().map((o, i) => ({ value: i, label: o.name, separatorBefore: i === (store.lastAdjustments()[props.value.kind] ? 2 : 1) })),
+          ...(current() < 0 ? [{ value: -1, label: 'Custom', separatorBefore: true }] : []),
+        ]}
+        onChange={(i) => {
+          const o = options()[i];
+          if (o) props.onChange(structuredClone(o.value), true);
+        }}
+      />
+    </Show>
+  );
+}
+
+/** Auto Color Correction Options, inline under the Auto button of Levels and Curves. */
+function AutoOptionsPanel() {
+  const o = () => store.autoOptions();
+  const set = (patch: Partial<AutoOptions>) => store.setAutoOptions({ ...o(), ...patch });
+  return (
+    <div class="auto-options">
+      <Select
+        value={o().algorithm}
+        label="Algorithm"
+        width={200}
+        options={[
+          { value: 'monochromatic', label: 'Enhance Monochromatic Contrast' },
+          { value: 'perChannel', label: 'Enhance Per Channel Contrast' },
+          { value: 'darkLight', label: 'Find Dark & Light Colors' },
+        ]}
+        onChange={(a) => set({ algorithm: a })}
+      />
+      <Checkbox checked={o().snapNeutral} label="Snap Neutral Midtones" onChange={(v) => set({ snapNeutral: v })} />
+      <div class="adjust-fields">
+        <NumberField label="Clip Shadows" value={o().shadowClip} min={0} max={9.99} step={0.01} precision={2} suffix="%" width={50} onChange={(v) => set({ shadowClip: v })} />
+        <NumberField label="Highlights" value={o().highlightClip} min={0} max={9.99} step={0.01} precision={2} suffix="%" width={50} onChange={(v) => set({ highlightClip: v })} />
+      </div>
+    </div>
+  );
+}
+
+/** The sampled colour in 8-bit units, as the eyedropper maths wants it. */
+const to8 = (rgb: readonly number[]) => rgb.map((c) => c * 255);
 
 // ---- shared controls ------------------------------------------------------------------------
 
@@ -193,6 +280,8 @@ function BrightnessContrast(props: { value: Of<'brightnessContrast'>; onChange: 
 
 function Levels(props: { value: Of<'levels'>; onChange: Change; histogram: Histogram | null }) {
   const [channel, setChannel] = createSignal<ChannelKey>('master');
+  const [showOptions, setShowOptions] = createSignal(false);
+  const id = `levels-${++editorSerial}`;
   const ch = (): LevelsChannel => props.value[channel()];
   const set = (patch: Partial<LevelsChannel>, final: boolean) =>
     props.onChange({ ...props.value, [channel()]: { ...ch(), ...patch } }, final);
@@ -280,6 +369,26 @@ function Levels(props: { value: Of<'levels'>; onChange: Change; histogram: Histo
         <span class="spacer" />
         <NumberField value={ch().outWhite} min={0} max={255} width={46} onChange={(v) => set({ outWhite: v }, true)} />
       </div>
+      <div class="adjust-fields">
+        <Dropper id={`${id}-black`} title="Set black point" swatch="#000" onPick={(rgb) => props.onChange(levelsBlackPoint(props.value, to8(rgb)), true)} />
+        <Dropper id={`${id}-gray`} title="Set gray point" swatch="#808080" onPick={(rgb) => props.onChange(levelsGrayPoint(props.value, to8(rgb)), true)} />
+        <Dropper id={`${id}-white`} title="Set white point" swatch="#fff" onPick={(rgb) => props.onChange(levelsWhitePoint(props.value, to8(rgb)), true)} />
+        <span class="spacer" />
+        <Button
+          width={56}
+          title="Auto — with the Auto Color Correction Options below"
+          disabled={!props.histogram}
+          onClick={() => props.histogram && props.onChange(autoLevelsWith(props.histogram, store.autoOptions()), true)}
+        >
+          Auto
+        </Button>
+        <Button width={70} onClick={() => setShowOptions((v) => !v)}>
+          Options…
+        </Button>
+      </div>
+      <Show when={showOptions()}>
+        <AutoOptionsPanel />
+      </Show>
       <Button onClick={() => props.onChange({ ...props.value, [channel()]: DEFAULT_LEVELS }, true)} width={78}>
         Reset
       </Button>
@@ -294,13 +403,27 @@ const MAX_POINTS = 16;
 function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolean; histogram: Histogram | null }) {
   const [channel, setChannel] = createSignal<ChannelKey>('master');
   const [selected, setSelected] = createSignal<number | null>(null);
+  const [showOptions, setShowOptions] = createSignal(false);
+  const id = `curves-${++editorSerial}`;
   const points = () => props.value[channel()];
-  const setPoints = (pts: CurvePoint[], final: boolean) =>
-    props.onChange({ ...props.value, [channel()]: pts }, final);
+  const map = () => props.value.maps?.[channel()];
+  const pencil = () => !!map();
+  const setPoints = (pts: CurvePoint[], final: boolean) => {
+    const maps = props.value.maps ? { ...props.value.maps } : undefined;
+    if (maps) delete maps[channel()];
+    props.onChange({ ...props.value, [channel()]: pts, maps: maps && Object.keys(maps).length ? maps : undefined }, final);
+  };
+  const setMap = (m: number[], final: boolean) =>
+    props.onChange({ ...props.value, maps: { ...(props.value.maps ?? {}), [channel()]: m } }, final);
 
   const curvePath = createMemo(() => {
-    const pts = points();
+    const m = map();
     let d = '';
+    if (m) {
+      for (let i = 0; i < 256; i++) d += `${i === 0 ? 'M' : 'L'}${i} ${(255 - m[i]!).toFixed(2)}`;
+      return d;
+    }
+    const pts = points();
     for (let i = 0; i <= 128; i++) {
       const x = i / 128;
       const y = Math.min(1, Math.max(0, evaluateCurve(pts, x)));
@@ -310,7 +433,7 @@ function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolea
   });
 
   let svg!: SVGSVGElement;
-  const toCurve = (e: PointerEvent) => {
+  const toCurve = (e: { clientX: number; clientY: number }) => {
     const r = svg.getBoundingClientRect();
     return {
       x: (e.clientX - r.left) / r.width,
@@ -353,8 +476,37 @@ function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolea
     window.addEventListener('pointerup', up);
   };
 
-  /** Click on the graph adds a point there and starts dragging it. */
-  const addPoint = (e: PointerEvent) => {
+  /** Pencil mode: draw the map freehand, filling between successive pointer positions. */
+  const drawMap = (e: PointerEvent) => {
+    e.preventDefault();
+    const m = [...(map() ?? Array.from({ length: 256 }, (_, i) => i))];
+    let prev: { x: number; y: number } | null = null;
+    const paint = (ev: PointerEvent, final: boolean) => {
+      const p = toCurve(ev);
+      const cur = { x: Math.round(clamp01(p.x) * 255), y: Math.round(clamp01(p.y) * 255) };
+      const from = prev ?? cur;
+      const steps = Math.max(1, Math.abs(cur.x - from.x));
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        m[Math.round(from.x + (cur.x - from.x) * t)] = Math.round(from.y + (cur.y - from.y) * t);
+      }
+      prev = cur;
+      setMap([...m], final);
+    };
+    paint(e, false);
+    const move = (ev: PointerEvent) => paint(ev, false);
+    const up = (ev: PointerEvent) => {
+      paint(ev, true);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  /** Click on the graph adds a point there and starts dragging it (points mode). */
+  const onGraphDown = (e: PointerEvent) => {
+    if (pencil()) return drawMap(e);
     if (points().length >= MAX_POINTS) return;
     const p = toCurve(e);
     const pt = { x: q(p.x), y: q(p.y) };
@@ -364,6 +516,14 @@ function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolea
     setPoints(next, false);
     // Drag against the list that now contains the point.
     queueMicrotask(() => dragPoint(index, e));
+  };
+
+  /** Smooth, as the pencil mode's button does: a light blur of the drawn map, ends kept. */
+  const smooth = () => {
+    const m = map();
+    if (!m) return;
+    const out = m.map((v, i) => (i === 0 || i === 255 ? v : Math.round((m[i - 1]! + 2 * v + m[i + 1]!) / 4)));
+    setMap(out, true);
   };
 
   const sel = () => {
@@ -378,17 +538,47 @@ function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolea
     setPoints(normaliseCurve(next), true);
   };
 
+  /**
+   * The on-image tool: the clicked colour's value on this channel gets a point (or reuses the
+   * one already there), and dragging up or down moves its output.
+   */
+  const onImage = (rgb: [number, number, number]): OnImageDrag | null => {
+    if (pencil()) return null;
+    const ch = channel();
+    const v = ch === 'master' ? 0.3 * rgb[0] + 0.59 * rgb[1] + 0.11 * rgb[2] : rgb[ch === 'r' ? 0 : ch === 'g' ? 1 : 2];
+    const x = q(v);
+    const existing = points().find((p) => Math.abs(p.x - x) < 2 / 255);
+    const y0 = existing ? existing.y : clamp01(evaluateCurve(points(), x));
+    const base = points().filter((p) => p !== existing);
+    return (_dx, dy, final) => {
+      const pt = { x: existing?.x ?? x, y: q(y0 + dy / 255) };
+      const next = normaliseCurve([...base, pt]);
+      setSelected(next.indexOf(pt));
+      setPoints(next, final);
+    };
+  };
+
   const stroke = () => (channel() === 'r' ? '#e5484d' : channel() === 'g' ? '#46a758' : channel() === 'b' ? '#3e7bfa' : 'var(--text)');
 
   return (
     <>
-      <Select value={channel()} options={CHANNEL_OPTIONS} onChange={(c) => { setChannel(c); setSelected(null); }} label="Channel" width={90} />
+      <div class="adjust-fields">
+        <Select value={channel()} options={CHANNEL_OPTIONS} onChange={(c) => { setChannel(c); setSelected(null); }} label="Channel" width={90} />
+        <span class="spacer" />
+        <button type="button" class="dropper" classList={{ armed: !pencil() }} title="Edit points to modify the curve" onClick={() => pencil() && setPoints(mapToPoints(map()!), true)}>
+          <Icon name="adjCurves" size={14} />
+        </button>
+        <button type="button" class="dropper" classList={{ armed: pencil() }} title="Draw to modify the curve" onClick={() => !pencil() && setMap(Array.from({ length: 256 }, (_, i) => Math.round(clamp01(evaluateCurve(points(), i / 255)) * 255)), true)}>
+          <Icon name="pencil" size={14} />
+        </button>
+        <OnImageButton id={`${id}-onimage`} title="Click and drag in the image to modify the curve" onStart={onImage} />
+      </div>
       <svg
         ref={svg}
         class="curves-graph"
-        classList={{ compact: props.compact }}
+        classList={{ compact: props.compact, pencil: pencil() }}
         viewBox="0 0 255 255"
-        onPointerDown={addPoint}
+        onPointerDown={onGraphDown}
       >
         <HistogramPath counts={histogramFor(props.histogram, channel())} height={255} class="histogram-fill faint" />
         <For each={[63.75, 127.5, 191.25]}>
@@ -401,30 +591,60 @@ function Curves(props: { value: Of<'curves'>; onChange: Change; compact?: boolea
         </For>
         <line class="curves-baseline" x1="0" y1="255" x2="255" y2="0" />
         <path class="curves-line" d={curvePath()} style={{ stroke: stroke() }} />
-        <For each={points()}>
-          {(p, i) => (
-            <rect
-              class="curves-point"
-              classList={{ selected: selected() === i() }}
-              x={p.x * 255 - 4}
-              y={255 - p.y * 255 - 4}
-              width="8"
-              height="8"
-              onPointerDown={(e) => dragPoint(i(), e)}
-            />
-          )}
-        </For>
+        <Show when={!pencil()}>
+          <For each={points()}>
+            {(p, i) => (
+              <rect
+                class="curves-point"
+                classList={{ selected: selected() === i() }}
+                x={p.x * 255 - 4}
+                y={255 - p.y * 255 - 4}
+                width="8"
+                height="8"
+                onPointerDown={(e) => dragPoint(i(), e)}
+              />
+            )}
+          </For>
+        </Show>
       </svg>
       <div class="adjust-fields">
-        <Show when={sel()} fallback={<span class="dim">Click the curve to add a point; drag one off to remove it.</span>}>
-          {(p) => (
-            <>
-              <NumberField label="Input" value={Math.round(p().x * 255)} min={0} max={255} width={44} onChange={(v) => setSel({ x: v / 255 })} />
-              <NumberField label="Output" value={Math.round(p().y * 255)} min={0} max={255} width={44} onChange={(v) => setSel({ y: v / 255 })} />
-            </>
-          )}
+        <Show
+          when={!pencil()}
+          fallback={
+            <Button width={70} onClick={smooth}>
+              Smooth
+            </Button>
+          }
+        >
+          <Show when={sel()} fallback={<span class="dim">Click the curve to add a point; drag one off to remove it.</span>}>
+            {(p) => (
+              <>
+                <NumberField label="Input" value={Math.round(p().x * 255)} min={0} max={255} width={44} onChange={(v) => setSel({ x: v / 255 })} />
+                <NumberField label="Output" value={Math.round(p().y * 255)} min={0} max={255} width={44} onChange={(v) => setSel({ y: v / 255 })} />
+              </>
+            )}
+          </Show>
         </Show>
       </div>
+      <div class="adjust-fields">
+        <Dropper id={`${id}-black`} title="Sample in image to set black point" swatch="#000" onPick={(rgb) => props.onChange(curvesEyedropper(props.value, to8(rgb), 'black'), true)} />
+        <Dropper id={`${id}-gray`} title="Sample in image to set gray point" swatch="#808080" onPick={(rgb) => props.onChange(curvesEyedropper(props.value, to8(rgb), 'gray'), true)} />
+        <Dropper id={`${id}-white`} title="Sample in image to set white point" swatch="#fff" onPick={(rgb) => props.onChange(curvesEyedropper(props.value, to8(rgb), 'white'), true)} />
+        <span class="spacer" />
+        <Button
+          width={56}
+          disabled={!props.histogram}
+          onClick={() => props.histogram && props.onChange(levelsToCurves(autoLevelsWith(props.histogram, store.autoOptions())), true)}
+        >
+          Auto
+        </Button>
+        <Button width={70} onClick={() => setShowOptions((v) => !v)}>
+          Options…
+        </Button>
+      </div>
+      <Show when={showOptions()}>
+        <AutoOptionsPanel />
+      </Show>
     </>
   );
 }
@@ -466,6 +686,39 @@ const HUE_EDIT_OPTIONS: { value: 'master' | HueBandName; label: string }[] = [
 
 function HueSaturation(props: { value: Of<'hueSaturation'>; onChange: Change }) {
   const [edit, setEdit] = createSignal<'master' | HueBandName>('master');
+  const serial = ++editorSerial;
+  /**
+   * The on-image tool: the clicked colour's range becomes the one being edited, and a
+   * horizontal drag changes its Saturation — or its Hue with Ctrl held, as in Photoshop.
+   */
+  const onImage = (rgb: [number, number, number]): OnImageDrag | null => {
+    const max = Math.max(...rgb);
+    const min = Math.min(...rgb);
+    if (max - min < 1e-3) return null;
+    const d = max - min;
+    const h = (max === rgb[0] ? ((rgb[1] - rgb[2]) / d + 6) % 6 : max === rgb[1] ? (rgb[2] - rgb[0]) / d + 2 : (rgb[0] - rgb[1]) / d + 4) * 60;
+    let best: HueBandName = 'reds';
+    let weight = -1;
+    for (const name of HUE_EDIT_OPTIONS.slice(1).map((o) => o.value as HueBandName)) {
+      const w = hueBandWeight(h, bands()[name].range);
+      if (w > weight) {
+        weight = w;
+        best = name;
+      }
+    }
+    setEdit(best);
+    const start = bands()[best];
+    let ctrl = false;
+    const key = (e: PointerEvent) => (ctrl = e.ctrlKey || e.metaKey);
+    window.addEventListener('pointermove', key);
+    return (dx, _dy, final) => {
+      const patch = ctrl
+        ? { hue: Math.round(Math.max(-180, Math.min(180, start.hue + dx / 2))) }
+        : { saturation: Math.round(Math.max(-100, Math.min(100, start.saturation + dx / 2))) };
+      set({ bands: { ...bands(), [best]: { ...bands()[best], ...patch } } }, final);
+      if (final) window.removeEventListener('pointermove', key);
+    };
+  };
   const set = (patch: Partial<Of<'hueSaturation'>>, final: boolean) => props.onChange({ ...props.value, ...patch }, final);
   const master = (patch: Partial<Of<'hueSaturation'>['master']>, final: boolean) =>
     set({ master: { ...props.value.master, ...patch } }, final);
@@ -482,7 +735,10 @@ function HueSaturation(props: { value: Of<'hueSaturation'>; onChange: Change }) 
         when={props.value.colorize}
         fallback={
           <>
-            <Select value={edit()} options={HUE_EDIT_OPTIONS} label="Edit" width={100} onChange={setEdit} />
+            <div class="adjust-fields">
+              <Select value={edit()} options={HUE_EDIT_OPTIONS} label="Edit" width={100} onChange={setEdit} />
+              <OnImageButton id={`huesat-${serial}`} title="Click and drag in the image to modify saturation (Ctrl-drag: hue)" onStart={onImage} />
+            </div>
             <Show
               when={band()}
               fallback={
@@ -515,6 +771,7 @@ function HueSaturation(props: { value: Of<'hueSaturation'>; onChange: Change }) 
 }
 
 const wrap = (v: number) => ((v % 360) + 360) % 360;
+
 const hueCss = (h: number) => `hsl(${wrap(h)}, 100%, 50%)`;
 
 /**
@@ -645,9 +902,28 @@ function BlackWhite(props: { value: Of<'blackWhite'>; onChange: Change }) {
     { key: 'blues', label: 'Blues', color: '#00f' },
     { key: 'magentas', label: 'Magentas', color: '#f0f' },
   ];
+  const serial = ++editorSerial;
+  /**
+   * On-image: the slider that governs the clicked colour — the family of its largest channel,
+   * or of its two largest when that pair dominates (the kernel's primary/secondary rule) —
+   * follows a horizontal drag.
+   */
+  const onImage = (rgb: [number, number, number]): OnImageDrag | null => {
+    const [r, g, b] = rgb;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const mid = r + g + b - max - min;
+    if (max - min < 1e-3) return null;
+    let key: (typeof rows)[number]['key'];
+    if (max - mid >= mid - min) key = max === r ? 'reds' : max === g ? 'greens' : 'blues';
+    else key = min === b ? 'yellows' : min === r ? 'cyans' : 'magentas';
+    const start = props.value[key];
+    return (dx, _dy, final) => set({ [key]: Math.round(Math.max(-200, Math.min(300, start + dx))) } as Partial<Of<'blackWhite'>>, final);
+  };
   return (
     <>
       <div class="adjust-fields">
+        <OnImageButton id={`bw-${serial}`} title="Click and drag in the image to modify that colour's slider" onStart={onImage} />
         <Checkbox
           checked={!!props.value.tint}
           label="Tint"

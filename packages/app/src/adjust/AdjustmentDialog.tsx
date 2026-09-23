@@ -2,6 +2,10 @@ import { createSignal, onCleanup, onMount } from 'solid-js';
 import { Checkbox } from '@umbra/ui/widgets/controls';
 import { ADJUSTMENT_LABEL, type Adjustment } from '@umbra/engine';
 import { Dialog } from '../dialogs/Dialogs';
+import { store } from '../state/store';
+
+/** Kinds whose dialog has eyedroppers or an on-image tool, and so lets clicks reach the image. */
+const PICKS_FROM_IMAGE = new Set(['levels', 'curves', 'hueSaturation', 'blackWhite']);
 import { AdjustmentEditor } from './editors';
 
 /**
@@ -58,9 +62,11 @@ export function AdjustmentDialog(props: {
         if (pending) cancelAnimationFrame(pending);
         pending = 0;
         props.send({ t: 'applyAdjustment', adjustment: value() });
+        store.setLastAdjustment(value());
         props.onClose();
       }}
       onCancel={close}
+      passThrough={PICKS_FROM_IMAGE.has(props.initial.kind)}
       onReset={() => change(props.initial)}
       footer={
         <Checkbox
