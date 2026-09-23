@@ -23,6 +23,7 @@ export interface EngineClientEvents {
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
   onLuts?: (msg: { list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }) => void;
+  onReplaceColorPreview?: (p: { pixels: Uint8Array; width: number; height: number }) => void;
   onPatterns?: (list: import('@umbra/engine').PatternSummary[]) => void;
   onHistogram?: (h: { source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }) => void;
   onThumbnail?: (t: { pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }) => void;
@@ -104,7 +105,8 @@ export class EngineClient {
         this.events.onDoc?.(msg.doc);
         break;
       case 'sampled':
-        this.events.onSampled?.(msg.color, msg.toBackground);
+        if (msg.pick) this.pickHandler?.(msg.color);
+        else this.events.onSampled?.(msg.color, msg.toBackground);
         break;
       case 'transform':
         this.transformActive = msg.active;
@@ -121,6 +123,9 @@ export class EngineClient {
         break;
       case 'luts':
         this.events.onLuts?.(msg);
+        break;
+      case 'replaceColorPreview':
+        this.events.onReplaceColorPreview?.(msg);
         break;
       case 'patterns':
         this.events.onPatterns?.(msg.list);
@@ -166,6 +171,12 @@ export class EngineClient {
   selectTool: string | null = null;
   /** Set while the Eyedropper is active; the number is the sample square's edge in doc px. */
   sampleSize: number | null = null;
+  /**
+   * Set while a dialog's eyedropper is armed (Levels/Curves black, grey and white points,
+   * Replace Color, Curves' on-image tool): a canvas click samples the composite and hands the
+   * colour here instead of reaching the active tool.
+   */
+  pickHandler: ((rgb: [number, number, number]) => void) | null = null;
   /** True while the Crop tool is selected. */
   cropTool = false;
   private cropFrom: { x: number; y: number } | null = null;
@@ -249,6 +260,12 @@ export class EngineClient {
 
     canvas.addEventListener('pointerdown', (e) => {
       canvas.setPointerCapture(e.pointerId);
+      if (this.pickHandler && e.button === 0) {
+        const p = toLocal(e);
+        // Photoshop's adjustment eyedroppers default to a 3×3 average.
+        this.send({ t: 'sample', x: p.x, y: p.y, size: 3, toBackground: false, pick: true });
+        return;
+      }
       // Dragging on the canvas with the Crop tool redraws the rectangle from scratch; the
       // handles on the existing one are the transform box's, handled below.
       if (this.cropTool && e.button === 0) {

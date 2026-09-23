@@ -34,6 +34,11 @@ export function Dialog(props: {
   okLabel?: string;
   width?: number;
   footer?: JSX.Element;
+  /**
+   * Let clicks through to the canvas — for dialogs with eyedroppers, which in Photoshop are
+   * modal to the rest of the app but not to the image.
+   */
+  passThrough?: boolean;
 }) {
   const [pos, setPos] = createSignal<{ x: number; y: number } | null>(null);
   const [altHeld, setAltHeld] = createSignal(false);
@@ -79,7 +84,7 @@ export function Dialog(props: {
   };
 
   return (
-    <div class="dialog-scrim">
+    <div class="dialog-scrim" classList={{ 'pass-through': props.passThrough }}>
       <div
         class="dialog"
         style={{

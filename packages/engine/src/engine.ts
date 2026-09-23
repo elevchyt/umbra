@@ -66,6 +66,8 @@ import * as ClipCmd from './commands/clipboard.js';
 import * as ChannelCmd from './commands/channels.js';
 import * as MaskCmd from './commands/masks.js';
 import * as AdjustCmd from './commands/adjust.js';
+import * as SpatialCmd from './commands/spatial.js';
+import { colorStats, replaceColorMask, SPATIAL_LABEL, type SpatialAdjustment } from '@umbra/kernels/spatial';
 import { ADJUSTMENT_LABEL, luminance, type Adjustment } from '@umbra/kernels/adjust';
 import { autoColor, autoContrast, autoTone, equalizeLut } from '@umbra/kernels/auto';
 import { builtinPatterns, FILL_LABEL, type FillContent, type PatternDef } from '@umbra/kernels/fill';
@@ -289,6 +291,8 @@ export class Engine {
   // ---- document ---------------------------------------------------------------------
 
   private commit(doc: Doc, historyName: string): void {
+    // Any committed edit makes a spatial preview stale.
+    this.previewDoc = null;
     this.doc = doc;
     this.history.push(historyName, doc);
     this.compositeCache = null;
@@ -908,6 +912,7 @@ export class Engine {
   /** Image ▸ Adjustments ▸ …, OK. */
   applyAdjustment(adjustment: Adjustment): boolean {
     this.adjustPreview = null;
+    this.previewDoc = null;
     const id = this.adjustTarget();
     if (id === null) return false;
     const next = AdjustCmd.applyAdjustment(this.doc, id, adjustment);
@@ -931,6 +936,62 @@ export class Engine {
     if (next === this.doc) return false;
     this.commit(next, { tone: 'Auto Tone', contrast: 'Auto Contrast', color: 'Auto Color', equalize: 'Equalize' }[mode]);
     return true;
+  }
+
+  // ---- spatial adjustments --------------------------------------------------------------
+
+  /**
+   * A whole document shown in place of the real one: the preview of a Shadows/Highlights,
+   * Replace Color, Match Color or HDR Toning dialog. Those are not per-pixel, so there is no
+   * GPU shortcut — the result is computed on the CPU (latest request wins, see the worker) and
+   * drawn instead of the document until OK or Cancel.
+   */
+  private previewDoc: Doc | null = null;
+
+  private spatialContext(adj: SpatialAdjustment): SpatialCmd.SpatialContext {
+    if (adj.kind !== 'matchColor') return {};
+    if (adj.sourceLayerId === null) {
+      const merged = this.documentPixels();
+      return merged ? { sourceStats: colorStats(merged.pixels) } : {};
+    }
+    const src = findLayer(this.doc.layers, adj.sourceLayerId);
+    if (!src || src.kind !== 'pixel') return {};
+    return { sourceStats: colorStats(SpatialCmd.layerRaster(this.doc, src)) };
+  }
+
+  previewSpatial(adj: SpatialAdjustment | null): void {
+    const id = this.adjustTarget();
+    this.previewDoc = adj && id !== null ? SpatialCmd.applySpatial(this.doc, id, adj, this.spatialContext(adj)) : null;
+  }
+
+  applySpatial(adj: SpatialAdjustment): boolean {
+    this.previewDoc = null;
+    const id = this.adjustTarget();
+    if (id === null) return false;
+    const next = SpatialCmd.applySpatial(this.doc, id, adj, this.spatialContext(adj));
+    if (next === this.doc) return false;
+    this.commit(next, SPATIAL_LABEL[adj.kind]);
+    return true;
+  }
+
+  /** Replace Color's selection preview: the target's match weights, scaled to fit `maxSize`. */
+  replaceColorPreview(color: [number, number, number], fuzziness: number, maxSize: number): { pixels: Uint8Array; width: number; height: number } | null {
+    const id = this.adjustTarget();
+    const layer = id === null ? undefined : findLayer(this.doc.layers, id);
+    if (!layer || layer.kind !== 'pixel') return null;
+    const raster = SpatialCmd.layerRaster(this.doc, layer);
+    const mask = replaceColorMask(raster, color, fuzziness);
+    const scale = Math.min(1, maxSize / Math.max(this.doc.width, this.doc.height));
+    const w = Math.max(1, Math.round(this.doc.width * scale));
+    const h = Math.max(1, Math.round(this.doc.height * scale));
+    const pixels = new Uint8Array(w * h * 4);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const v = mask[Math.min(this.doc.height - 1, Math.floor(y / scale)) * this.doc.width + Math.min(this.doc.width - 1, Math.floor(x / scale))]!;
+        pixels.set([v, v, v, 255], (y * w + x) * 4);
+      }
+    }
+    return { pixels, width: w, height: h };
   }
 
   // ---- fill layers and patterns ---------------------------------------------------------
@@ -1924,7 +1985,7 @@ export class Engine {
     this.renderer.setAdjustPreview(this.adjustPreview);
     const overlay = this.quickMask ? this.selectionTexture() : null;
     const s = this.renderer.render(
-      this.doc,
+      this.previewDoc ?? this.doc,
       this.view,
       docRect(this.doc),
       undefined,

@@ -147,6 +147,12 @@ export interface Histogram {
 }
 /** The pattern library as the engine last reported it (thumbnails only; pixels stay there). */
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
+/**
+ * An armed dialog eyedropper: the next canvas click samples and calls `onPick` instead of
+ * reaching the tool. `id` lets the dialog show which of its droppers is armed.
+ */
+const [pickRequest, setPickRequest] = createSignal<{ id: string; onPick: (rgb: [number, number, number]) => void } | null>(null);
+
 /** 3-D LUTs registered in the worker, for Color Lookup. */
 const [luts, setLuts] = createSignal<{ id: string; name: string; size: number }[]>([]);
 
@@ -242,6 +248,7 @@ export type DialogId =
   | 'stroke'
   | 'adjustment'
   | 'fillLayer'
+  | 'spatial'
   | 'definePattern';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
@@ -316,6 +323,8 @@ export const store = {
   setPatterns,
   luts,
   setLuts,
+  pickRequest,
+  setPickRequest,
   get engine() {
     return engine();
   },

@@ -254,7 +254,7 @@ export function rasterizeLine(
 // ---- Select ▸ Modify ----------------------------------------------------------------------
 
 /** Separable box blur, the building block for a fast Gaussian approximation. */
-function boxBlur(src: Float32Array, dst: Float32Array, width: number, height: number, radius: number): void {
+export function boxBlur(src: Float32Array, dst: Float32Array, width: number, height: number, radius: number): void {
   const r = Math.max(0, Math.floor(radius));
   if (r === 0) {
     dst.set(src);

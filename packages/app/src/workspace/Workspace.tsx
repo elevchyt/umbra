@@ -4,10 +4,11 @@ import { MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment } from '@umbra/engine';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
+import { SpatialDialog } from '../adjust/spatial';
 import { EngineClient } from '../engine-client';
 import { store, type ThemeName } from '../state/store';
 import { MENUS, COMMAND_BY_ID } from '../menus/menus';
@@ -115,6 +116,7 @@ export function Workspace() {
         onThumbnail: store.setThumbnail,
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
+        onReplaceColorPreview: (p) => window.dispatchEvent(new CustomEvent('umbra:replace-color-preview', { detail: p })),
         onLuts: (m) => {
           store.setLuts(m.list);
           if (m.error) flash(`Could not load the LUT: ${m.error}`);
@@ -182,6 +184,15 @@ export function Workspace() {
     client.moveTool = tool === 'move';
     client.fillTool = tool === 'paintBucket' ? 'bucket' : tool === 'gradient' ? 'gradient' : null;
     client.cropTool = tool === 'crop';
+  });
+
+  // An armed dialog eyedropper takes canvas clicks away from the tool. Read the signals
+  // before the guard, or the effect never subscribes (see the note below).
+  createEffect(() => {
+    const req = store.pickRequest();
+    const ready = store.engineReady();
+    if (!client || !ready) return;
+    client.pickHandler = req ? (rgb) => req.onPick(rgb) : null;
   });
 
   // Selection options live in the UI store; the engine needs them before the next gesture.
@@ -617,6 +628,26 @@ export function Workspace() {
         }
         const mode = cmd === 'adjust.equalize' ? 'equalize' : cmd === 'image.autoTone' ? 'tone' : cmd === 'image.autoContrast' ? 'contrast' : 'color';
         send({ t: 'autoAdjust', mode });
+        break;
+      }
+      case 'adjust.shadowsHighlights':
+      case 'adjust.hdrToning':
+      case 'adjust.matchColor':
+      case 'adjust.replaceColor': {
+        const doc = store.doc();
+        const active = doc?.layers.find((l) => l.id === doc.activeLayerIds[0]);
+        const kind = cmd.slice('adjust.'.length) as SpatialAdjustment['kind'];
+        // HDR Toning flattens, so any active layer will do; the rest act on a pixel layer.
+        if (kind !== 'hdrToning' && (!active || active.kind !== 'pixel')) {
+          flash(`Could not complete ${SPATIAL_LABEL[kind]} because the target layer is not a pixel layer.`);
+          break;
+        }
+        const initial = defaultSpatial(kind);
+        if (initial.kind === 'replaceColor') {
+          const fg = store.foreground();
+          initial.color = [fg.r, fg.g, fg.b];
+        }
+        store.openDialog('spatial', initial);
         break;
       }
       case 'fill.solid':
@@ -1236,6 +1267,13 @@ export function Workspace() {
       <Show when={store.dialog()?.id === 'adjustment'}>
         <AdjustmentDialog
           initial={store.dialog()!.payload as Adjustment}
+          send={(m) => send(m as Parameters<typeof send>[0])}
+          onClose={store.closeDialog}
+        />
+      </Show>
+      <Show when={store.dialog()?.id === 'spatial'}>
+        <SpatialDialog
+          initial={store.dialog()!.payload as SpatialAdjustment}
           send={(m) => send(m as Parameters<typeof send>[0])}
           onClose={store.closeDialog}
         />

@@ -3,6 +3,7 @@ import type { BrushParams } from '@umbra/kernels/brush';
 import type { Gradient } from '@umbra/kernels/gradient';
 import type { Adjustment } from '@umbra/kernels/adjust';
 import type { FillContent } from '@umbra/kernels/fill';
+import type { SpatialAdjustment } from '@umbra/kernels/spatial';
 
 /**
  * A fill layer's content as the UI sees it: the same as the model, except a pattern is named
@@ -153,6 +154,10 @@ export type ToEngine =
   | { t: 'setFillContent'; id: number; content: FillSummary; final: boolean; amend?: boolean }
   | { t: 'requestPatterns' }
   | { t: 'requestLuts' }
+  /** Latest wins: the worker drops superseded previews rather than queueing them. */
+  | { t: 'previewSpatial'; adjustment: SpatialAdjustment | null }
+  | { t: 'applySpatial'; adjustment: SpatialAdjustment }
+  | { t: 'requestReplaceColorPreview'; color: [number, number, number]; fuzziness: number; size: number }
   /** A .cube or .3dl file the user picked; the reply is the updated `luts` list. */
   | { t: 'loadLut'; fileName: string; bytes: Uint8Array }
   | { t: 'definePattern'; name: string }
@@ -199,7 +204,7 @@ export type ToEngine =
       mode: string;
       opacity: number;
     }
-  | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean }
+  | { t: 'sample'; x: number; y: number; size: number; toBackground: boolean; pick?: boolean }
   | {
       t: 'fill';
       color: [number, number, number];
@@ -240,6 +245,7 @@ export type FromEngine =
   | { t: 'stats'; stats: EngineStats }
   | { t: 'doc'; doc: DocSummary }
   | { t: 'patterns'; list: PatternSummary[] }
+  | { t: 'replaceColorPreview'; pixels: Uint8Array; width: number; height: number }
   | { t: 'luts'; list: { id: string; name: string; size: number }[]; loaded?: string; error?: string }
   | { t: 'histogram'; source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }
   | { t: 'contextLost' }
@@ -248,7 +254,7 @@ export type FromEngine =
   | { t: 'parity'; pass: boolean; text: string }
   | { t: 'error'; message: string }
   | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
-  | { t: 'sampled'; color: [number, number, number]; toBackground: boolean }
+  | { t: 'sampled'; color: [number, number, number]; toBackground: boolean; pick?: boolean }
   | { t: 'transform'; active: boolean }
   | { t: 'thumbnail'; pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }
   | { t: 'recovery'; name: string; savedAt: number; width: number; height: number }

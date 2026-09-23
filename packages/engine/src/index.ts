@@ -24,6 +24,7 @@ export type { PaintMode } from './commands/fill.js';
 export {
   ADJUSTMENT_LABEL,
   DEFAULT_LEVELS,
+  applyToRgb,
   defaultAdjustment,
   type Adjustment,
   type ChannelMixerOutput,
@@ -40,3 +41,4 @@ export {
 } from '@umbra/kernels/adjust';
 export { evaluateCurve, normaliseCurve, type CurvePoint } from '@umbra/kernels/curve';
 export { FILL_LABEL, type FillType } from '@umbra/kernels/fill';
+export { SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment } from '@umbra/kernels/spatial';

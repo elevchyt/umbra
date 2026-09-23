@@ -1020,3 +1020,11 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .layer-thumb.fill { background-image: none; }
 .layer-fill-swatch { display: block; width: 100%; height: 100%; background-size: 16px 16px; }
 .layer-fill-swatch.small { width: 15px; height: 15px; border: 1px solid var(--border-dark); }
+/* An eyedropper dialog lets the image be clicked; the dialog itself stays interactive. */
+.dialog-scrim.pass-through { pointer-events: none; background: transparent; }
+.dialog-scrim.pass-through .dialog { pointer-events: auto; }
+.dropper { width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center; background: var(--well); border: 1px solid var(--border-dark); border-radius: var(--radius); color: var(--icon); cursor: pointer; }
+.dropper.armed { border-color: var(--accent); color: var(--icon-active); box-shadow: 0 0 0 1px var(--accent); }
+.dropper .swatch { width: 12px; height: 12px; border: 1px solid var(--border-light); }
+.dropper-swatch { display: inline-block; width: 26px; height: 20px; border: 1px solid var(--border-dark); border-radius: var(--radius); }
+.replace-mask { display: block; max-width: 100%; border: 1px solid var(--border-dark); image-rendering: pixelated; }

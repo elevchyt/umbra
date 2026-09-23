@@ -13,6 +13,10 @@ let ringSab: SharedArrayBuffer | null = null;
 /** Bytes found by `checkRecovery`, held until the user accepts or discards them. */
 let recovered: ArrayBuffer | null = null;
 
+/** The newest Spatial preview request not yet computed — see 'previewSpatial'. */
+let pendingSpatial: { adjustment: import('@umbra/kernels/spatial').SpatialAdjustment | null } | null = null;
+let spatialScheduled = false;
+
 function post(msg: FromEngine, transfer?: Transferable[]): void {
   (self as unknown as Worker).postMessage(msg, transfer ?? []);
 }
@@ -165,7 +169,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         break;
       case 'sample': {
         const color = engine?.sampleColor(msg.x, msg.y, msg.size);
-        if (color) post({ t: 'sampled', color, toBackground: msg.toBackground });
+        if (color) post({ t: 'sampled', color, toBackground: msg.toBackground, pick: msg.pick });
         break;
       }
       case 'beginTransform':
@@ -215,6 +219,30 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setFillContent':
         if (engine?.setFillContent(msg.id, msg.content, msg.final, msg.amend)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'previewSpatial':
+        // Latest wins. A preview can take a few hundred milliseconds, and a slider sends one
+        // per frame; queueing them would make the preview trail further and further behind.
+        // Messages already queued run before this timeout, so it computes only the newest.
+        pendingSpatial = { adjustment: msg.adjustment };
+        if (!spatialScheduled) {
+          spatialScheduled = true;
+          setTimeout(() => {
+            spatialScheduled = false;
+            const next = pendingSpatial;
+            pendingSpatial = null;
+            if (next && engine) engine.previewSpatial(next.adjustment);
+          }, 0);
+        }
+        break;
+      case 'applySpatial':
+        pendingSpatial = null;
+        if (engine?.applySpatial(msg.adjustment)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestReplaceColorPreview': {
+        const p = engine?.replaceColorPreview(msg.color, msg.fuzziness, msg.size);
+        if (p) post({ t: 'replaceColorPreview', ...p }, [p.pixels.buffer]);
+        break;
+      }
       case 'requestLuts':
         post({ t: 'luts', list: listLuts() });
         break;
