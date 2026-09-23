@@ -436,6 +436,53 @@ global light, Styles panel, copy/paste/scale/create-layers, `.asl` import/export
 read/write, effects cache in compositor (distance transforms via jump-flood on GPU).
 **Exit:** style golden suite (each effect × key parameter sweeps) visually matches
 (SSIM ≥ 0.98) Photoshop renders.
+**Exit (revised, no Photoshop — as for M4 and M5).** Each effect is pinned by behavioural
+tests (a drop shadow falls away from the light by its distance, a stroke is a ring of its
+width on the right side of the edge, an inner bevel is lit on the lit side and flat
+elsewhere, glows stay outside or inside, spread hardens, knockout removes what it covers),
+the distance transform is exact against brute force, and the whole style goes through both
+compositors in GPU ≡ CPU parity documents. Styles and Blending Options round-trip through PSD
+and .asl. The Photoshop comparison waits for a machine with Photoshop, and the recipes that
+would change are tagged `[fit]` in `kernels/src/effects/render.ts`.
+
+**Status (2026-09-23): complete**, with the deferral below. All ten effects with multi-instance,
+Photoshop's defaults, contours (twelve presets, an editor), global light; the Layer Style
+dialog (Styles page, Blending Options with split Blend If sliders, knockout, channels, fill,
+every effect page, New Style, Make/Reset to Default, preview tile, live canvas preview);
+effect rows and the fx menu in the Layers panel; Copy/Paste/Clear Style, Create Layers, Hide
+All Effects, Scale Effects (and Image Size scales styles), Rasterize Layer Style; the Styles
+panel with .asl read/write; effects on groups and smart objects; PSD read/write of styles and
+Blending Options. GPU knockout and multi-range Blend If brought the GPU up to the CPU
+reference. Parity 131/131; 755 tests.
+
+Deferred: the GPU effects path (jump-flood distance transform). Effects are computed on the
+CPU and cached per layer — 0.3–0.7 s for a canvas-sized layer with shadow, stroke and bevel
+on 2400×1600 — which is correct and fast enough to edit with, but a brush stroke shows its
+effects only when it ends.
+
+**Findings.**
+1. **Effects as generated layers.** A layer with a style is drawn as itself plus generated
+   pixel layers, each with its effect's mode and the shape baked into its coverage. Neither
+   compositor needed an effects node: the GPU path, the CPU reference, merge, flatten, export
+   composites and smart-object contents all draw them for free, and parity covers them.
+2. **Layer opacity applies once, to content and effects together.** Scaling each generated
+   layer by the layer's opacity let a 50 % layer under a 50 % overlay show 75 %; below full
+   opacity the lot now goes in a pass-through group, which cross-fades exactly as Photoshop
+   does.
+3. **A distance field from pixel centres is biased on curves.** Distances to the nearest
+   inside pixel's centre made a 4 px outside stroke 6 % too wide on a disc; correcting by
+   that pixel's coverage (how far through it the edge passes) brought it within 2 %.
+4. **Knockout at Fill 0 did nothing.** The CPU reference only knocked out where the layer
+   drew at its fill, so the classic hole-punch never punched. Knockout now replaces the
+   backdrop inside the shape at Fill 100 % × opacity, on both compositors.
+5. **`renderToBuffer` had its own layer walk.** The readback the Magic Wand, sampling and
+   the parity suite use built its layer list separately and missed the effects; parity
+   caught it at 255 on the first run.
+6. **ag-psd dropped the last excluded channel.** Its `brst` reader stopped one entry short,
+   so a single restriction never read back; fixed in a pnpm patch of the vendored codec.
+7. **.asl is PSD's own parts.** A style library is patterns in PSD's `Patt` format and styles
+   as the same effects descriptor a layer carries, so ag-psd's descriptor and pattern codecs,
+   reached by deep import, read and write it with no parser of our own.
 
 ### M7 — Vector + Type (XL)
 Pen / Freeform / Curvature Pen, Add/Delete/Convert Point, Path & Direct Selection, Paths panel,

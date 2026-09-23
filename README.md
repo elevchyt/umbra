@@ -9,23 +9,23 @@ Working name — "Photoshop" never appears in the product.
 
 ## Status
 
-**M0–M5 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
+**M0–M6 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of
 Photoshop's adjustments (destructive and as adjustment layers), fill layers, masks, the
-Filter menu (58 filters and the 47-effect Filter Gallery), smart objects and smart filters
-work; layer styles, vector and type do not.
+Filter menu (58 filters and the 47-effect Filter Gallery), smart objects and smart filters,
+layer styles and advanced blending work; vector and type do not.
 
 > ### ⚠️ Read [`docs/not-working.md`](docs/not-working.md) first
 >
 > Most of the UI is present because M1's exit criterion was that a Photoshop user finds
-> everything where they expect it — **340 of 572 menu commands are not built yet** (greyed out,
+> everything where they expect it — **321 of 572 menu commands are not built yet** (greyed out,
 > not silently inert). That file is the running checklist, and it
 > separates *broken* (cheap bugs) from *not built yet* (the roadmap). It carries the script
 > that regenerates it, because the hand-maintained flags in the source have been wrong before.
 
 | | |
 |---|---|
-| Tests | 727 across 31 files |
-| GPU ≡ CPU parity | 126/126 cases — every blend mode, every adjustment, fill layers, and real documents through the renderer |
+| Tests | 755 across 35 files |
+| GPU ≡ CPU parity | 131/131 cases — every blend mode, every adjustment, fill layers, and real documents through the renderer |
 | Payload | 203 KB UI + 195 KB worker, gzipped |
 | Compositing | 100 layers at 4K, ~8 ms/frame |
 
@@ -49,6 +49,11 @@ Last Filter and Edit ▸ Fade; the Filter Gallery's 47 effects with stackable ef
 Smart objects: Convert, Place Embedded, Open as Smart Object, Edit Contents in a tab,
 instances, lossless transforms, Convert to Layers, Rasterize — and smart filters with
 per-filter blending and a paintable filter mask, all saved to and read from PSD.
+
+Layer styles: all ten effects (five of them multi-instance) in Photoshop's Layer Style dialog,
+Blending Options with Blend If and knockout, the Styles panel with .asl libraries, Create
+Layers, Scale Effects, Global Light — rendered identically by the GPU and the CPU reference,
+and saved to PSD.
 
 ## Running it
 

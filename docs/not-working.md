@@ -157,22 +157,36 @@ the feature is complete.
 
 | Menu | Wired | Chiefly waiting on |
 |---|---|---|
-| File | 8 / 50 | export & automation (M11), place/linked (M5) |
-| Edit | 26 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
+| File | 10 / 50 | export & automation (M11), linked smart objects (M11) |
+| Edit | 27 / 69 | warps (M9), presets & colour settings (M10–M11), preferences (M11) |
 | Image | 37 / 56 | colour modes (M10), Duplicate and Arbitrary rotation (M11), variables (M11) |
-| Layer | 41 / 137 | layer styles (M6), smart objects (M5), align & distribute (M9), type & shapes (M7) |
+| Layer | 69 / 137 | linked smart objects (M11), align & distribute (M9), type & shapes (M7), vector masks (M7) |
 | Type | 5 / 39 | all of type (M7) — the 5 are its panel toggles |
 | Select | 15 / 24 | Color Range, Focus Area, Subject, Sky, Select and Mask (M9) |
 | Filter | 61 / 74 | Blur Gallery, Liquify, Lens Correction, Develop (later), Flame/Picture Frame/Tree |
 | View | 12 / 61 | guides, grid, snapping, proof colours (M10–M11) |
 | Window | 32 / 56 | multi-document window arrangement (M11) |
-| Help | 4 / 5 | — |
+| Help | 4 / 6 | — |
 
 "Wired" counts a `runCommand` case or a generated panel toggle. An earlier version of this table
 counted every `case` in `Workspace.tsx`, which included `isChecked`'s — a tick mark is not an
 implementation.
 
 ### Specifically, in the menus you are most likely to reach for
+
+- [x] **Layer ▸ Layer Style — all ten effects** (multi-instance Drop Shadow, Inner Shadow,
+      Color/Gradient Overlay and Stroke), the Layer Style dialog with Blending Options (Blend
+      If split sliders, knockout, channels, fill), Styles page, New Style, Make/Reset Default,
+      contour presets and editor; effect rows in the Layers panel; Copy/Paste/Clear, Global
+      Light, Create Layers, Hide All Effects, Scale Effects, Rasterize ▸ Layer Style; the Styles
+      panel with .asl load/save; PSD read/write. Groups take effects too. The effect recipes
+      follow spec 06 §9 and are `[fit]` where it says so — there is no Photoshop to compare with.
+- [ ] **Layer effects render on the CPU** (cached per layer): 0.3–0.7 s to re-render a
+      canvas-sized layer's shadow, stroke and bevel on 2400×1600, and a live brush stroke
+      shows its effects when it ends. The GPU jump-flood path spec 03 plans is not built.
+- [ ] **Not in the codec, so not round-tripped through PSD:** glow gradients and Outer Glow's
+      Precise technique, Bevel's Contour and Texture settings, shape-burst stroke gradients,
+      contour corners, shallow vs deep knockout (both read as shallow). Opening says which.
 
 - [x] **Filter ▸ Blur, Distort, Noise, Pixelate, Render (Clouds, Difference Clouds, Fibers,
       Lens Flare), Sharpen, Stylize, Video and Other — 58 filters**, from one registry

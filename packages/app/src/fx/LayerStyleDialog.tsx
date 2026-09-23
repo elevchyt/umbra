@@ -62,7 +62,29 @@ const fgbg = (): { fg: Rgb; bg: Rgb } => {
   return { fg: [f.r, f.g, f.b], bg: [b.r, b.g, b.b] };
 };
 
+/** Make Default: the user's own starting settings per effect, kept in this browser. */
+const DEFAULTS_KEY = 'umbra.effectDefaults';
+function userDefaults(): Record<string, unknown> {
+  try {
+    return JSON.parse(localStorage.getItem(DEFAULTS_KEY) ?? '{}') as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+function saveUserDefault(key: string, value: unknown | null): void {
+  try {
+    const all = userDefaults();
+    if (value === null) delete all[key];
+    else all[key] = value;
+    localStorage.setItem(DEFAULTS_KEY, JSON.stringify(all));
+  } catch {
+    // Storage may be unavailable; the factory defaults still apply.
+  }
+}
+
 function freshEffect(key: Multi | Single) {
+  const saved = userDefaults()[key];
+  if (saved) return structuredClone(saved) as ReturnType<(typeof EFFECT_DEFAULTS)[typeof key]>;
   const { fg, bg } = fgbg();
   if (key === 'gradientOverlay') return EFFECT_DEFAULTS.gradientOverlay(fg, bg);
   if (key === 'patternOverlay') return EFFECT_DEFAULTS.patternOverlay(null);
@@ -323,6 +345,25 @@ export function LayerStyleDialog(props: { payload: LayerStylePayload; send: (m: 
               <StrokePage value={fx().stroke[page().index]!} set={setAt('stroke', page().index)} fg={fg} bg={bg} />
             </Match>
           </Switch>
+          <Show when={page().key !== 'blending' && page().key !== 'styles'}>
+            <div class="fx-row fx-defaults">
+              <Button width={110} title="Start new effects of this kind with these settings" onClick={() => {
+                const key = (page().key === 'bevelContour' || page().key === 'bevelTexture' ? 'bevel' : page().key) as Multi | Single;
+                const v = MULTI.has(key) ? list(key as Multi)[page().index] : single(key as Single);
+                if (v) saveUserDefault(key, { ...v, enabled: true });
+              }}>
+                Make Default
+              </Button>
+              <Button width={120} title="Back to the settings this effect started with" onClick={() => {
+                const key = (page().key === 'bevelContour' || page().key === 'bevelTexture' ? 'bevel' : page().key) as Multi | Single;
+                const fresh = freshEffect(key);
+                if (MULTI.has(key)) update({ [key]: list(key as Multi).map((e, i) => (i === page().index ? fresh : e)) } as never);
+                else update({ [key]: fresh } as never);
+              }}>
+                Reset to Default
+              </Button>
+            </div>
+          </Show>
         </div>
         <div class="fx-side">
           <Button width={100} onClick={() => setNaming(true)} title="Add these effects to the Styles panel">
