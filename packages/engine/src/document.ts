@@ -16,6 +16,7 @@ import type { FillContent } from '@umbra/kernels/fill';
 import type { Selection } from './selection.js';
 import type { Mat } from '@umbra/kernels/matrix';
 import type { FilterParams } from '@umbra/kernels/filters/types';
+import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 
 export type LabelColor =
   | 'none'
@@ -79,6 +80,8 @@ export interface LayerBase {
   readonly seed: number;
   /** PSD blocks we did not interpret, re-emitted verbatim on save (spec 07 §1.1). */
   readonly psdExtra?: unknown;
+  /** Layer effects (the layer style), spec 02 §3. */
+  readonly effects?: LayerEffects;
 }
 
 export interface PixelLayer extends LayerBase {
@@ -200,6 +203,8 @@ export interface Doc {
   readonly channels: readonly AlphaChannel[];
   /** Bottom layer is a locked Background (no alpha, no mode). */
   readonly hasBackground: boolean;
+  /** Layer ▸ Layer Style ▸ Global Light; effects with "Use Global Light" follow it. */
+  readonly globalLight?: GlobalLight;
   readonly dirty: boolean;
 }
 

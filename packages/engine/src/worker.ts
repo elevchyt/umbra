@@ -261,6 +261,19 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         latestPreview(() => engine?.previewFilter(m.id, m.params, m.fg, m.bg, m.smartIndex));
         break;
       }
+      case 'setLayerEffects':
+        pendingPreview = null;
+        if (engine?.setLayerEffects(msg.id, msg.effects, msg.name)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'previewLayerEffects': {
+        const m = msg;
+        latestPreview(() => engine?.previewLayerEffects(m.id, m.effects, m.globalLight));
+        break;
+      }
+      case 'setGlobalLight':
+        pendingPreview = null;
+        if (engine?.setGlobalLight(msg.light)) post({ t: 'doc', doc: engine.summary() });
+        break;
       case 'smartCommand':
         pendingPreview = null;
         if (engine?.smartCommand(msg.cmd)) post({ t: 'doc', doc: engine.summary() });

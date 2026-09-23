@@ -6,6 +6,7 @@
  * clipping run and mask therefore goes through exactly the same code the parity suite checks
  * against the CPU reference.
  */
+import { EffectsCache, expandEffects } from '../effects-layers.js';
 import type { Rect } from '@umbra/core/geom';
 import { Program } from '../gpu/program.js';
 import type { TileAtlas } from '../gpu/atlas.js';
@@ -164,6 +165,8 @@ export class DocumentRenderer {
    * rewritten, so dragging is free and the pixels are resampled exactly once, on commit.
    */
   private liveTransform: { ids: ReadonlySet<number>; matrix: Mat } | null = null;
+  /** Rendered layer effects, per layer, reused while nothing they depend on changes. */
+  private readonly fxCache = new EffectsCache();
 
   setLiveTransform(t: { ids: ReadonlySet<number>; matrix: Mat } | null): void {
     this.liveTransform = t;
@@ -283,7 +286,8 @@ export class DocumentRenderer {
     };
 
     const live =
-      this.liveTransform && this.liveTransform.ids.has(layer.id) ? this.liveTransform.matrix : IDENTITY;
+      // A layer's generated effect layers move with it.
+      this.liveTransform && this.liveTransform.ids.has((layer as { effectOf?: number }).effectOf ?? layer.id) ? this.liveTransform.matrix : IDENTITY;
 
     const erase = this.eraseOverlay?.layerId === layer.id ? this.eraseOverlay : null;
     const maskPlane = layer.mask && layer.mask.enabled ? layer.mask.plane : null;
@@ -366,7 +370,7 @@ export class DocumentRenderer {
     this.compositor.resize(vw, vh);
     this.compositor.setOrigin(0, 0);
 
-    const layers = this.toGpuLayers(doc.layers, view, docRect);
+    const layers = this.toGpuLayers(expandEffects(doc.layers, doc, this.fxCache), view, docRect);
 
     // Composite onto transparency; the present pass puts the checkerboard underneath.
     const composite = this.compositor.compositeOnTransparent(layers);
@@ -455,7 +459,7 @@ export class DocumentRenderer {
     };
 
     this.compositor.resize(width, height);
-    const layers = doc.layers.map((l) => this.toGpuLayer(l, view, { x0: 0, y0: 0, x1: doc.width, y1: doc.height }));
+    const layers = expandEffects(doc.layers, doc, this.fxCache).map((l) => this.toGpuLayer(l, view, { x0: 0, y0: 0, x1: doc.width, y1: doc.height }));
     const composite = this.compositor.compositeOnTransparent(layers);
 
     const floats = new Float32Array(width * height * 4);
@@ -500,7 +504,7 @@ export class DocumentRenderer {
     const clip = { x0: 0, y0: 0, x1: doc.width, y1: doc.height };
 
     this.compositor.resize(width, height);
-    const composite = this.compositor.compositeOnTransparent(this.toGpuLayers(doc.layers, view, clip));
+    const composite = this.compositor.compositeOnTransparent(this.toGpuLayers(expandEffects(doc.layers, doc, this.fxCache), view, clip));
     const floats = new Float32Array(width * height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, composite.fbo);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.FLOAT, floats);

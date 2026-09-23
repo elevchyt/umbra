@@ -12,6 +12,7 @@ import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { compositeDocument } from '@umbra/kernels/composite';
 import { createMask, rasterizeEllipse, rasterizeRect } from '@umbra/kernels/selection';
 import { builtinPatterns } from '@umbra/kernels/fill';
+import { DEFAULTS, EMPTY_EFFECTS } from '@umbra/kernels/effects/types';
 import { TileAtlas } from './gpu/atlas.js';
 import type { GpuCaps } from './gpu/caps.js';
 import { DocumentRenderer } from './render/document-renderer.js';
@@ -62,6 +63,21 @@ function withSelection(doc: Doc, shape: 'rect' | 'ellipse'): Doc {
   return { ...doc, selection: makeSelection(W, H, m) };
 }
 
+/** An opaque disc and bar of colour over transparency: a shape for layer effects to act on. */
+function shape(): Plane {
+  const w = Plane.empty(RGBA8).writer();
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const inside = Math.hypot(x - 200, y - 150) < 80 || (x > 260 && x < 480 && y > 110 && y < 190);
+      if (!inside) continue;
+      const d = w.mutable(x >> TILE_SHIFT, y >> TILE_SHIFT);
+      const o = ((y & (TILE_SIZE - 1)) * TILE_SIZE + (x & (TILE_SIZE - 1))) * 4;
+      d.set([40 + (x & 63), 120, 200 - (y & 63), 255], o);
+    }
+  }
+  return w.commit();
+}
+
 function documents(): { name: string; doc: Doc }[] {
   const base = () => makePixelLayer('Background', colourful());
   const one = (layers: Doc['layers']): Doc => ({ ...emptyDoc(W, H, 'parity'), layers, activeLayerIds: [layers[layers.length - 1]!.id] });
@@ -91,6 +107,35 @@ function documents(): { name: string; doc: Doc }[] {
         reverse: false,
         offset: { x: 0, y: 0 },
       }),
+    },
+    {
+      name: 'doc: layer effects — drop shadow, bevel, stroke',
+      doc: one([
+        base(),
+        makePixelLayer('Shape', shape(), {
+          effects: {
+            ...EMPTY_EFFECTS,
+            dropShadow: [{ ...DEFAULTS.dropShadow(), opacity: 0.8, distance: 12, size: 10 }],
+            bevel: { ...DEFAULTS.bevel(), size: 8 },
+            stroke: [{ ...DEFAULTS.stroke(), size: 4, position: 'center', blendMode: 'overlay' }],
+          },
+        }),
+      ]),
+    },
+    {
+      name: 'doc: layer effects on a 60% layer — glow, overlay, inner shadow',
+      doc: one([
+        base(),
+        makePixelLayer('Shape', shape(), {
+          opacity: 0.6,
+          effects: {
+            ...EMPTY_EFFECTS,
+            outerGlow: { ...DEFAULTS.outerGlow(), opacity: 0.9, size: 14 },
+            colorOverlay: [{ ...DEFAULTS.colorOverlay(), blendMode: 'screen', opacity: 0.7 }],
+            innerShadow: [{ ...DEFAULTS.innerShadow(), opacity: 0.9, size: 12, distance: 8 }],
+          },
+        }),
+      ]),
     },
     {
       name: 'doc: pattern fill layer, full canvas',

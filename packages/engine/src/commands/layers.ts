@@ -5,6 +5,8 @@
  * subtree and tile. That is what lets history keep 50 states cheaply and what makes these
  * trivially testable (spec 03 §6).
  */
+import { expandEffects } from '../effects-layers.js';
+import type { GlobalLight } from '@umbra/kernels/effects/types';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { compositeDocument } from '@umbra/kernels/composite';
 import { rectIsEmpty, type Rect } from '@umbra/core/geom';
@@ -213,12 +215,13 @@ export function ungroup(doc: Doc, id: number): Doc {
  * of ordinary size and wrong for anything interactive. The tiled fast path belongs with the
  * export work (spec 03 §5.3).
  */
-export function rasterize(layers: readonly Layer[], rect: Rect): Plane {
+export function rasterize(layers: readonly Layer[], rect: Rect, globalLight?: GlobalLight): Plane {
   const writer = Plane.empty(RGBA8).writer();
   if (rectIsEmpty(rect)) return writer.commit();
   // Fill layers are defined relative to the canvas, which is what `rect` is.
   const size = { width: rect.x1, height: rect.y1 };
-  const composite = layers.map((l) => toCompositeLayer(l, size));
+  // Merging keeps what the effects look like: they are part of the result.
+  const composite = expandEffects(layers, { ...size, globalLight }).map((l) => toCompositeLayer(l, size));
 
   for (let y = rect.y0; y < rect.y1; y++) {
     for (let x = rect.x0; x < rect.x1; x++) {
@@ -245,7 +248,7 @@ export function mergeDown(doc: Doc, id: number): Doc {
   const lower = found.parent[found.index - 1]!;
 
   // The pair is composited on its own, so the result is independent of what is beneath them.
-  const merged = makePixelLayer(lower.name, rasterize([lower, upper], canvasRect(doc)));
+  const merged = makePixelLayer(lower.name, rasterize([lower, upper], canvasRect(doc), doc.globalLight));
   const layers = mapSiblings(doc.layers, id, (sib, i) => {
     sib.splice(i - 1, 2, merged);
     return sib;
@@ -256,13 +259,13 @@ export function mergeDown(doc: Doc, id: number): Doc {
 export function mergeVisible(doc: Doc): Doc {
   const visible = doc.layers.filter((l) => l.visible);
   if (visible.length === 0) return doc;
-  const merged = makePixelLayer(visible[0]!.name, rasterize(visible, canvasRect(doc)));
+  const merged = makePixelLayer(visible[0]!.name, rasterize(visible, canvasRect(doc), doc.globalLight));
   const hidden = doc.layers.filter((l) => !l.visible);
   return { ...doc, layers: [merged, ...hidden], activeLayerIds: [merged.id] };
 }
 
 export function flatten(doc: Doc, name = 'Background'): Doc {
-  const merged = makePixelLayer(name, rasterize(doc.layers.filter((l) => l.visible), canvasRect(doc)));
+  const merged = makePixelLayer(name, rasterize(doc.layers.filter((l) => l.visible), canvasRect(doc), doc.globalLight));
   return { ...doc, layers: [merged], activeLayerIds: [merged.id], hasBackground: true };
 }
 
@@ -270,7 +273,7 @@ export function flatten(doc: Doc, name = 'Background'): Doc {
 export function stampVisible(doc: Doc): Doc {
   const visible = doc.layers.filter((l) => l.visible);
   if (visible.length === 0) return doc;
-  const stamp = makePixelLayer(nameFor(doc, 'Merged'), rasterize(visible, canvasRect(doc)));
+  const stamp = makePixelLayer(nameFor(doc, 'Merged'), rasterize(visible, canvasRect(doc), doc.globalLight));
   return { ...doc, layers: [...doc.layers, stamp], activeLayerIds: [stamp.id] };
 }
 

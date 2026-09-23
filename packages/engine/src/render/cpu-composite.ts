@@ -4,6 +4,7 @@
  * Used for export, for headless rendering, and by the tests that check a PSD renders the way
  * the spec says it should (spec 03 §5.3).
  */
+import { expandEffects } from '../effects-layers.js';
 import { TILE_SHIFT, TILE_SIZE, channelCount, maxValue } from '@umbra/core/pixels';
 import type { CompositeLayer, Sample } from '@umbra/kernels/composite';
 import { DEFAULT_BLENDING } from '@umbra/kernels/composite';
@@ -80,5 +81,5 @@ export function toCompositeLayer(layer: Layer, size: { width: number; height: nu
 }
 
 export function toCompositeLayers(doc: Doc): CompositeLayer[] {
-  return doc.layers.map((l) => toCompositeLayer(l, doc));
+  return expandEffects(doc.layers, doc).map((l) => toCompositeLayer(l, doc));
 }

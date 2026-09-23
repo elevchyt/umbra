@@ -65,3 +65,5 @@ export {
 } from '@umbra/kernels/applyimage';
 export { FILTERS, FILTER_BY_ID, GALLERY_EFFECTS, GALLERY_BY_ID, GALLERY_CATEGORIES, DEFAULT_STACK, parseStack, fromRgba8, toRgba8 } from '@umbra/kernels/filters/index';
 export { defaultsOf, type FilterDef, type FilterParams, type ParamSpec, type ParamValue, type GalleryEffect, type GalleryLayer, type GalleryCategory } from '@umbra/kernels/filters/types';
+export { DEFAULTS as EFFECT_DEFAULTS, EMPTY_EFFECTS, DEFAULT_GLOBAL_LIGHT, LINEAR_CONTOUR, hasVisibleEffects, type LayerEffects, type GlobalLight, type Contour, type ShadowEffect, type GlowEffect, type BevelEffect, type SatinEffect, type ColorOverlayEffect, type GradientOverlayEffect, type PatternOverlayEffect, type StrokeEffect, type StrokeFill, type GlowFill } from '@umbra/kernels/effects/types';
+export { CONTOUR_PRESETS, contourLut, applyContour } from '@umbra/kernels/effects/contour';

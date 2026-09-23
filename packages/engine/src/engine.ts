@@ -2,6 +2,7 @@
  * Engine: owns the document, the history and the GL context. Lives in a worker so that
  * neither UI work nor engine work can stall the other (spec 03 §2).
  */
+import { DEFAULT_GLOBAL_LIGHT, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
 import { TILE_SIZE, TILE_SHIFT } from '@umbra/core/pixels';
 import { EMPTY_RECT, rectIsEmpty, rectUnion, type Rect } from '@umbra/core/geom';
 import type { BlendMode } from '@umbra/core/blend';
@@ -437,6 +438,35 @@ export class Engine {
     };
     // A slider drag coalesces into one history entry rather than one per pixel of travel.
     this.history.amend('Layer Opacity', this.doc);
+  }
+
+  // ---- layer styles ----------------------------------------------------------------------
+
+  /** The Layer Style dialog's OK (and every one-shot style command): a new style for a layer. */
+  setLayerEffects(id: number, effects: LayerEffects | null, historyName = 'Layer Style'): boolean {
+    const layer = findLayer(this.doc.layers, id);
+    if (!layer || layer.kind === 'adjustment') return false;
+    this.previewDoc = null;
+    const next = { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, effects: effects ?? undefined })) };
+    this.commit(next, historyName);
+    return true;
+  }
+
+  /** The Layer Style dialog's live preview; null ends it. */
+  previewLayerEffects(id: number, effects: LayerEffects | null, globalLight?: GlobalLight): void {
+    if (!effects) {
+      this.previewDoc = null;
+      return;
+    }
+    const doc = { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, effects })) };
+    this.previewDoc = globalLight ? { ...doc, globalLight } : doc;
+  }
+
+  /** Layer ▸ Layer Style ▸ Global Light. */
+  setGlobalLight(light: GlobalLight): boolean {
+    this.previewDoc = null;
+    this.commit({ ...this.doc, globalLight: light }, 'Global Light');
+    return true;
   }
 
   setLayerBlendMode(id: number, mode: BlendMode): void {
@@ -2753,6 +2783,7 @@ export class Engine {
       activeLayerIds: [...this.doc.activeLayerIds],
       maskTarget: this.paintTarget()?.mask && !this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       editingContents: this.editingContents,
+      globalLight: this.doc.globalLight ?? DEFAULT_GLOBAL_LIGHT,
       filterMaskTarget: this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
       fadeName: this.fadeName,
@@ -2776,6 +2807,7 @@ export class Engine {
         name: layer.name,
         kind: layer.kind,
         smart: layer.kind === 'smart' ? Engine.smartToSummary(layer) : undefined,
+        effects: layer.effects,
         adjustment: layer.kind === 'adjustment' ? layer.adjustment : undefined,
         fillContent: layer.kind === 'fill' ? Engine.fillToSummary(layer.content) : undefined,
         depth,

@@ -16,6 +16,7 @@ import type { BlendMode } from '@umbra/core/blend';
 import { compositePixel } from '@umbra/kernels/blend';
 import { compose, scale, transformedBounds, translate, type Mat } from '@umbra/kernels/matrix';
 import { FILTER_BY_ID } from '@umbra/kernels/filters/index';
+import { hasVisibleEffects } from '@umbra/kernels/effects/types';
 import { Plane } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
 import { RGBA8 } from './tiles/import.js';
@@ -57,7 +58,7 @@ let nextSourceId = 1;
 
 const canvasOf = (s: Size): Rect => ({ x0: 0, y0: 0, x1: s.width, y1: s.height });
 
-const plain = (l: Layer) => l.visible && l.opacity >= 1 && l.fill >= 1 && l.blendMode === 'normal' && !l.mask && !l.clipped;
+const plain = (l: Layer) => l.visible && l.opacity >= 1 && l.fill >= 1 && l.blendMode === 'normal' && !l.mask && !l.clipped && !hasVisibleEffects(l.effects);
 
 /** The embedded document flattened. One plain pixel layer inside the canvas is used as it is. */
 export function flattenSource(doc: Doc): Plane {
@@ -68,7 +69,7 @@ export function flattenSource(doc: Doc): Plane {
     const b = tightBounds(only.plane.base);
     if (rectIsEmpty(b) || (b.x0 >= 0 && b.y0 >= 0 && b.x1 <= canvas.x1 && b.y1 <= canvas.y1)) return only.plane.base;
   }
-  return rasterize(visible, canvas);
+  return rasterize(visible, canvas, doc.globalLight);
 }
 
 export function makeSource(name: string, doc: Doc, id = nextSourceId++, file?: SmartSource['file']): SmartSource {
