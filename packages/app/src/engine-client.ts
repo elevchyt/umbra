@@ -225,6 +225,9 @@ export class EngineClient {
   transformActive = false;
   /** True when the Move tool is selected, so a drag transforms rather than pans. */
   moveTool = false;
+  /** Set while a vector tool (Pen, anchors, Path/Direct Selection) is active. */
+  vectorTool: string | null = null;
+  private vectorDown = false;
   private transformDragging = false;
   /** Combine mode chosen in the options bar; modifier keys override it for one gesture. */
   selectOp = 'new';
@@ -330,6 +333,12 @@ export class EngineClient {
         this.transformDragging = true;
         return;
       }
+      if (this.vectorTool && e.button === 0 && !this.transformActive) {
+        const p = toLocal(e);
+        this.vectorDown = true;
+        this.send({ t: 'vectorPointer', phase: 'down', x: p.x, y: p.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, clicks: e.detail });
+        return;
+      }
       if (this.fillTool && e.button === 0) {
         const p = toLocal(e);
         if (this.fillTool === 'bucket') {
@@ -403,6 +412,12 @@ export class EngineClient {
         });
         return;
       }
+      if (this.vectorTool && !this.transformActive) {
+        // Moves go even with the button up: the Pen's rubber band follows the pointer.
+        const p = toLocal(e);
+        this.send({ t: 'vectorPointer', phase: 'move', x: p.x, y: p.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, clicks: 0 });
+        if (this.vectorDown || !this.panning) return;
+      }
       if (this.sampling && this.sampleSize !== null) {
         const p = toLocal(e);
         this.send({ t: 'sample', x: p.x, y: p.y, size: this.sampleSize, toBackground: e.altKey });
@@ -429,6 +444,11 @@ export class EngineClient {
       // race the ring: messages are delivered immediately, but ring samples are only drained on
       // the next tick, so the stroke would end before its own samples had been consumed and the
       // tail of the stroke would be silently dropped.
+      if (this.vectorDown) {
+        this.vectorDown = false;
+        const p = toLocal(e);
+        this.send({ t: 'vectorPointer', phase: 'up', x: p.x, y: p.y, shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey || e.metaKey, clicks: e.detail });
+      }
       if (this.selecting) {
         const p = toLocal(e);
         this.send({ t: 'endSelect', x: p.x, y: p.y });

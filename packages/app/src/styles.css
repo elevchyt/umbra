@@ -1131,3 +1131,10 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .fx-contour-curve { stroke: var(--text); stroke-width: 1.5; fill: none; }
 .fx-contour-point { fill: var(--panel); stroke: var(--text); cursor: move; }
 .fx-contour-point.corner { fill: var(--accent); }
+.paths-panel { display: flex; flex-direction: column; height: 100%; }
+.paths-list { flex: 1; overflow-y: auto; min-height: 60px; }
+.path-row { display: flex; align-items: center; gap: 8px; padding: 3px 6px; cursor: default; }
+.path-row:hover { background: var(--row-hover); }
+.path-row.selected { background: var(--row-selected); }
+.path-row.work .path-name { font-style: italic; }
+.path-thumb { width: 36px; height: 36px; border: 1px solid var(--border-dark); flex: none; }

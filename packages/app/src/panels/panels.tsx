@@ -7,6 +7,7 @@ import { gradientCss } from '../adjust/editors';
 import { STYLE_ITEMS, type StyleKey } from '../fx/LayerStyleDialog';
 import { MENUS } from '../menus/menus';
 import { StylesPanel } from '../fx/StylesPanel';
+import { PathsPanel } from '../paths/PathsPanel';
 import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
@@ -46,7 +47,7 @@ export function renderPanel(id: string): JSX.Element {
     case 'channels':
       return <ChannelsPanel />;
     case 'paths':
-      return <Placeholder name="Paths" milestone="M7" what="work path, saved paths, fill and stroke path" />;
+      return <PathsPanel />;
     case 'adjustments':
       return <AdjustmentsPanel />;
     case 'brushSettings':

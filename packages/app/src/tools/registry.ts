@@ -161,12 +161,12 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'pen',
     key: 'p',
     tools: [
-      { id: 'pen', name: 'Pen Tool', icon: 'pen', key: 'p' },
-      { id: 'freeformPen', name: 'Freeform Pen Tool', icon: 'freeformPen', key: 'p' },
-      { id: 'curvaturePen', name: 'Curvature Pen Tool', icon: 'curvaturePen', key: 'p' },
-      { id: 'addAnchor', name: 'Add Anchor Point Tool', icon: 'addAnchor' },
-      { id: 'deleteAnchor', name: 'Delete Anchor Point Tool', icon: 'deleteAnchor' },
-      { id: 'convertPoint', name: 'Convert Point Tool', icon: 'convertPoint' },
+      { id: 'pen', name: 'Pen Tool', icon: 'pen', key: 'p', implemented: true, hint: 'Click for corners, drag for curves; click the first anchor to close. Ctrl: Direct Selection.' },
+      { id: 'freeformPen', name: 'Freeform Pen Tool', icon: 'freeformPen', key: 'p', implemented: true, hint: 'Drag to draw; curves are fitted to the trail.' },
+      { id: 'curvaturePen', name: 'Curvature Pen Tool', icon: 'curvaturePen', key: 'p', implemented: true, hint: 'Click points; the curve smooths through them. Double-click a point for a corner.' },
+      { id: 'addAnchor', name: 'Add Anchor Point Tool', icon: 'addAnchor', implemented: true, hint: 'Click a segment to add an anchor.' },
+      { id: 'deleteAnchor', name: 'Delete Anchor Point Tool', icon: 'deleteAnchor', implemented: true, hint: 'Click an anchor to delete it.' },
+      { id: 'convertPoint', name: 'Convert Point Tool', icon: 'convertPoint', implemented: true, hint: 'Click an anchor to make a corner; drag to pull out smooth handles; drag a handle to break it.' },
     ],
   },
   {
@@ -183,8 +183,8 @@ export const TOOL_GROUPS: ToolGroup[] = [
     id: 'pathSelect',
     key: 'a',
     tools: [
-      { id: 'pathSelect', name: 'Path Selection Tool', icon: 'pathSelect', key: 'a' },
-      { id: 'directSelect', name: 'Direct Selection Tool', icon: 'directSelect', key: 'a' },
+      { id: 'pathSelect', name: 'Path Selection Tool', icon: 'pathSelect', key: 'a', implemented: true, hint: 'Click or drag to select whole paths; drag to move, Alt-drag to duplicate.' },
+      { id: 'directSelect', name: 'Direct Selection Tool', icon: 'directSelect', key: 'a', implemented: true, hint: 'Click or drag to select anchors; drag anchors, segments or handles.' },
     ],
   },
   {

@@ -10,7 +10,9 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { LayerStyleProps, SmartCommand, SmartFilterOp, StyleCommand } from './engine.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand } from './engine.js';
+import type { VectorOptions, VectorToolId } from './vector-tool.js';
+import type { Path } from '@umbra/kernels/vector/path';
 
 type Rgb3 = [number, number, number];
 
@@ -107,6 +109,9 @@ export interface DocSummary {
   maskTarget: number | null;
   /** Layer ▸ Layer Style ▸ Global Light. */
   globalLight: GlobalLight;
+  /** The Paths panel: saved paths and the Work Path, and the one selected. */
+  paths: { id: number; name: string; work: boolean; path: Path }[];
+  activePathId: number | null;
   /** The smart object whose FILTER mask is the edit target. */
   filterMaskTarget: number | null;
   /** Set while a smart object's contents are open: the documents above them, and whether they changed since saved. */
@@ -239,6 +244,11 @@ export type ToEngine =
   /** Latest wins; effects and props both absent ends the preview. */
   | { t: 'previewLayerStyle'; id: number; effects: LayerEffects | null; props?: LayerStyleProps; globalLight?: GlobalLight }
   | { t: 'styleCommand'; cmd: StyleCommand; amount?: number }
+  /** The active vector tool (null: none), and its options-bar settings. */
+  | { t: 'setVectorTool'; tool: VectorToolId | null; options?: Partial<VectorOptions> }
+  | { t: 'vectorPointer'; phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; alt: boolean; ctrl: boolean; clicks: number }
+  | { t: 'vectorKey'; key: string }
+  | ({ t: 'pathCommand' } & PathCommand)
   /** The Styles panel's library; each answered with the updated `styles` list. */
   | { t: 'requestStyles' }
   | { t: 'applyStyle'; id: string }

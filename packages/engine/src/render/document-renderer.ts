@@ -6,6 +6,7 @@
  * clipping run and mask therefore goes through exactly the same code the parity suite checks
  * against the CPU reference.
  */
+import { PathOverlayRenderer, type PathOverlay } from './path-overlay.js';
 import { EffectsCache, expandEffects } from '../effects-layers.js';
 import type { Rect } from '@umbra/core/geom';
 import { Program } from '../gpu/program.js';
@@ -127,6 +128,7 @@ export class DocumentRenderer {
     this.ants = new AntsRenderer(gl);
     this.quickMask = new QuickMaskRenderer(gl);
     this.handles = new HandlesRenderer(gl);
+    this.paths = new PathOverlayRenderer(gl);
     this.fills = new FillRenderer(gl);
     this.present = new Program(gl, QUAD_VERT, PRESENT_FRAG, 'present');
     this.checker = new Program(gl, CANVAS_MASK_VERT, CHECKER_FRAG, 'checker');
@@ -165,6 +167,9 @@ export class DocumentRenderer {
    * rewritten, so dragging is free and the pixels are resampled exactly once, on commit.
    */
   private liveTransform: { ids: ReadonlySet<number>; matrix: Mat } | null = null;
+  /** The vector tools' overlay (target path, anchors, handles), set by the engine. */
+  pathOverlay: PathOverlay | null = null;
+  private paths!: PathOverlayRenderer;
   /** Rendered layer effects, per layer, reused while nothing they depend on changes. */
   private readonly fxCache = new EffectsCache();
 
@@ -432,6 +437,8 @@ export class DocumentRenderer {
       // Selection outline sits on top of everything, in screen space.
       this.ants.draw(view, performance.now());
     }
+    // Paths and their anchors go over the selection outline.
+    if (this.pathOverlay) this.paths.render(view, this.pathOverlay);
     // The transform box goes above even the ants: it is what the pointer is acting on.
     if (transformBox) this.handles.draw(view, transformBox.box, transformBox.matrix);
 
@@ -533,6 +540,7 @@ export class DocumentRenderer {
     this.channel.dispose();
     this.quickMask.dispose();
     this.handles.dispose();
+    this.paths.dispose();
     this.fills.dispose();
     this.gl.deleteBuffer(this.quad);
     this.gl.deleteVertexArray(this.vao);

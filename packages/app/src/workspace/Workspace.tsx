@@ -30,6 +30,9 @@ import { NewDocumentDialog, ColorPickerDialog, AboutDialog, SystemInfoDialog, Sh
 
 const THEME_ORDER: ThemeName[] = ['darkest', 'dark', 'medium', 'light'];
 
+/** The tools the engine's vector state machine drives. */
+const VECTOR_TOOLS = new Set(['pen', 'freeformPen', 'curvaturePen', 'addAnchor', 'deleteAnchor', 'convertPoint', 'pathSelect', 'directSelect']);
+
 /** Commands that only make sense on a smart object, and when. */
 const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
   'so.newViaCopy': () => true,
@@ -232,6 +235,9 @@ export function Workspace() {
     client.moveTool = tool === 'move';
     client.fillTool = tool === 'paintBucket' ? 'bucket' : tool === 'gradient' ? 'gradient' : null;
     client.cropTool = tool === 'crop';
+    const vector = VECTOR_TOOLS.has(tool) ? tool : null;
+    client.vectorTool = vector;
+    client.send({ t: 'setVectorTool', tool: vector as never, options: store.vectorOptions() });
   });
 
   // An armed dialog eyedropper takes canvas clicks away from the tool. Read the signals
@@ -1148,6 +1154,12 @@ export function Workspace() {
       if (isTextEntry(e.target)) return;
       // Any modal swallows the shell's shortcuts, including the small Select ▸ Modify dialogs.
       if (store.dialog() || amountPrompt()) return;
+      // The vector tools take Enter/Escape (end the path) and Backspace/Delete (delete anchors).
+      if (VECTOR_TOOLS.has(store.activeTool()) && ['Enter', 'Escape', 'Backspace', 'Delete'].includes(e.key)) {
+        e.preventDefault();
+        send({ t: 'vectorKey', key: e.key });
+        return;
+      }
       // A transform or crop box owns Enter, Escape and the arrow keys while it is open.
       if (transforming()) {
         const cropping = store.activeTool() === 'crop';

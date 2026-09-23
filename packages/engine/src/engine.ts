@@ -2,6 +2,12 @@
  * Engine: owns the document, the history and the GL context. Lives in a worker so that
  * neither UI work nor engine work can stall the other (spec 03 §2).
  */
+import { VectorTool, overlayOutline, type VectorOptions, type VectorToolId } from './vector-tool.js';
+import type { PathOverlay } from './render/path-overlay.js';
+import { flattenSubpath, type Path } from '@umbra/kernels/vector/path';
+import { rasterizePath } from '@umbra/kernels/vector/raster';
+import { coverageToPath } from '@umbra/kernels/vector/trace';
+import { combine as combineMask, createMask } from '@umbra/kernels/selection';
 import { DEFAULT_GLOBAL_LIGHT, mapEffectPatterns, scaleEffects, type GlobalLight, type LayerEffects } from '@umbra/kernels/effects/types';
 import { EffectsCache, type EffectLayer } from './effects-layers.js';
 import { builtinStyles, type StylePreset } from '@umbra/kernels/effects/presets';
@@ -47,6 +53,7 @@ import {
   type PixelLayer,
   type SmartObjectLayer,
   type SmartSource,
+  type SavedPath,
 } from './document.js';
 import { History } from './history.js';
 import {
@@ -144,6 +151,23 @@ function transformReadout(box: Rect, m: Mat) {
 
 const STROKE_SPACING = 0.25; // fraction of diameter, Photoshop's default
 
+export interface PathCommand {
+  cmd: 'select' | 'new' | 'save' | 'rename' | 'duplicate' | 'delete' | 'fill' | 'stroke' | 'toSelection' | 'fromSelection';
+  /** The path to act on; the selected one when absent. */
+  id?: number;
+  name?: string;
+  color?: [number, number, number];
+  mode?: string;
+  opacity?: number;
+  preserveTransparency?: boolean;
+  feather?: number;
+  antiAlias?: boolean;
+  op?: string;
+  tolerance?: number;
+  tool?: 'brush' | 'pencil' | 'eraser';
+  brush?: BrushParams;
+  simulatePressure?: boolean;
+}
 export type StyleCommand = 'copy' | 'paste' | 'clear' | 'hideAll' | 'scale' | 'createLayers' | 'rasterize';
 export interface LayerStyleProps {
   opacity?: number;
@@ -677,6 +701,8 @@ export class Engine {
     const doc = this.history.undo();
     if (!doc) return false;
     this.doc = doc;
+    // A path edit in progress refers to indices the older path may not have.
+    this.vector.reset();
     return true;
   }
 
@@ -684,7 +710,208 @@ export class Engine {
     const doc = this.history.redo();
     if (!doc) return false;
     this.doc = doc;
+    this.vector.reset();
     return true;
+  }
+
+  // ---- paths and the vector tools --------------------------------------------------------
+
+  /** Pen, Freeform/Curvature Pen, anchor tools, Path/Direct Selection (spec 04 §6). */
+  readonly vector = new VectorTool(() => 6 / Math.max(1e-6, this.view.zoom));
+  /** A vector tool is the active tool (anchors show only then). */
+  vectorToolActive = false;
+  /** The path the Paths panel has selected: what the vector tools edit and the commands use. */
+  activePathId: number | null = null;
+  private nextPathId = 1;
+
+  private targetPath(): SavedPath | null {
+    return (this.doc.paths ?? []).find((p) => p.id === this.activePathId) ?? null;
+  }
+
+  /** The document with the target path replaced; with no target, a new Work Path (replacing any old one). */
+  private withPath(path: Path): Doc {
+    const paths = this.doc.paths ?? [];
+    const cur = this.targetPath();
+    if (cur) return { ...this.doc, paths: paths.map((p) => (p.id === cur.id ? { ...p, path } : p)) };
+    const id = this.nextPathId++;
+    this.activePathId = id;
+    return { ...this.doc, paths: [...paths.filter((p) => !p.work), { id, name: 'Work Path', path, work: true }] };
+  }
+
+  private applyVector(r: { path: Path | null; commit: string | null }): boolean {
+    if (r.path) this.doc = this.withPath(r.path);
+    if (r.commit) {
+      this.previewDoc = null;
+      this.fadeState = null;
+      this.history.push(r.commit, this.doc);
+    }
+    return !!(r.path || r.commit);
+  }
+
+  setVectorTool(tool: VectorToolId | null, options?: Partial<VectorOptions>): void {
+    if (tool && tool !== this.vector.tool) {
+      this.vector.tool = tool;
+      this.vector.drawing = null;
+    }
+    this.vectorToolActive = !!tool;
+    if (options) this.vector.options = { ...this.vector.options, ...options };
+  }
+
+  /** A pointer event for the active vector tool, in screen coordinates. */
+  vectorPointer(e: { phase: 'down' | 'move' | 'up'; x: number; y: number; shift: boolean; alt: boolean; ctrl: boolean; clicks: number }): boolean {
+    const d = docPointAtScreen(this.view, e.x, e.y);
+    const r = this.vector.pointer(this.targetPath()?.path ?? null, { ...e, x: d.x, y: d.y });
+    return this.applyVector(r) || e.phase !== 'move';
+  }
+
+  vectorKey(key: string): boolean {
+    return this.applyVector(this.vector.key(this.targetPath()?.path ?? null, key));
+  }
+
+  /** The overlay the renderer draws for the vector tools. */
+  private pathOverlay(): PathOverlay | null {
+    const t = this.targetPath();
+    const trail = this.vector.trail;
+    if (!t) return trail ? { outlines: [], anchors: [], handles: [], rubber: null, marquee: this.vector.marquee, trail } : null;
+    const p = t.path;
+    const tools = this.vectorToolActive;
+    const selected = new Set(this.vector.selected.map((r) => `${r.s}:${r.k}`));
+    const wholeSelected = new Set(this.vector.selectedSubpaths);
+    const anchors: PathOverlay['anchors'] = [];
+    if (tools) {
+      p.subpaths.forEach((sp, s) => sp.knots.forEach((k, i) => anchors.push({ p: k.anchor, selected: selected.has(`${s}:${i}`) || wholeSelected.has(s) })));
+    }
+    const handles: PathOverlay['handles'] = [];
+    if (tools) {
+      for (const r of this.vector.visibleHandleKnots(p)) {
+        const k = p.subpaths[r.s]?.knots[r.k];
+        if (!k) continue;
+        if (Math.hypot(k.in.x - k.anchor.x, k.in.y - k.anchor.y) > 0.01) handles.push({ anchor: k.anchor, handle: k.in });
+        if (Math.hypot(k.out.x - k.anchor.x, k.out.y - k.anchor.y) > 0.01) handles.push({ anchor: k.anchor, handle: k.out });
+      }
+    }
+    let rubber: PathOverlay['rubber'] = null;
+    const drawing = this.vector.drawing;
+    if (tools && drawing !== null && this.vector.hover && this.vector.tool === 'pen') {
+      const knots = p.subpaths[drawing]?.knots;
+      if (knots?.length) rubber = [knots[knots.length - 1]!.anchor, this.vector.hover];
+    }
+    return { outlines: overlayOutline(p), anchors, handles, rubber, marquee: this.vector.marquee, trail };
+  }
+
+  /** Paths panel commands and Fill/Stroke Path, Make Selection, Make Work Path. */
+  pathCommand(cmd: PathCommand): boolean {
+    const paths = this.doc.paths ?? [];
+    const commitPaths = (next: readonly SavedPath[], name: string) => {
+      this.commit({ ...this.doc, paths: next }, name);
+      return true;
+    };
+    const target = cmd.id !== undefined ? paths.find((p) => p.id === cmd.id) : this.targetPath();
+    switch (cmd.cmd) {
+      case 'select':
+        this.activePathId = cmd.id ?? null;
+        this.vector.reset();
+        return true;
+      case 'new': {
+        const id = this.nextPathId++;
+        this.activePathId = id;
+        this.vector.reset();
+        return commitPaths([...paths, { id, name: cmd.name || `Path ${paths.filter((p) => !p.work).length + 1}`, path: { subpaths: [] }, work: false }], 'New Path');
+      }
+      case 'save':
+        if (!target) return false;
+        return commitPaths(paths.map((p) => (p.id === target.id ? { ...p, work: false, name: cmd.name || `Path ${paths.filter((q) => !q.work).length + 1}` } : p)), 'Save Path');
+      case 'rename':
+        if (!target || !cmd.name) return false;
+        return commitPaths(paths.map((p) => (p.id === target.id ? { ...p, name: cmd.name! } : p)), 'Rename Path');
+      case 'duplicate': {
+        if (!target) return false;
+        const id = this.nextPathId++;
+        return commitPaths([...paths, { id, name: `${target.name} copy`, path: target.path, work: false }], 'Duplicate Path');
+      }
+      case 'delete':
+        if (!target) return false;
+        if (this.activePathId === target.id) this.activePathId = null;
+        this.vector.reset();
+        return commitPaths(paths.filter((p) => p.id !== target.id), 'Delete Path');
+      case 'fill': {
+        if (!target) return false;
+        const sel = this.pathSelection(target.path, 'new', cmd.feather ?? 0, cmd.antiAlias !== false);
+        if (!sel) return false;
+        const next = FillCmd.fill({ ...this.doc, selection: sel }, { color: cmd.color ?? [0, 0, 0], mode: (cmd.mode ?? 'normal') as never, opacity: cmd.opacity ?? 1, preserveTransparency: !!cmd.preserveTransparency });
+        this.commit({ ...next, selection: this.doc.selection }, 'Fill Path');
+        return true;
+      }
+      case 'stroke':
+        return target ? this.strokePath(target.path, cmd) : false;
+      case 'toSelection': {
+        if (!target) return false;
+        const sel = this.pathSelection(target.path, (cmd.op ?? 'new') as CombineOp, cmd.feather ?? 0, cmd.antiAlias !== false);
+        if (!sel) return false;
+        this.setSelection(sel, 'Make Selection');
+        return true;
+      }
+      case 'fromSelection': {
+        const sel = this.doc.selection;
+        if (!sel) return false;
+        const cov = new Float32Array(sel.mask.length);
+        for (let i = 0; i < cov.length; i++) cov[i] = sel.mask[i]! / 255;
+        const path = coverageToPath(cov, sel.width, sel.height, cmd.tolerance ?? 2);
+        const id = this.nextPathId++;
+        this.activePathId = id;
+        this.vector.reset();
+        return commitPaths([...paths.filter((p) => !p.work), { id, name: 'Work Path', path, work: true }], 'Make Work Path');
+      }
+    }
+  }
+
+  /** A path's fill as a selection combined with the current one. */
+  private pathSelection(path: Path, op: CombineOp, feather: number, antiAlias: boolean): Selection | null {
+    const { width: w, height: h } = this.doc;
+    const cov = rasterizePath(path, { x0: 0, y0: 0, x1: w, y1: h });
+    const mask = createMask(w, h);
+    for (let i = 0; i < mask.length; i++) mask[i] = antiAlias ? Math.round(cov[i]! * 255) : cov[i]! >= 0.5 ? 255 : 0;
+    let sel = makeSelection(w, h, mask);
+    if (feather > 0) sel = featherSelection(sel, feather);
+    if (op === 'new' || !this.doc.selection) return sel;
+    const dst = Uint8Array.from(this.doc.selection.mask);
+    return makeSelection(w, h, combineMask(dst, sel.mask, op));
+  }
+
+  /**
+   * Stroke Path: the brush (or pencil, or eraser) run along the path with the current tip and
+   * colour; Simulate Pressure tapers it from nothing to full and back, as Photoshop does.
+   */
+  private strokePath(path: Path, cmd: PathCommand): boolean {
+    if (!cmd.brush) return false;
+    const mode: PaintMode = cmd.tool === 'eraser' ? 'clear' : ((cmd.mode ?? 'normal') as PaintMode);
+    const brush = cmd.tool === 'pencil' ? { ...cmd.brush, hardness: 1 } : cmd.brush;
+    let stroked = false;
+    for (const sp of path.subpaths) {
+      const pts = flattenSubpath(sp, 0.25);
+      if (sp.closed && pts.length > 1) pts.push(pts[0]!);
+      if (pts.length === 0) continue;
+      // Resample at half-pixel spacing so the brush engine's own spacing decides the dabs.
+      const along: { x: number; y: number }[] = [pts[0]!];
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1]!;
+        const b = pts[i]!;
+        const n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) * 2));
+        for (let j = 1; j <= n; j++) along.push({ x: a.x + ((b.x - a.x) * j) / n, y: a.y + ((b.y - a.y) * j) / n });
+      }
+      this.beginStroke(brush, cmd.color ?? [0, 0, 0], mode);
+      if (!this.painting || !this.strokeState) continue;
+      const t0 = nowAbs();
+      along.forEach((q, i) => {
+        const f = along.length > 1 ? i / (along.length - 1) : 0.5;
+        const pressure = cmd.simulatePressure ? Math.sin(Math.PI * f) : 1;
+        for (const dab of strokeTo(this.strokeState!, { x: q.x, y: q.y, pressure, time: t0 + i })) this.stampDab(dab);
+      });
+      this.endStroke();
+      stroked = true;
+    }
+    if (stroked) this.history.amend('Stroke Path', this.doc);
+    return stroked;
   }
 
   // ---- selection ----------------------------------------------------------------------
@@ -2893,6 +3120,7 @@ export class Engine {
     );
     this.renderer.setAdjustPreview(this.adjustPreview);
     const overlay = this.quickMask ? this.selectionTexture() : null;
+    this.renderer.pathOverlay = this.pathOverlay();
     const s = this.renderer.render(
       this.previewDoc ?? this.doc,
       this.view,
@@ -2963,6 +3191,8 @@ export class Engine {
       maskTarget: this.paintTarget()?.mask && !this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       editingContents: this.editingContents,
       globalLight: this.doc.globalLight ?? DEFAULT_GLOBAL_LIGHT,
+      paths: (this.doc.paths ?? []).map((p) => ({ id: p.id, name: p.name, work: p.work, path: p.path })),
+      activePathId: this.targetPath()?.id ?? null,
       filterMaskTarget: this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       lastFilter: this.lastFilterRun ? { id: this.lastFilterRun.id, label: FILTER_BY_ID.get(this.lastFilterRun.id)?.label ?? '' } : null,
       fadeName: this.fadeName,

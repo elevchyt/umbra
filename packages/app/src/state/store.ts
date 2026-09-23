@@ -147,6 +147,8 @@ export interface Histogram {
 }
 /** The pattern library as the engine last reported it (thumbnails only; pixels stay there). */
 const [patterns, setPatterns] = createSignal<PatternSummary[]>([]);
+/** The vector tools' options bar: Auto Add/Delete, Curve Fit, the path operation. */
+const [vectorOptions, setVectorOptions] = createSignal<{ autoAddDelete: boolean; curveFit: number; op: 'add' | 'subtract' | 'intersect' | 'exclude' }>({ autoAddDelete: true, curveFit: 2, op: 'add' });
 /** The Styles panel's library, as the engine last sent it. */
 const [styles, setStyles] = createSignal<StylePreset[]>([]);
 /**
@@ -346,6 +348,8 @@ export const store = {
   setPatterns,
   styles,
   setStyles,
+  vectorOptions,
+  setVectorOptions,
   luts,
   setLuts,
   pickRequest,

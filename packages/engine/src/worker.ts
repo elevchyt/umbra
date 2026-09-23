@@ -270,6 +270,21 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         latestPreview(() => engine?.previewLayerStyle(m.id, m.effects, m.props, m.globalLight));
         break;
       }
+      case 'setVectorTool':
+        engine?.setVectorTool(msg.tool, msg.options);
+        break;
+      case 'vectorPointer':
+        // Moves only redraw the overlay; everything else can change the Paths panel.
+        if (engine?.vectorPointer(msg) && msg.phase !== 'move') post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'vectorKey':
+        if (engine?.vectorKey(msg.key)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'pathCommand': {
+        const { t: _t, ...cmd } = msg;
+        if (engine?.pathCommand(cmd)) post({ t: 'doc', doc: engine.summary() });
+        break;
+      }
       case 'styleCommand':
         pendingPreview = null;
         if (engine?.styleCommand(msg.cmd, msg.amount)) post({ t: 'doc', doc: engine.summary() });

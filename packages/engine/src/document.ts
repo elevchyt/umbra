@@ -17,6 +17,7 @@ import type { Selection } from './selection.js';
 import type { Mat } from '@umbra/kernels/matrix';
 import type { FilterParams } from '@umbra/kernels/filters/types';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
+import type { Path } from '@umbra/kernels/vector/path';
 
 export type LabelColor =
   | 'none'
@@ -190,6 +191,14 @@ export interface AlphaChannel {
   readonly indicates: 'masked' | 'selected';
 }
 
+/** A path in the Paths panel: a saved one, or the Work Path (at most one, unsaved). */
+export interface SavedPath {
+  readonly id: number;
+  readonly name: string;
+  readonly path: Path;
+  readonly work: boolean;
+}
+
 export interface Doc {
   readonly name: string;
   readonly width: number;
@@ -205,6 +214,8 @@ export interface Doc {
   readonly hasBackground: boolean;
   /** Layer ▸ Layer Style ▸ Global Light; effects with "Use Global Light" follow it. */
   readonly globalLight?: GlobalLight;
+  /** The Paths panel's saved paths and the Work Path (spec 02 §7). */
+  readonly paths?: readonly SavedPath[];
   readonly dirty: boolean;
 }
 

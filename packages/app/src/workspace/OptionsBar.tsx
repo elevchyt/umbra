@@ -342,6 +342,33 @@ export function OptionsBar(props: OptionsBarProps) {
           />
         </Match>
 
+        <Match when={['pen', 'freeformPen', 'curvaturePen', 'pathSelect', 'directSelect', 'addAnchor', 'deleteAnchor', 'convertPoint'].includes(store.activeTool())}>
+          <span class="options-label">Path</span>
+          <Separator />
+          <Select
+            label="Operation"
+            value={store.vectorOptions().op}
+            width={140}
+            options={[
+              { value: 'add', label: 'Combine Shapes' },
+              { value: 'subtract', label: 'Subtract Front Shape' },
+              { value: 'intersect', label: 'Intersect Shape Areas' },
+              { value: 'exclude', label: 'Exclude Overlapping' },
+            ]}
+            onChange={(op) => store.setVectorOptions({ ...store.vectorOptions(), op: op as 'add' })}
+          />
+          <Show when={store.activeTool() === 'pen'}>
+            <Checkbox checked={store.vectorOptions().autoAddDelete} label="Auto Add/Delete" onChange={(v) => store.setVectorOptions({ ...store.vectorOptions(), autoAddDelete: v })} />
+          </Show>
+          <Show when={store.activeTool() === 'freeformPen'}>
+            <NumberField label="Curve Fit" value={store.vectorOptions().curveFit} min={0.5} max={10} step={0.5} precision={1} suffix="px" width={48} onChange={(v) => store.setVectorOptions({ ...store.vectorOptions(), curveFit: v })} />
+          </Show>
+          <Separator />
+          <span class="options-label">Make:</span>
+          <IconButton icon="marqueeRect" title="Make Selection from the path" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'toSelection', op: 'new' } as never)} />
+          <IconButton icon="pen" title="Make a Work Path from the selection" onClick={() => store.engine?.({ t: 'pathCommand', cmd: 'fromSelection', tolerance: 2 } as never)} />
+        </Match>
+
         <Match when={store.activeTool() === 'magicWand'}>
           <SelectionOps />
           <Separator />
