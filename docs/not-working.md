@@ -206,10 +206,20 @@ implementation.
 - [x] **The symmetry guide** (2026-09-24): while a painting tool has symmetry on, its axes (or
       the wave, circle or spiral) show on the canvas. Handles move the centre, turn it (Shift
       for 15° steps) and size the figure; the options bar's Size and Angle follow.
-- [ ] **The symmetry guide is not a path**: Photoshop keeps the symmetry as an editable path
-      in the Paths panel, with Free Transform's full box. Here it has three handles, and Path
-      symmetry shows the path only when a path tool is active. Past twice a Circle's radius, a
-      mirror crosses the centre.
+- [x] **The symmetry path's transform box** (2026-09-24). Choosing a type, the options bar's
+      Transform button, or the "Symmetry" row in the Paths panel opens a box round the figure:
+      - corner and side handles scale about the centre (Shift keeps the proportions)
+      - Ctrl on the top or bottom handle skews
+      - the knob turns it (Shift: 15° steps), and the centre handle moves it
+      - the options bar has X, Y, W, H, angle and skew fields
+      - Enter commits and Esc restores it
+
+      A stretched or skewed symmetry mirrors in its own frame (a stretched Circle mirrors
+      across the ellipse).
+- [ ] **The symmetry path is not an ordinary path**: its anchors cannot be edited with the
+      Direct Selection tool, and it scales about its centre (no reference point, no vertical
+      skew). Path symmetry shows its path only while a path tool is active. Past twice a
+      Circle's radius, a mirror crosses the centre.
 - [x] **Load Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel. It maps onto
       Umbra's tools and options:
       - brushes with all their dynamics and sampled tips

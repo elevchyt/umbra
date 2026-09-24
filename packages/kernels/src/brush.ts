@@ -647,14 +647,78 @@ function mirroredTip(dab: Dab, n: { x: number; y: number; tx: number; ty: number
   return mirrored(dab, m, n.x, n.y);
 }
 
+/**
+ * The symmetry path's placement: a figure point q (laid out about the origin, angle 0) lands
+ * at centre + R(angle)·K·q, K = scale·skew. Null when it is only a centre and an angle.
+ */
+export function symmetryPlacement(s: Symmetry): { toDoc: (x: number, y: number) => Pt; toFigure: (x: number, y: number) => Pt; linear: [number, number, number, number] } | null {
+  const t = s.transform;
+  if (!t || (t.scaleX === 1 && t.scaleY === 1 && t.skew === 0) || s.mode === 'path') return null;
+  const th = (s.angle * Math.PI) / 180;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const sx = Math.abs(t.scaleX) < 0.01 ? 0.01 * Math.sign(t.scaleX || 1) : t.scaleX;
+  const sy = Math.abs(t.scaleY) < 0.01 ? 0.01 * Math.sign(t.scaleY || 1) : t.scaleY;
+  const k = Math.tan((Math.max(-89, Math.min(89, t.skew)) * Math.PI) / 180);
+  // L = R·K, K = [[sx, sx·k], [0, sy]].
+  const a = cos * sx;
+  const b = sin * sx;
+  const c = cos * sx * k - sin * sy;
+  const d = sin * sx * k + cos * sy;
+  const det = a * d - b * c;
+  return {
+    linear: [a, b, c, d],
+    toDoc: (x, y) => ({ x: s.cx + a * x + c * y, y: s.cy + b * x + d * y }),
+    toFigure: (x, y) => {
+      const X = x - s.cx;
+      const Y = y - s.cy;
+      return { x: (d * X - c * Y) / det, y: (-b * X + a * Y) / det };
+    },
+  };
+}
+
+/** A dab carried through an affine map (position, tip direction, dual stamps). */
+function carried(dab: Dab, to: (x: number, y: number) => Pt, lin: [number, number, number, number]): Dab {
+  const p = to(dab.x, dab.y);
+  const ux = Math.cos(dab.angle);
+  const uy = Math.sin(dab.angle);
+  const out: Dab = { ...dab, x: p.x, y: p.y, angle: Math.atan2(lin[1] * ux + lin[3] * uy, lin[0] * ux + lin[2] * uy) };
+  if (dab.dual) out.dual = dab.dual.map((st) => ({ ...st, ...to(st.x, st.y) }));
+  return out;
+}
+
+const figureCache = new WeakMap<Symmetry, Symmetry>();
+
 function withSymmetry(state: StrokeState, dabs: Dab[]): Dab[] {
   const s = state.params.symmetry;
   if (!s || s.mode === 'off') return dabs;
+  const place = symmetryPlacement(s);
+  if (!place) return mirrorDabs(state, s, dabs, 1);
+  // A transformed symmetry path: into the figure's frame, mirrored there, and back.
+  let fig = figureCache.get(s);
+  if (!fig) {
+    fig = { ...s, cx: 0, cy: 0, angle: 0, transform: undefined };
+    figureCache.set(s, fig);
+  }
+  const [a, b, c, d] = place.linear;
+  const det = a * d - b * c;
+  const inv: [number, number, number, number] = [d / det, -b / det, -c / det, a / det];
+  const originals = new Map<Dab, Dab>();
+  const inFigure = dabs.map((dab) => {
+    const f = carried(dab, place.toFigure, inv);
+    originals.set(f, dab);
+    return f;
+  });
+  return mirrorDabs(state, fig, inFigure, Math.sqrt(Math.abs(det))).map((m) => originals.get(m) ?? carried(m, place.toDoc, place.linear));
+}
+
+/** Mirror dabs by a symmetry laid out in their own frame; `scale` is that frame's size per px. */
+function mirrorDabs(state: StrokeState, s: Symmetry, dabs: Dab[], scale: number): Dab[] {
   if (s.mode === 'wavy' || s.mode === 'circle' || s.mode === 'spiral' || s.mode === 'path') {
     const curves = symmetryCurve(s);
     // The mapping stretches the stroke where the figure bends (a steep wave, far out on a
     // spiral), so the mirror is filled in: dabs mirrored from between the source's dabs.
-    const step = Math.max(0.5, state.params.size * Math.max(0.01, state.params.spacing));
+    const step = Math.max(0.5, state.params.size * Math.max(0.01, state.params.spacing)) / scale;
     return dabs.flatMap((d) => {
       const m = mirroredAcross(d, curves, s);
       if (!m) return [d];

@@ -200,7 +200,23 @@ export interface Symmetry {
   size?: number;
   /** Path symmetry: the axis, flattened (document px). */
   path?: { points: { x: number; y: number }[]; closed: boolean }[];
+  /**
+   * The symmetry path's transform beyond its centre and angle (its transform box): width and
+   * height scale, and horizontal skew in degrees. The figure is laid out about the origin,
+   * skewed, scaled, turned by `angle` and moved to the centre; strokes mirror in that frame.
+   */
+  transform?: SymmetryTransform;
 }
+
+export interface SymmetryTransform {
+  /** 1 = 100 %; negative flips. */
+  scaleX: number;
+  scaleY: number;
+  /** Degrees, −89…89. */
+  skew: number;
+}
+
+export const IDENTITY_SYMMETRY_TRANSFORM: SymmetryTransform = { scaleX: 1, scaleY: 1, skew: 0 };
 
 export const DEFAULT_SHAPE_DYNAMICS: ShapeDynamics = {
   enabled: false,

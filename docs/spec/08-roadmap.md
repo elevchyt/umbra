@@ -586,7 +586,7 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests (885 after the follow-ups). Nothing from M8 remains deferred.
+Parity 133/133; 873 tests (886 after the follow-ups). Nothing from M8 remains deferred.
 
 Follow-up (2026-09-24), each of these was deferred above and is now built:
 - **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
@@ -629,6 +629,15 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
   Sampler markers are, with handles for the centre, the angle and the size. The curves are
   the brush's own (`symmetryCurve`), so what the guide shows is what the stroke mirrors
   across.
+- **The symmetry path's transform box.** A symmetry carries a placement: centre, angle, then
+  width and height scale and horizontal skew.
+  - Strokes are carried into the figure's own frame, mirrored there and carried back. A
+    similarity stays an exact Euclidean mirror; a stretch mirrors in the stretched frame.
+  - Tests check that a uniform scale leaves a line mirror alone, that a Circle stretched to
+    twice the width mirrors across the ellipse, and that a 45° skew gives the oblique mirror
+    (x − 2y, −y).
+  - In the browser, a stroke from x = 380 to 360 on a 200 %-wide circle mirrored to
+    x = 320–338, as predicted.
 - **Saving `.tpl`** (`writeTplFile`). It is the reader's exact inverse, and a painting
   preset's brush is written with the same items an `.abr` preset has.
   - Every option family survives a write and read.

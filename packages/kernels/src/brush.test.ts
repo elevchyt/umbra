@@ -179,6 +179,7 @@ import {
   symmetryMaps,
   symmetryCurve,
   symmetryMirror,
+  symmetryPlacement,
 } from './brush.js';
 
 function line(p: BrushParams, n = 20, opts = {}): Dab[] {
@@ -306,6 +307,27 @@ describe('dynamics', () => {
     expect(sm.y).toBeCloseTo(20, 6);
     const mid = ((180 - 100) + (sm.x - 100)) / 2;
     expect((mid / (50 / (2 * Math.PI))) % (2 * Math.PI)).toBeCloseTo(0, 6);
+  });
+
+  it('a transformed symmetry path mirrors in its own frame', () => {
+    const one = (sym: import('./brush.js').Symmetry, x: number, y: number) => {
+      const s = beginStroke({ ...base, spacing: 10, symmetry: sym });
+      const d = strokeTo(s, { x, y, pressure: 1, time: 0, tiltX: 0, tiltY: 0, twist: 0 });
+      return d.slice(1).map((m) => [Math.round(m.x * 1000) / 1000, Math.round(m.y * 1000) / 1000]);
+    };
+    const at = { segments: 2, cx: 100, cy: 50, angle: 0 };
+    // A uniform scale does not move a line: Vertical is Vertical.
+    expect(one({ ...at, mode: 'vertical', transform: { scaleX: 2, scaleY: 2, skew: 0 } }, 130, 70)).toEqual([[70, 70]]);
+    // A circle of radius 50 stretched to twice the width: across the ellipse's side at x + 100.
+    expect(one({ ...at, mode: 'circle', size: 50, transform: { scaleX: 2, scaleY: 1, skew: 0 } }, 250, 50)).toEqual([[150, 50]]);
+    // Horizontal, skewed 45°: the axis stays put, the mirror goes along the skew — (x, y)
+    // about the centre lands at (x − 2y, −y).
+    expect(one({ ...at, mode: 'horizontal', transform: { scaleX: 1, scaleY: 1, skew: 45 } }, 100 + 30, 50 + 10)).toEqual([[100 + 10, 50 - 10]]);
+    // The placement maps the figure to the document and back.
+    const place = symmetryPlacement({ ...at, mode: 'circle', size: 50, angle: 30, transform: { scaleX: 1.5, scaleY: 0.5, skew: 20 } })!;
+    const q = place.toFigure(place.toDoc(7, -3).x, place.toDoc(7, -3).y);
+    expect(q.x).toBeCloseTo(7, 9);
+    expect(q.y).toBeCloseTo(-3, 9);
   });
 
   it('pulled string waits inside its leash; catch-up on end finishes the line', () => {

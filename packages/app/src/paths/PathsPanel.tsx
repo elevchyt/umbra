@@ -6,6 +6,8 @@
  * a shape layer's outline or its vector mask — is listed first, in italics, as Photoshop does;
  * it is what the tools and buttons use while no saved path is selected.
  */
+import { PAINT_TOOLS } from '../tools/registry';
+import { beginSymmetryEdit } from '../workspace/SymmetryGuide';
 import { For, Show, createEffect, createSignal } from 'solid-js';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { rasterizePath, transformPath, pathBounds, type Path } from '@umbra/engine';
@@ -30,6 +32,19 @@ function PathThumb(props: { path: Path; docW: number; docH: number }) {
   return <canvas ref={canvas} class="path-thumb" width={THUMB} height={THUMB} />;
 }
 
+const SYMMETRY_LABEL: Record<string, string> = {
+  vertical: 'Vertical',
+  horizontal: 'Horizontal',
+  dualAxis: 'Dual Axis',
+  diagonal: 'Diagonal',
+  wavy: 'Wavy',
+  circle: 'Circle',
+  spiral: 'Spiral',
+  parallelLines: 'Parallel Lines',
+  radial: 'Radial',
+  mandala: 'Mandala',
+};
+
 export function PathsPanel() {
   const send = (m: unknown) => store.engine?.(m as never);
   const [renaming, setRenaming] = createSignal<number | null>(null);
@@ -53,6 +68,22 @@ export function PathsPanel() {
   return (
     <div class="paths-panel">
       <div class="paths-list" onClick={() => send({ t: 'pathCommand', cmd: 'select' })}>
+        <Show when={store.brush.symmetry && store.brush.symmetry.mode !== 'off' && store.brush.symmetry.mode !== 'path'}>
+          <div
+            class="path-row symmetry-path"
+            classList={{ selected: !!store.symmetryEdit() }}
+            title="The paint symmetry: click to transform it"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Its box is a painting tool's: switch to the Brush if another tool is active.
+              if (!PAINT_TOOLS.has(store.activeTool())) store.setActiveTool('brush');
+              beginSymmetryEdit();
+            }}
+          >
+            <Icon name="rotateView" size={15} />
+            <span class="path-name">Symmetry — {SYMMETRY_LABEL[store.brush.symmetry!.mode] ?? store.brush.symmetry!.mode}</span>
+          </div>
+        </Show>
         <Show when={doc()?.layerPath}>
           {(lp) => (
             <div

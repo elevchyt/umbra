@@ -3,8 +3,9 @@ import { Icon } from '@umbra/ui/icons/Icon';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
-import { TOOL_BY_ID } from '../tools/registry';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, RETOUCH_TOOLS, type SymmetryMode } from '@umbra/engine';
+import { TOOL_BY_ID, PAINT_TOOLS } from '../tools/registry';
+import { beginSymmetryEdit, endSymmetryEdit } from './SymmetryGuide';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, RETOUCH_TOOLS, IDENTITY_SYMMETRY_TRANSFORM, type SymmetryMode, type Symmetry, type SymmetryTransform } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
 import { TypeToolOptions } from '../type/TypePanels';
@@ -126,6 +127,9 @@ export function OptionsBar(props: OptionsBarProps) {
       <Separator />
 
       <Switch fallback={<UnimplementedNote name={tool()?.name ?? 'Tool'} />}>
+        <Match when={store.symmetryEdit() && PAINT_TOOLS.has(store.activeTool()) && brush.symmetry}>
+          <SymmetryTransformBar />
+        </Match>
         <Match when={store.activeTool() === 'cafSampling' && store.caf()}>
           <span class="options-hint">Sampling Brush</span>
           <Select
@@ -235,8 +239,14 @@ export function OptionsBar(props: OptionsBarProps) {
               const size = cur.size ?? Math.max(16, Math.round(Math.min(d?.width ?? 400, d?.height ?? 400) / 4));
               const { path: _path, ...rest } = cur;
               store.setBrush('symmetry', { ...DEFAULT_SYMMETRY, ...rest, size, mode: mode as SymmetryMode, cx: (d?.width ?? 0) / 2, cy: (d?.height ?? 0) / 2 });
+              // As in Photoshop, a new symmetry arrives with its transform box open.
+              if (mode === 'off' || mode === 'path') store.setSymmetryEdit(null);
+              else beginSymmetryEdit();
             }}
           />
+          <Show when={brush.symmetry && brush.symmetry.mode !== 'off' && brush.symmetry.mode !== 'path'}>
+            <IconButton icon="arrange" title="Transform the symmetry path (its box: scale, skew, turn, move)" active={!!store.symmetryEdit()} onClick={() => (store.symmetryEdit() ? endSymmetryEdit(true) : beginSymmetryEdit())} />
+          </Show>
           <Show when={brush.symmetry?.mode === 'radial' || brush.symmetry?.mode === 'mandala'}>
             <NumberField label="Segments" value={brush.symmetry!.segments} min={2} max={12} width={32} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, segments: v })} />
           </Show>
@@ -527,5 +537,33 @@ function UnimplementedNote(props: { name: string }) {
     <span class="dim options-note">
       {props.name} — options arrive with the tool itself.
     </span>
+  );
+}
+
+/**
+ * The symmetry path's transform, as Free Transform's options bar: centre, width and height,
+ * angle and skew — with commit and cancel (Enter and Esc do the same).
+ */
+function SymmetryTransformBar() {
+  const s = () => store.brush.symmetry!;
+  const t = () => s().transform ?? IDENTITY_SYMMETRY_TRANSFORM;
+  const set = (patch: Partial<Symmetry>) => store.setBrush('symmetry', { ...s(), ...patch });
+  const setT = (patch: Partial<SymmetryTransform>) => set({ transform: { ...t(), ...patch } });
+  return (
+    <>
+      <span class="options-hint">Symmetry path</span>
+      <NumberField label="X" value={Math.round(s().cx)} suffix="px" width={48} onChange={(v) => set({ cx: v })} />
+      <NumberField label="Y" value={Math.round(s().cy)} suffix="px" width={48} onChange={(v) => set({ cy: v })} />
+      <NumberField label="W" value={Math.round(t().scaleX * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => setT({ scaleX: v / 100 || 0.05 })} />
+      <NumberField label="H" value={Math.round(t().scaleY * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => setT({ scaleY: v / 100 || 0.05 })} />
+      <NumberField label="∠" value={s().angle} min={-180} max={180} suffix="°" width={40} onChange={(v) => set({ angle: v })} />
+      <NumberField label="H skew" value={t().skew} min={-80} max={80} suffix="°" width={40} onChange={(v) => setT({ skew: v })} />
+      <Show when={s().size !== undefined}>
+        <NumberField label="Size" value={s().size!} min={4} max={10000} suffix="px" width={44} onChange={(v) => set({ size: v })} />
+      </Show>
+      <Separator />
+      <IconButton icon="close" title="Cancel the transform (Esc)" onClick={() => endSymmetryEdit(false)} />
+      <IconButton icon="check" title="Commit the transform (Enter)" onClick={() => endSymmetryEdit(true)} />
+    </>
   );
 }

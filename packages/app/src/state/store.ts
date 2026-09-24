@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import type { Gradient, CafOptions } from '@umbra/engine';
+import type { Gradient, CafOptions, Symmetry } from '@umbra/engine';
 import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, DEFAULT_RETOUCH, type RetouchOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
@@ -179,6 +179,11 @@ export interface CafWorkspace {
   subtract: boolean;
 }
 const [caf, setCaf] = createSignal<CafWorkspace | null>(null);
+/**
+ * The symmetry path's transform box, while it is open: the symmetry as it was when editing
+ * began (Esc goes back to it). Choosing a symmetry type opens it, as in Photoshop.
+ */
+const [symmetryEdit, setSymmetryEdit] = createSignal<{ start: Symmetry } | null>(null);
 /** Clone Source ▸ Show Overlay and its options (Photoshop's defaults). */
 export interface CloneOverlaySettings {
   show: boolean;
@@ -426,6 +431,8 @@ export const store = {
   setCloneSlot,
   caf,
   setCaf,
+  symmetryEdit,
+  setSymmetryEdit,
   cloneOverlay,
   setCloneOverlay,
   brushPresetId,

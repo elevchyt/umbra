@@ -1,19 +1,36 @@
 /**
- * The paint symmetry's guide on the canvas — Photoshop's symmetry path: the mirror axes (or
- * the wave, circle or spiral) drawn over the document while a painting tool has symmetry on,
- * with handles to move its centre, turn it, and size its figure. Only the handles take the
- * pointer; everywhere else strokes go through to the canvas.
+ * The paint symmetry's guide on the canvas — Photoshop's symmetry path. While a painting tool
+ * has symmetry on, its axes (or wave, circle or spiral) are drawn over the document. Editing
+ * the symmetry (choosing a type, the options bar's Transform button, or its row in the Paths
+ * panel) opens a transform box round the figure, as Free Transform does:
+ *
+ * - corner and side handles scale it about its centre (Shift keeps the proportions);
+ * - Ctrl on the top or bottom handle skews it;
+ * - the knob above the box turns it (Shift: 15° steps); the centre handle moves it;
+ * - Enter commits, Esc puts it back as it was.
+ *
+ * Outside editing only the lines show, and nothing takes the pointer: strokes go through.
  */
-import { For, Show, createMemo } from 'solid-js';
-import { screenPointAtDoc, docPointAtScreen, symmetryCurve, type ViewState } from '@umbra/engine';
+import { For, Show, createEffect, createMemo, onCleanup } from 'solid-js';
+import { reconcile } from 'solid-js/store';
+import { screenPointAtDoc, docPointAtScreen, symmetryCurve, IDENTITY_SYMMETRY_TRANSFORM, type Symmetry, type ViewState } from '@umbra/engine';
 import { store } from '../state/store';
 import { PAINT_TOOLS } from '../tools/registry';
 
 type Pt = { x: number; y: number };
+type Handle = 'nw' | 'n' | 'ne' | 'e' | 'se' | 's' | 'sw' | 'w';
 
-/** Symmetry types whose figure has a size, and those that have an angle. */
-const SIZED = new Set(['wavy', 'circle', 'spiral', 'parallelLines']);
-const TURNED = new Set(['vertical', 'horizontal', 'dualAxis', 'diagonal', 'wavy', 'spiral', 'parallelLines', 'radial', 'mandala']);
+/** Each box handle's place on the figure's square, in units of its half-size. */
+const HANDLES: [Handle, number, number][] = [
+  ['nw', -1, -1],
+  ['n', 0, -1],
+  ['ne', 1, -1],
+  ['e', 1, 0],
+  ['se', 1, 1],
+  ['s', 0, 1],
+  ['sw', -1, 1],
+  ['w', -1, 0],
+];
 
 function viewOf(): ViewState | null {
   const s = store.stats();
@@ -21,103 +38,132 @@ function viewOf(): ViewState | null {
   return { zoom: s.zoom, rotation: s.viewRotation, centre: { x: s.centreX, y: s.centreY }, width: s.viewWidth, height: s.viewHeight, devicePixelRatio: 1 };
 }
 
+/** The symmetry's placement: figure space (about the origin, angle 0) → document. */
+export function placementOf(s: Symmetry): { toDoc: (x: number, y: number) => Pt } {
+  const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
+  const th = (s.angle * Math.PI) / 180;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const k = Math.tan((Math.max(-89, Math.min(89, t.skew)) * Math.PI) / 180);
+  const a = cos * t.scaleX;
+  const b = sin * t.scaleX;
+  const c = cos * t.scaleX * k - sin * t.scaleY;
+  const d = sin * t.scaleX * k + cos * t.scaleY;
+  return { toDoc: (x, y) => ({ x: s.cx + a * x + c * y, y: s.cy + b * x + d * y }) };
+}
+
+/** The box's half-size in figure space: the figure's own size. */
+const halfOf = (s: Symmetry) => Math.max(16, s.size ?? 100);
+
+/** Leave the transform box: keep the symmetry, or put it back as it was. */
+export function endSymmetryEdit(commit: boolean): void {
+  const e = store.symmetryEdit();
+  if (!e) return;
+  if (!commit) store.setBrush('symmetry', reconcile({ ...e.start, transform: e.start.transform ?? IDENTITY_SYMMETRY_TRANSFORM }));
+  store.setSymmetryEdit(null);
+}
+
+/** Open the transform box on the current symmetry. */
+export function beginSymmetryEdit(): void {
+  const s = store.brush.symmetry;
+  if (!s || s.mode === 'off' || s.mode === 'path') return;
+  store.setSymmetryEdit({ start: JSON.parse(JSON.stringify(s)) as Symmetry });
+}
+
 export function SymmetryGuide() {
   const sym = () => {
     const s = store.brush.symmetry;
     return s && s.mode !== 'off' && s.mode !== 'path' && PAINT_TOOLS.has(store.activeTool()) && store.doc() ? s : null;
   };
+  const editing = () => !!store.symmetryEdit() && !!sym();
 
-  /** The guide in document space: polylines, and where the handles sit. */
-  const figure = createMemo(() => {
+  // Leaving the painting tools, or turning symmetry off, commits the box.
+  createEffect(() => {
+    if (store.symmetryEdit() && !sym()) store.setSymmetryEdit(null);
+  });
+  // Enter commits, Esc cancels — not while typing in a field.
+  createEffect(() => {
+    if (!editing()) return;
+    const key = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select')) return;
+      if (e.key !== 'Enter' && e.key !== 'Escape') return;
+      endSymmetryEdit(e.key === 'Enter');
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener('keydown', key, true);
+    onCleanup(() => window.removeEventListener('keydown', key, true));
+  });
+
+  /** The guide in document space: the figure's lines, placed. */
+  const lines = createMemo(() => {
     const s = sym();
     const d = store.doc();
-    if (!s || !d) return null;
-    const c = { x: s.cx, y: s.cy };
-    const th = (s.angle * Math.PI) / 180;
-    const far = Math.hypot(d.width, d.height) * 2;
-    const dir = (a: number): Pt => ({ x: Math.cos(a), y: Math.sin(a) });
+    if (!s || !d) return [] as Pt[][];
+    const place = placementOf(s);
+    const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
+    // Long enough in figure space to cross the canvas after the placement's scale.
+    const far = (Math.hypot(d.width, d.height) * 2) / Math.max(0.05, Math.min(Math.abs(t.scaleX), Math.abs(t.scaleY)));
     const line = (a: number, off = 0): Pt[] => {
-      const u = dir(a);
-      const n = { x: -u.y * off, y: u.x * off };
+      const u = { x: Math.cos(a), y: Math.sin(a) };
       return [
-        { x: c.x + n.x - u.x * far, y: c.y + n.y - u.y * far },
-        { x: c.x + n.x + u.x * far, y: c.y + n.y + u.y * far },
+        { x: -u.y * off - u.x * far, y: u.x * off - u.y * far },
+        { x: -u.y * off + u.x * far, y: u.x * off + u.y * far },
       ];
     };
-    const ray = (a: number): Pt[] => [c, { x: c.x + Math.cos(a) * far, y: c.y + Math.sin(a) * far }];
+    const ray = (a: number): Pt[] => [{ x: 0, y: 0 }, { x: Math.cos(a) * far, y: Math.sin(a) * far }];
     const size = s.size ?? 100;
-    let lines: Pt[][] = [];
+    const n = Math.max(2, Math.min(12, Math.round(s.segments)));
+    let fig: Pt[][];
     switch (s.mode) {
       case 'vertical':
-        lines = [line(th + Math.PI / 2)];
+        fig = [line(Math.PI / 2)];
         break;
       case 'horizontal':
-        lines = [line(th)];
+        fig = [line(0)];
         break;
       case 'dualAxis':
-        lines = [line(th), line(th + Math.PI / 2)];
+        fig = [line(0), line(Math.PI / 2)];
         break;
       case 'diagonal':
-        lines = [line(th + Math.PI / 4)];
+        fig = [line(Math.PI / 4)];
         break;
       case 'parallelLines':
-        lines = [line(th, size / 2), line(th, -size / 2)];
+        fig = [line(0, size / 2), line(0, -size / 2)];
         break;
-      case 'radial': {
-        const n = Math.max(2, Math.min(12, Math.round(s.segments)));
-        lines = Array.from({ length: n }, (_, k) => ray(th + (2 * Math.PI * k) / n));
+      case 'radial':
+        fig = Array.from({ length: n }, (_, k) => ray((2 * Math.PI * k) / n));
         break;
-      }
-      case 'mandala': {
-        const n = Math.max(2, Math.min(12, Math.round(s.segments)));
-        lines = Array.from({ length: 2 * n }, (_, k) => ray(th + (Math.PI * k) / n));
+      case 'mandala':
+        fig = Array.from({ length: 2 * n }, (_, k) => ray((Math.PI * k) / n));
         break;
-      }
-      default: {
-        // Wavy, Circle, Spiral: the brush's own curve, kept to around the canvas.
-        const m = Math.max(d.width, d.height);
-        // A plain copy: the store merges into its object, which would defeat the curve cache.
-        lines = symmetryCurve(JSON.parse(JSON.stringify(s))).map((poly) => poly.filter((p) => p.x > -m && p.y > -m && p.x < d.width + m && p.y < d.height + m));
-      }
+      default:
+        // Wavy, Circle, Spiral: the brush's own curve, laid out about the origin. (A plain
+        // copy: the store merges into its object, which would defeat the curve cache.)
+        fig = symmetryCurve({ ...(JSON.parse(JSON.stringify(s)) as Symmetry), cx: 0, cy: 0, angle: 0, transform: undefined });
     }
-    // Handles: the centre; a knob to turn it; a knob for the figure's size.
-    const handles: { kind: 'centre' | 'turn' | 'size'; at: Pt }[] = [{ kind: 'centre', at: c }];
-    if (SIZED.has(s.mode)) {
-      const a = s.mode === 'parallelLines' ? th + Math.PI / 2 : th;
-      const r = s.mode === 'parallelLines' ? size / 2 : size;
-      handles.push({ kind: 'size', at: { x: c.x + Math.cos(a) * r, y: c.y + Math.sin(a) * r } });
-    }
-    return { lines, handles, turnable: TURNED.has(s.mode), th };
+    const m = Math.max(d.width, d.height);
+    return fig.map((poly) => poly.map((p) => place.toDoc(p.x, p.y)).filter((p) => p.x > -m && p.y > -m && p.x < d.width + m && p.y < d.height + m));
   });
 
   const toScreen = (p: Pt) => screenPointAtDoc(viewOf()!, p.x, p.y);
 
-  /** Drag a handle: every move rewrites the brush's symmetry. */
-  const drag = (kind: 'centre' | 'turn' | 'size') => (e: PointerEvent) => {
+  /**
+   * Drag part of the box. `apply` turns the pointer (document px), the symmetry as it was when
+   * the drag began and where the drag began into the change to make.
+   */
+  const drag = (apply: (p: Pt, start: Symmetry, from: Pt, ev: PointerEvent) => Partial<Symmetry>) => (e: PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const el = e.currentTarget as SVGElement;
-    const box = el.ownerSVGElement!.getBoundingClientRect();
-    // Window listeners, as the other drag handles here: they follow the pointer off the knob.
+    const box = (e.currentTarget as SVGElement).ownerSVGElement!.getBoundingClientRect();
+    const start = JSON.parse(JSON.stringify(store.brush.symmetry)) as Symmetry;
+    const at = (ev: PointerEvent) => docPointAtScreen(viewOf()!, ev.clientX - box.left, ev.clientY - box.top);
+    const from = at(e);
+    // Window listeners, as the other drag handles here: they follow the pointer off the handle.
     const move = (ev: PointerEvent) => {
-      const v = viewOf();
-      const s = store.brush.symmetry;
-      if (!v || !s) return;
-      const p = docPointAtScreen(v, ev.clientX - box.left, ev.clientY - box.top);
-      if (kind === 'centre') store.setBrush('symmetry', { ...s, cx: Math.round(p.x), cy: Math.round(p.y) });
-      else if (kind === 'turn') {
-        let a = (Math.atan2(p.y - s.cy, p.x - s.cx) * 180) / Math.PI;
-        // Shift snaps to 15°, as Photoshop's transform rotation does.
-        if (ev.shiftKey) a = Math.round(a / 15) * 15;
-        store.setBrush('symmetry', { ...s, angle: Math.round(a * 10) / 10 });
-      } else {
-        const th = (s.angle * Math.PI) / 180;
-        const a = s.mode === 'parallelLines' ? th + Math.PI / 2 : th;
-        // Along the handle's own direction; Parallel Lines' knob is half the gap.
-        const along = (p.x - s.cx) * Math.cos(a) + (p.y - s.cy) * Math.sin(a);
-        const size = Math.max(4, Math.round(s.mode === 'parallelLines' ? along * 2 : Math.abs(along)));
-        store.setBrush('symmetry', { ...s, size });
-      }
+      if (!viewOf()) return;
+      const patch = apply(at(ev), start, from, ev);
+      store.setBrush('symmetry', { ...start, ...patch });
     };
     const up = () => {
       window.removeEventListener('pointermove', move);
@@ -129,10 +175,54 @@ export function SymmetryGuide() {
     window.addEventListener('pointercancel', up);
   };
 
+  const moveCentre = drag((p, s, from) => ({ cx: Math.round((s.cx + p.x - from.x) * 10) / 10, cy: Math.round((s.cy + p.y - from.y) * 10) / 10 }));
+
+  const turn = drag((p, s, from, ev) => {
+    const a0 = Math.atan2(from.y - s.cy, from.x - s.cx);
+    const a1 = Math.atan2(p.y - s.cy, p.x - s.cx);
+    let angle = s.angle + ((a1 - a0) * 180) / Math.PI;
+    if (ev.shiftKey) angle = Math.round(angle / 15) * 15;
+    angle = ((((angle + 180) % 360) + 360) % 360) - 180;
+    return { angle: Math.round(angle * 10) / 10 };
+  });
+
+  /** A box handle: scale about the centre (Shift: proportionally); Ctrl on top/bottom: skew. */
+  const scaleBy = (hx: number, hy: number) =>
+    drag((p, s, _from, ev) => {
+      const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
+      const E = halfOf(s);
+      const th = (s.angle * Math.PI) / 180;
+      // The pointer in the symmetry's turned frame (before its scale and skew).
+      const dx = p.x - s.cx;
+      const dy = p.y - s.cy;
+      const vx = dx * Math.cos(th) + dy * Math.sin(th);
+      const vy = -dx * Math.sin(th) + dy * Math.cos(th);
+      const k = Math.tan((t.skew * Math.PI) / 180);
+      const clampS = (v: number) => (Math.abs(v) < 0.05 ? 0.05 * Math.sign(v || 1) : Math.round(v * 1000) / 1000);
+      if ((ev.ctrlKey || ev.metaKey) && hx === 0 && hy !== 0) {
+        // Skew: the top or bottom edge slides sideways.
+        const skew = (Math.atan(vx / (t.scaleX * hy * E)) * 180) / Math.PI;
+        return { transform: { ...t, skew: Math.round(Math.max(-80, Math.min(80, skew)) * 10) / 10 } };
+      }
+      let scaleX = t.scaleX;
+      let scaleY = t.scaleY;
+      if (hy !== 0) scaleY = vy / (hy * E);
+      if (hx !== 0) scaleX = vx / (hx * E + k * hy * E);
+      if (ev.shiftKey && hx !== 0 && hy !== 0) {
+        // Proportionally: along the corner's own direction from the centre.
+        const cx = t.scaleX * (hx * E + k * hy * E);
+        const cy = t.scaleY * hy * E;
+        const f = (vx * cx + vy * cy) / (cx * cx + cy * cy);
+        scaleX = t.scaleX * f;
+        scaleY = t.scaleY * f;
+      }
+      return { transform: { ...t, scaleX: clampS(scaleX), scaleY: clampS(scaleY) } };
+    });
+
   return (
-    <Show when={figure() && viewOf()}>
+    <Show when={sym() && viewOf()}>
       {(_) => {
-        const f = () => figure()!;
+        const s = () => store.brush.symmetry!;
         const canvasClip = () => {
           const d = store.doc()!;
           return [
@@ -150,15 +240,19 @@ export function SymmetryGuide() {
             .map(toScreen)
             .map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`)
             .join(' ');
-        const turnKnob = () => {
-          const s = store.brush.symmetry!;
-          const c = toScreen({ x: s.cx, y: s.cy });
-          // 56 screen px out from the centre, along the axis: mapped from the document, so the
-          // view's zoom and rotation are accounted for.
-          const reach = 56 / Math.max(1e-6, viewOf()!.zoom);
-          const k = toScreen({ x: s.cx + Math.cos(f().th) * reach, y: s.cy + Math.sin(f().th) * reach });
-          return { x: k.x, y: k.y, cx: c.x, cy: c.y };
+        const corner = (hx: number, hy: number) => {
+          const E = halfOf(s());
+          return toScreen(placementOf(s()).toDoc(hx * E, hy * E));
         };
+        const boxPoints = () => [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)].map((p) => `${p.x},${p.y}`).join(' ');
+        const knob = () => {
+          // Beyond the top edge's middle, 24 px further out on screen.
+          const top = corner(0, -1);
+          const c = toScreen({ x: s().cx, y: s().cy });
+          const len = Math.hypot(top.x - c.x, top.y - c.y) || 1;
+          return { x: top.x + ((top.x - c.x) / len) * 24, y: top.y + ((top.y - c.y) / len) * 24, fx: top.x, fy: top.y };
+        };
+        const centre = () => toScreen({ x: s().cx, y: s().cy });
         return (
           <svg class="symmetry-guide">
             <defs>
@@ -167,7 +261,7 @@ export function SymmetryGuide() {
               </clipPath>
             </defs>
             <g clip-path="url(#symmetry-canvas)">
-              <For each={f().lines}>
+              <For each={lines()}>
                 {(poly) => (
                   <>
                     <polyline class="symmetry-line-under" points={pts(poly)} />
@@ -176,25 +270,23 @@ export function SymmetryGuide() {
                 )}
               </For>
             </g>
-            <Show when={f().turnable}>
-              <line class="symmetry-arm" x1={turnKnob().cx} y1={turnKnob().cy} x2={turnKnob().x} y2={turnKnob().y} />
-              <circle class="symmetry-handle turn" cx={turnKnob().x} cy={turnKnob().y} r={5} onPointerDown={drag('turn')}>
-                <title>Drag to turn the symmetry (Shift: 15° steps)</title>
+            <Show when={editing()}>
+              <polygon class="symmetry-box" points={boxPoints()} />
+              <line class="symmetry-arm" x1={knob().fx} y1={knob().fy} x2={knob().x} y2={knob().y} />
+              <circle class="symmetry-handle turn" cx={knob().x} cy={knob().y} r={5} onPointerDown={turn}>
+                <title>Drag to turn (Shift: 15° steps)</title>
+              </circle>
+              <For each={HANDLES}>
+                {([id, hx, hy]) => (
+                  <rect class={`symmetry-handle box ${id}`} x={corner(hx, hy).x - 4} y={corner(hx, hy).y - 4} width={8} height={8} onPointerDown={scaleBy(hx, hy)}>
+                    <title>{hx !== 0 && hy !== 0 ? 'Drag to scale (Shift: proportionally)' : hy !== 0 ? 'Drag to scale (Ctrl: skew)' : 'Drag to scale'}</title>
+                  </rect>
+                )}
+              </For>
+              <circle class="symmetry-handle centre" cx={centre().x} cy={centre().y} r={6} onPointerDown={moveCentre}>
+                <title>Drag to move the symmetry</title>
               </circle>
             </Show>
-            <For each={f().handles}>
-              {(h) => (
-                <circle
-                  class={`symmetry-handle ${h.kind}`}
-                  cx={toScreen(h.at).x}
-                  cy={toScreen(h.at).y}
-                  r={h.kind === 'centre' ? 6 : 5}
-                  onPointerDown={drag(h.kind)}
-                >
-                  <title>{h.kind === 'centre' ? 'Drag to move the symmetry' : 'Drag to size the figure'}</title>
-                </circle>
-              )}
-            </For>
           </svg>
         );
       }}

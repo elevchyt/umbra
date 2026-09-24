@@ -1267,4 +1267,11 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .symmetry-arm { stroke: #4fc3f7; stroke-width: 1; }
 .symmetry-handle { fill: #fff; stroke: #1a73a8; stroke-width: 1.5; pointer-events: all; cursor: move; }
 .symmetry-handle.turn { cursor: alias; }
-.symmetry-handle.size { fill: #4fc3f7; cursor: ew-resize; }
+
+.symmetry-box { fill: none; stroke: #fff; stroke-width: 1; stroke-dasharray: 3 3; pointer-events: none; }
+.symmetry-handle.box { fill: #fff; stroke: #1a73a8; }
+.symmetry-handle.box.n, .symmetry-handle.box.s { cursor: ns-resize; }
+.symmetry-handle.box.e, .symmetry-handle.box.w { cursor: ew-resize; }
+.symmetry-handle.box.nw, .symmetry-handle.box.se { cursor: nwse-resize; }
+.symmetry-handle.box.ne, .symmetry-handle.box.sw { cursor: nesw-resize; }
+.path-row.symmetry-path .path-name { font-style: italic; }
