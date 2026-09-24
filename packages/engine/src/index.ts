@@ -33,6 +33,7 @@ export {
   isPhysical,
   symmetryCurve,
   symmetryPlacement,
+  symmetryLinear,
   IDENTITY_SYMMETRY_TRANSFORM,
   renderDabs,
   beginStroke as beginBrushStroke,

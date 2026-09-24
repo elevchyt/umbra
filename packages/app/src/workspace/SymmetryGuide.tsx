@@ -4,16 +4,18 @@
  * the symmetry (choosing a type, the options bar's Transform button, or its row in the Paths
  * panel) opens a transform box round the figure, as Free Transform does:
  *
- * - corner and side handles scale it about its centre (Shift keeps the proportions);
- * - Ctrl on the top or bottom handle skews it;
- * - the knob above the box turns it (Shift: 15° steps); the centre handle moves it;
+ * - corner and side handles scale it about the reference point (Shift keeps the proportions);
+ * - Ctrl on a top or bottom handle skews it horizontally, on a side handle vertically;
+ * - the knob above the box turns it about the reference point (Shift: 15° steps);
+ * - the reference point (a crosshair, or the options bar's locator) can be put anywhere;
+ * - the centre handle moves the whole figure, reference point and all;
  * - Enter commits, Esc puts it back as it was.
  *
  * Outside editing only the lines show, and nothing takes the pointer: strokes go through.
  */
 import { For, Show, createEffect, createMemo, onCleanup } from 'solid-js';
 import { reconcile } from 'solid-js/store';
-import { screenPointAtDoc, docPointAtScreen, symmetryCurve, IDENTITY_SYMMETRY_TRANSFORM, type Symmetry, type ViewState } from '@umbra/engine';
+import { screenPointAtDoc, docPointAtScreen, symmetryCurve, symmetryLinear, IDENTITY_SYMMETRY_TRANSFORM, type Symmetry, type SymmetryTransform, type ViewState } from '@umbra/engine';
 import { store } from '../state/store';
 import { PAINT_TOOLS } from '../tools/registry';
 
@@ -38,18 +40,14 @@ function viewOf(): ViewState | null {
   return { zoom: s.zoom, rotation: s.viewRotation, centre: { x: s.centreX, y: s.centreY }, width: s.viewWidth, height: s.viewHeight, devicePixelRatio: 1 };
 }
 
-/** The symmetry's placement: figure space (about the origin, angle 0) → document. */
-export function placementOf(s: Symmetry): { toDoc: (x: number, y: number) => Pt } {
-  const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
-  const th = (s.angle * Math.PI) / 180;
-  const cos = Math.cos(th);
-  const sin = Math.sin(th);
-  const k = Math.tan((Math.max(-89, Math.min(89, t.skew)) * Math.PI) / 180);
-  const a = cos * t.scaleX;
-  const b = sin * t.scaleX;
-  const c = cos * t.scaleX * k - sin * t.scaleY;
-  const d = sin * t.scaleX * k + cos * t.scaleY;
-  return { toDoc: (x, y) => ({ x: s.cx + a * x + c * y, y: s.cy + b * x + d * y }) };
+/** The symmetry's placement: figure space (about the origin, angle 0) → document, and back. */
+export function placementOf(s: Symmetry): { toDoc: (x: number, y: number) => Pt; toFigure: (x: number, y: number) => Pt } {
+  const [a, b, c, d] = symmetryLinear(s);
+  const det = a * d - b * c;
+  return {
+    toDoc: (x, y) => ({ x: s.cx + a * x + c * y, y: s.cy + b * x + d * y }),
+    toFigure: (x, y) => ({ x: (d * (x - s.cx) - c * (y - s.cy)) / det, y: (-b * (x - s.cx) + a * (y - s.cy)) / det }),
+  };
 }
 
 /** The box's half-size in figure space: the figure's own size. */
@@ -63,11 +61,52 @@ export function endSymmetryEdit(commit: boolean): void {
   store.setSymmetryEdit(null);
 }
 
-/** Open the transform box on the current symmetry. */
+/** Open the transform box on the current symmetry, its reference point at the centre. */
 export function beginSymmetryEdit(): void {
   const s = store.brush.symmetry;
   if (!s || s.mode === 'off' || s.mode === 'path') return;
-  store.setSymmetryEdit({ start: JSON.parse(JSON.stringify(s)) as Symmetry });
+  store.setSymmetryEdit({ start: JSON.parse(JSON.stringify(s)) as Symmetry, ref: { u: 0, v: 0 } });
+}
+
+/** The reference point in the figure's frame, and on the document, for a symmetry. */
+function refOf(s: Symmetry): { q: Pt; doc: Pt } {
+  const r = store.symmetryEdit()?.ref ?? { u: 0, v: 0 };
+  const E = halfOf(s);
+  const q = { x: r.u * E, y: r.v * E };
+  return { q, doc: placementOf(s).toDoc(q.x, q.y) };
+}
+
+/**
+ * A new shape or angle for the symmetry that keeps the reference point where it was on the
+ * document: the centre moves to make it so. The options bar's fields use this too.
+ */
+export function symmetryAboutRef(s: Symmetry, patch: { transform?: Partial<SymmetryTransform>; angle?: number }): Symmetry {
+  const { q, doc: r } = refOf(s);
+  const next: Symmetry = {
+    ...s,
+    ...(patch.angle !== undefined ? { angle: patch.angle } : {}),
+    transform: { ...IDENTITY_SYMMETRY_TRANSFORM, ...(s.transform ?? {}), ...(patch.transform ?? {}) },
+  };
+  const [a, b, c, d] = symmetryLinear(next);
+  return { ...next, cx: r.x - (a * q.x + c * q.y), cy: r.y - (b * q.x + d * q.y) };
+}
+
+/** Where the reference point is (the options bar's X and Y), and moving the figure to put it elsewhere. */
+export function symmetryRef(): Pt | null {
+  const s = store.brush.symmetry;
+  return s && store.symmetryEdit() ? refOf(s).doc : null;
+}
+export function moveSymmetryRefTo(x: number, y: number): void {
+  const s = store.brush.symmetry;
+  const r = symmetryRef();
+  if (!s || !r) return;
+  store.setBrush('symmetry', { ...s, cx: s.cx + x - r.x, cy: s.cy + y - r.y });
+}
+
+/** The options bar's locator: the reference point to a corner, a side's middle, or the centre. */
+export function setSymmetryRef(u: number, v: number): void {
+  const e = store.symmetryEdit();
+  if (e) store.setSymmetryEdit({ ...e, ref: { u, v } });
 }
 
 export function SymmetryGuide() {
@@ -178,45 +217,62 @@ export function SymmetryGuide() {
   const moveCentre = drag((p, s, from) => ({ cx: Math.round((s.cx + p.x - from.x) * 10) / 10, cy: Math.round((s.cy + p.y - from.y) * 10) / 10 }));
 
   const turn = drag((p, s, from, ev) => {
-    const a0 = Math.atan2(from.y - s.cy, from.x - s.cx);
-    const a1 = Math.atan2(p.y - s.cy, p.x - s.cx);
+    const { doc: r } = refOf(s);
+    const a0 = Math.atan2(from.y - r.y, from.x - r.x);
+    const a1 = Math.atan2(p.y - r.y, p.x - r.x);
     let angle = s.angle + ((a1 - a0) * 180) / Math.PI;
     if (ev.shiftKey) angle = Math.round(angle / 15) * 15;
-    angle = ((((angle + 180) % 360) + 360) % 360) - 180;
-    return { angle: Math.round(angle * 10) / 10 };
+    angle = Math.round((((((angle + 180) % 360) + 360) % 360) - 180) * 10) / 10;
+    return symmetryAboutRef(s, { angle });
   });
 
-  /** A box handle: scale about the centre (Shift: proportionally); Ctrl on top/bottom: skew. */
+  /** The reference point itself: dragged anywhere, kept in the figure's frame. */
+  const moveRef = drag((p, s) => {
+    const q = placementOf(s).toFigure(p.x, p.y);
+    const E = halfOf(s);
+    setSymmetryRef(Math.round((q.x / E) * 1000) / 1000, Math.round((q.y / E) * 1000) / 1000);
+    return {};
+  });
+
+  /**
+   * A box handle: scale about the reference point (Shift: proportionally); with Ctrl, a top or
+   * bottom handle skews horizontally and a side handle vertically.
+   */
   const scaleBy = (hx: number, hy: number) =>
     drag((p, s, _from, ev) => {
-      const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
+      const t = { ...IDENTITY_SYMMETRY_TRANSFORM, ...(s.transform ?? {}) };
       const E = halfOf(s);
+      const { q, doc: r } = refOf(s);
       const th = (s.angle * Math.PI) / 180;
-      // The pointer in the symmetry's turned frame (before its scale and skew).
-      const dx = p.x - s.cx;
-      const dy = p.y - s.cy;
+      // The pointer from the reference point, in the symmetry's turned frame.
+      const dx = p.x - r.x;
+      const dy = p.y - r.y;
       const vx = dx * Math.cos(th) + dy * Math.sin(th);
       const vy = -dx * Math.sin(th) + dy * Math.cos(th);
-      const k = Math.tan((t.skew * Math.PI) / 180);
+      // The handle from the reference point, in the figure's frame.
+      const Dx = hx * E - q.x;
+      const Dy = hy * E - q.y;
+      const kx = Math.tan((t.skew * Math.PI) / 180);
+      const ky = Math.tan(((t.skewY ?? 0) * Math.PI) / 180);
+      const deg = (v: number) => Math.round(Math.max(-80, Math.min(80, (Math.atan(v) * 180) / Math.PI)) * 10) / 10;
+      const ok = (v: number) => Number.isFinite(v) && Math.abs(v) > 1e-6;
+      if ((ev.ctrlKey || ev.metaKey) && hx === 0 && hy !== 0 && ok(Dy)) return symmetryAboutRef(s, { transform: { skew: deg((vx / t.scaleX - Dx) / Dy) } });
+      if ((ev.ctrlKey || ev.metaKey) && hy === 0 && hx !== 0 && ok(Dx)) return symmetryAboutRef(s, { transform: { skewY: deg((vy / t.scaleY - Dy) / Dx) } });
       const clampS = (v: number) => (Math.abs(v) < 0.05 ? 0.05 * Math.sign(v || 1) : Math.round(v * 1000) / 1000);
-      if ((ev.ctrlKey || ev.metaKey) && hx === 0 && hy !== 0) {
-        // Skew: the top or bottom edge slides sideways.
-        const skew = (Math.atan(vx / (t.scaleX * hy * E)) * 180) / Math.PI;
-        return { transform: { ...t, skew: Math.round(Math.max(-80, Math.min(80, skew)) * 10) / 10 } };
-      }
       let scaleX = t.scaleX;
       let scaleY = t.scaleY;
-      if (hy !== 0) scaleY = vy / (hy * E);
-      if (hx !== 0) scaleX = vx / (hx * E + k * hy * E);
+      const den = { x: Dx + kx * Dy, y: ky * Dx + Dy };
+      if (hx !== 0 && ok(den.x)) scaleX = vx / den.x;
+      if (hy !== 0 && ok(den.y)) scaleY = vy / den.y;
       if (ev.shiftKey && hx !== 0 && hy !== 0) {
-        // Proportionally: along the corner's own direction from the centre.
-        const cx = t.scaleX * (hx * E + k * hy * E);
-        const cy = t.scaleY * hy * E;
-        const f = (vx * cx + vy * cy) / (cx * cx + cy * cy);
+        // Proportionally: along the handle's own direction from the reference point.
+        const cx = t.scaleX * den.x;
+        const cy = t.scaleY * den.y;
+        const f = (vx * cx + vy * cy) / (cx * cx + cy * cy || 1);
         scaleX = t.scaleX * f;
         scaleY = t.scaleY * f;
       }
-      return { transform: { ...t, scaleX: clampS(scaleX), scaleY: clampS(scaleY) } };
+      return symmetryAboutRef(s, { transform: { scaleX: clampS(scaleX), scaleY: clampS(scaleY) } });
     });
 
   return (
@@ -253,6 +309,7 @@ export function SymmetryGuide() {
           return { x: top.x + ((top.x - c.x) / len) * 24, y: top.y + ((top.y - c.y) / len) * 24, fx: top.x, fy: top.y };
         };
         const centre = () => toScreen({ x: s().cx, y: s().cy });
+        const refScreen = () => toScreen(refOf(s()).doc);
         return (
           <svg class="symmetry-guide">
             <defs>
@@ -286,6 +343,13 @@ export function SymmetryGuide() {
               <circle class="symmetry-handle centre" cx={centre().x} cy={centre().y} r={6} onPointerDown={moveCentre}>
                 <title>Drag to move the symmetry</title>
               </circle>
+              <g class="symmetry-ref" transform={`translate(${refScreen().x},${refScreen().y})`}>
+                <line x1={-9} y1={0} x2={9} y2={0} />
+                <line x1={0} y1={-9} x2={0} y2={9} />
+                <circle class="symmetry-handle ref" r={4} onPointerDown={moveRef}>
+                  <title>The reference point: scaling, skewing and turning happen about it. Drag to move it.</title>
+                </circle>
+              </g>
             </Show>
           </svg>
         );

@@ -4,7 +4,7 @@ import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID, PAINT_TOOLS } from '../tools/registry';
-import { beginSymmetryEdit, endSymmetryEdit } from './SymmetryGuide';
+import { beginSymmetryEdit, endSymmetryEdit, moveSymmetryRefTo, setSymmetryRef, symmetryAboutRef, symmetryRef } from './SymmetryGuide';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, RETOUCH_TOOLS, IDENTITY_SYMMETRY_TRANSFORM, type SymmetryMode, type Symmetry, type SymmetryTransform } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
@@ -546,20 +546,28 @@ function UnimplementedNote(props: { name: string }) {
  */
 function SymmetryTransformBar() {
   const s = () => store.brush.symmetry!;
-  const t = () => s().transform ?? IDENTITY_SYMMETRY_TRANSFORM;
-  const set = (patch: Partial<Symmetry>) => store.setBrush('symmetry', { ...s(), ...patch });
-  const setT = (patch: Partial<SymmetryTransform>) => set({ transform: { ...t(), ...patch } });
+  const t = () => ({ ...IDENTITY_SYMMETRY_TRANSFORM, ...(s().transform ?? {}) });
+  // Every field works about the reference point, as Free Transform's do.
+  const about = (patch: { transform?: Partial<SymmetryTransform>; angle?: number }) => store.setBrush('symmetry', symmetryAboutRef(s(), patch));
+  const ref = () => symmetryRef() ?? { x: s().cx, y: s().cy };
+  const current = () => store.symmetryEdit()?.ref ?? { u: 0, v: 0 };
   return (
     <>
       <span class="options-hint">Symmetry path</span>
-      <NumberField label="X" value={Math.round(s().cx)} suffix="px" width={48} onChange={(v) => set({ cx: v })} />
-      <NumberField label="Y" value={Math.round(s().cy)} suffix="px" width={48} onChange={(v) => set({ cy: v })} />
-      <NumberField label="W" value={Math.round(t().scaleX * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => setT({ scaleX: v / 100 || 0.05 })} />
-      <NumberField label="H" value={Math.round(t().scaleY * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => setT({ scaleY: v / 100 || 0.05 })} />
-      <NumberField label="∠" value={s().angle} min={-180} max={180} suffix="°" width={40} onChange={(v) => set({ angle: v })} />
-      <NumberField label="H skew" value={t().skew} min={-80} max={80} suffix="°" width={40} onChange={(v) => setT({ skew: v })} />
+      <span class="sym-locator" title="Reference point: what the box scales, skews and turns about">
+        <For each={[-1, 0, 1].flatMap((v) => [-1, 0, 1].map((u) => [u, v] as const))}>
+          {([u, v]) => <button type="button" classList={{ on: current().u === u && current().v === v }} onClick={() => setSymmetryRef(u, v)} />}
+        </For>
+      </span>
+      <NumberField label="X" value={Math.round(ref().x * 10) / 10} suffix="px" width={48} onChange={(v) => moveSymmetryRefTo(v, ref().y)} />
+      <NumberField label="Y" value={Math.round(ref().y * 10) / 10} suffix="px" width={48} onChange={(v) => moveSymmetryRefTo(ref().x, v)} />
+      <NumberField label="W" value={Math.round(t().scaleX * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => about({ transform: { scaleX: v / 100 || 0.05 } })} />
+      <NumberField label="H" value={Math.round(t().scaleY * 1000) / 10} min={-1000} max={1000} suffix="%" width={44} onChange={(v) => about({ transform: { scaleY: v / 100 || 0.05 } })} />
+      <NumberField label="∠" value={s().angle} min={-180} max={180} suffix="°" width={40} onChange={(v) => about({ angle: v })} />
+      <NumberField label="H" value={t().skew} min={-80} max={80} suffix="°" width={36} title="Horizontal skew" onChange={(v) => about({ transform: { skew: v } })} />
+      <NumberField label="V" value={t().skewY ?? 0} min={-80} max={80} suffix="°" width={36} title="Vertical skew" onChange={(v) => about({ transform: { skewY: v } })} />
       <Show when={s().size !== undefined}>
-        <NumberField label="Size" value={s().size!} min={4} max={10000} suffix="px" width={44} onChange={(v) => set({ size: v })} />
+        <NumberField label="Size" value={s().size!} min={4} max={10000} suffix="px" width={44} onChange={(v) => store.setBrush('symmetry', { ...s(), size: v })} />
       </Show>
       <Separator />
       <IconButton icon="close" title="Cancel the transform (Esc)" onClick={() => endSymmetryEdit(false)} />

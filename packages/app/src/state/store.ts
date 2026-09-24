@@ -183,7 +183,11 @@ const [caf, setCaf] = createSignal<CafWorkspace | null>(null);
  * The symmetry path's transform box, while it is open: the symmetry as it was when editing
  * began (Esc goes back to it). Choosing a symmetry type opens it, as in Photoshop.
  */
-const [symmetryEdit, setSymmetryEdit] = createSignal<{ start: Symmetry } | null>(null);
+const [symmetryEdit, setSymmetryEdit] = createSignal<{
+  start: Symmetry;
+  /** The reference point, in the figure's frame in units of its half-size (0, 0 = centre). */
+  ref: { u: number; v: number };
+} | null>(null);
 /** Clone Source ▸ Show Overlay and its options (Photoshop's defaults). */
 export interface CloneOverlaySettings {
   show: boolean;

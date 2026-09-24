@@ -208,17 +208,19 @@ implementation.
       for 15° steps) and size the figure; the options bar's Size and Angle follow.
 - [x] **The symmetry path's transform box** (2026-09-24). Choosing a type, the options bar's
       Transform button, or the "Symmetry" row in the Paths panel opens a box round the figure:
-      - corner and side handles scale about the centre (Shift keeps the proportions)
-      - Ctrl on the top or bottom handle skews
-      - the knob turns it (Shift: 15° steps), and the centre handle moves it
-      - the options bar has X, Y, W, H, angle and skew fields
+      - corner and side handles scale about the reference point (Shift keeps the proportions)
+      - Ctrl on the top or bottom handle skews horizontally, on a side handle vertically
+      - the knob turns it about the reference point (Shift: 15° steps)
+      - the reference point is a crosshair to drag, or the options bar's 3×3 locator
+      - the centre handle moves the whole figure
+      - the options bar has X and Y (the reference point's position), W, H, angle, and
+        horizontal and vertical skew, all working about the reference point
       - Enter commits and Esc restores it
 
       A stretched or skewed symmetry mirrors in its own frame (a stretched Circle mirrors
       across the ellipse).
 - [ ] **The symmetry path is not an ordinary path**: its anchors cannot be edited with the
-      Direct Selection tool, and it scales about its centre (no reference point, no vertical
-      skew). Path symmetry shows its path only while a path tool is active. Past twice a
+      Direct Selection tool. Path symmetry shows its path only while a path tool is active. Past twice a
       Circle's radius, a mirror crosses the centre.
 - [x] **Load Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel. It maps onto
       Umbra's tools and options:

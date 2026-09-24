@@ -653,18 +653,8 @@ function mirroredTip(dab: Dab, n: { x: number; y: number; tx: number; ty: number
  */
 export function symmetryPlacement(s: Symmetry): { toDoc: (x: number, y: number) => Pt; toFigure: (x: number, y: number) => Pt; linear: [number, number, number, number] } | null {
   const t = s.transform;
-  if (!t || (t.scaleX === 1 && t.scaleY === 1 && t.skew === 0) || s.mode === 'path') return null;
-  const th = (s.angle * Math.PI) / 180;
-  const cos = Math.cos(th);
-  const sin = Math.sin(th);
-  const sx = Math.abs(t.scaleX) < 0.01 ? 0.01 * Math.sign(t.scaleX || 1) : t.scaleX;
-  const sy = Math.abs(t.scaleY) < 0.01 ? 0.01 * Math.sign(t.scaleY || 1) : t.scaleY;
-  const k = Math.tan((Math.max(-89, Math.min(89, t.skew)) * Math.PI) / 180);
-  // L = R·K, K = [[sx, sx·k], [0, sy]].
-  const a = cos * sx;
-  const b = sin * sx;
-  const c = cos * sx * k - sin * sy;
-  const d = sin * sx * k + cos * sy;
+  if (!t || (t.scaleX === 1 && t.scaleY === 1 && t.skew === 0 && !t.skewY) || s.mode === 'path') return null;
+  const [a, b, c, d] = symmetryLinear(s);
   const det = a * d - b * c;
   return {
     linear: [a, b, c, d],
@@ -675,6 +665,24 @@ export function symmetryPlacement(s: Symmetry): { toDoc: (x: number, y: number) 
       return { x: (d * X - c * Y) / det, y: (-b * X + a * Y) / det };
     },
   };
+}
+
+/**
+ * The linear part of a symmetry's placement, [a, b, c, d] (x' = a·x + c·y, y' = b·x + d·y):
+ * R(angle)·K with K = [[sx, sx·kx], [sy·ky, sy]] — scale, and horizontal and vertical skew.
+ */
+export function symmetryLinear(s: Symmetry): [number, number, number, number] {
+  const t = s.transform;
+  const th = (s.angle * Math.PI) / 180;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const lim = (v: number) => (Math.abs(v) < 0.01 ? 0.01 * Math.sign(v || 1) : v);
+  const sx = lim(t?.scaleX ?? 1);
+  const sy = lim(t?.scaleY ?? 1);
+  const tan = (deg: number | undefined) => Math.tan((Math.max(-89, Math.min(89, deg ?? 0)) * Math.PI) / 180);
+  const kx = tan(t?.skew);
+  const ky = tan(t?.skewY);
+  return [cos * sx - sin * sy * ky, sin * sx + cos * sy * ky, cos * sx * kx - sin * sy, sin * sx * kx + cos * sy];
 }
 
 /** A dab carried through an affine map (position, tip direction, dual stamps). */

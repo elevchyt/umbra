@@ -630,14 +630,19 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
   the brush's own (`symmetryCurve`), so what the guide shows is what the stroke mirrors
   across.
 - **The symmetry path's transform box.** A symmetry carries a placement: centre, angle, then
-  width and height scale and horizontal skew.
+  width and height scale and horizontal and vertical skew (K = [[sx, sx·kx], [sy·ky, sy]]).
+  The box works about a reference point kept in the figure's frame, so it follows the figure.
+  Each scale, skew or turn moves the centre so that the point stays fixed on the canvas.
   - Strokes are carried into the figure's own frame, mirrored there and carried back. A
     similarity stays an exact Euclidean mirror; a stretch mirrors in the stretched frame.
   - Tests check that a uniform scale leaves a line mirror alone, that a Circle stretched to
-    twice the width mirrors across the ellipse, and that a 45° skew gives the oblique mirror
-    (x − 2y, −y).
+    twice the width mirrors across the ellipse, and that 45° skews give the oblique mirrors
+    (x − 2y, −y) horizontally and (−x, y − 2x) vertically.
   - In the browser, a stroke from x = 380 to 360 on a 200 %-wide circle mirrored to
     x = 320–338, as predicted.
+  - With the reference point at the top-left corner, (125, 75), dragging the right edge
+    75 px scaled to 150 % and moved the centre to x = 237.5, with the point still at
+    (125, 75). Ctrl-dragging the side handle 30 px gave a vertical skew of atan(30/150) = 11°.
 - **Saving `.tpl`** (`writeTplFile`). It is the reader's exact inverse, and a painting
   preset's brush is written with the same items an `.abr` preset has.
   - Every option family survives a write and read.

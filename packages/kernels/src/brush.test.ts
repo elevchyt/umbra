@@ -323,8 +323,11 @@ describe('dynamics', () => {
     // Horizontal, skewed 45°: the axis stays put, the mirror goes along the skew — (x, y)
     // about the centre lands at (x − 2y, −y).
     expect(one({ ...at, mode: 'horizontal', transform: { scaleX: 1, scaleY: 1, skew: 45 } }, 100 + 30, 50 + 10)).toEqual([[100 + 10, 50 - 10]]);
+    // Vertical skew, 45°: the vertical axis stays put, the mirror goes along the skew —
+    // (x, y) about the centre lands at (−x, y − 2x).
+    expect(one({ ...at, mode: 'vertical', transform: { scaleX: 1, scaleY: 1, skew: 0, skewY: 45 } }, 100 + 10, 50 + 30)).toEqual([[100 - 10, 50 + 10]]);
     // The placement maps the figure to the document and back.
-    const place = symmetryPlacement({ ...at, mode: 'circle', size: 50, angle: 30, transform: { scaleX: 1.5, scaleY: 0.5, skew: 20 } })!;
+    const place = symmetryPlacement({ ...at, mode: 'circle', size: 50, angle: 30, transform: { scaleX: 1.5, scaleY: 0.5, skew: 20, skewY: -15 } })!;
     const q = place.toFigure(place.toDoc(7, -3).x, place.toDoc(7, -3).y);
     expect(q.x).toBeCloseTo(7, 9);
     expect(q.y).toBeCloseTo(-3, 9);

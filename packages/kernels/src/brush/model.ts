@@ -212,11 +212,13 @@ export interface SymmetryTransform {
   /** 1 = 100 %; negative flips. */
   scaleX: number;
   scaleY: number;
-  /** Degrees, −89…89. */
+  /** Horizontal skew, degrees, −89…89. */
   skew: number;
+  /** Vertical skew, degrees, −89…89. */
+  skewY?: number;
 }
 
-export const IDENTITY_SYMMETRY_TRANSFORM: SymmetryTransform = { scaleX: 1, scaleY: 1, skew: 0 };
+export const IDENTITY_SYMMETRY_TRANSFORM: SymmetryTransform = { scaleX: 1, scaleY: 1, skew: 0, skewY: 0 };
 
 export const DEFAULT_SHAPE_DYNAMICS: ShapeDynamics = {
   enabled: false,
