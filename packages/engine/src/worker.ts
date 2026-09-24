@@ -149,7 +149,7 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (!engine) break;
         engine.forgetJournal();
         const buffer = engine.toPsd();
-        post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
+        post({ t: 'psdSaved', name: msg.name, buffer, document: true }, [buffer]);
         break;
       }
       case 'beginSelect':
@@ -218,6 +218,10 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'cancelTransform':
         engine?.cancelTransform();
         post({ t: 'transform', active: false });
+        break;
+      case 'setLayerColor':
+        engine?.setLayerColor(msg.ids, msg.color);
+        if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'setLayerLocks':
         engine?.setLayerLocks(msg.id, msg.locks);
@@ -675,6 +679,14 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         }
         break;
       }
+      case 'markSaved':
+        engine?.markSaved();
+        if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'requestLayerThumbs':
+        // Not transferred: the thumbnails are memoised in the engine and reused.
+        if (engine) post({ t: 'layerThumbs', thumbs: engine.layerThumbs(msg.size) });
+        break;
       case 'setCentre':
         engine?.setCentre(msg.x, msg.y);
         break;
@@ -753,6 +765,8 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'recover': {
         if (!engine || !recovered) break;
         engine.openPsdBuffer(recovered, 'Recovered');
+        // Recovered work is by definition not on disk.
+        engine.history.saved = null;
         void engine.resolvePendingSources().then((changed) => changed && engine && post({ t: 'doc', doc: engine.summary() }));
         recovered = null;
         // Once recovered, the autosave IS the open document. Leaving it on disk offered the

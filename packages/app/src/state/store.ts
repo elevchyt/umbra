@@ -7,7 +7,8 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import type { Gradient, CafOptions, Symmetry } from '@umbra/engine';
+import type { MenuBarNode } from '@umbra/ui/menu/MenuBar';
+import type { Gradient, CafOptions, Symmetry, LayerThumbs } from '@umbra/engine';
 import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, DEFAULT_RETOUCH, type RetouchOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
@@ -84,6 +85,15 @@ const [thumbnail, setThumbnail] = createSignal<{
   docWidth: number;
   docHeight: number;
 } | null>(null);
+
+/**
+ * The open right-click menu, if any: items in the menu bar's shape, run through the same
+ * command handler as the menus. Workspace draws it.
+ */
+const [contextMenu, setContextMenu] = createSignal<{ x: number; y: number; items: MenuBarNode[] } | null>(null);
+
+/** Layers-panel thumbnails by layer id, as the engine last sent them. */
+const [layerThumbs, setLayerThumbs] = createSignal<ReadonlyMap<number, LayerThumbs>>(new Map());
 
 /** The layer whose name is being edited in place in the Layers panel, if any. */
 const [renamingLayerId, setRenamingLayerId] = createSignal<number | null>(null);
@@ -337,6 +347,7 @@ export type DialogId =
   | 'gallery'
   | 'smartBlend'
   | 'closeContents'
+  | 'saveChanges'
   | 'layerStyle'
   | 'globalLight'
   | 'fade'
@@ -395,6 +406,10 @@ export const store = {
   setRenamingLayerId,
   thumbnail,
   setThumbnail,
+  layerThumbs,
+  setLayerThumbs,
+  contextMenu,
+  setContextMenu,
 
   foreground,
   setForeground,

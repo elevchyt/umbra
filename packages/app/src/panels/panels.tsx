@@ -15,8 +15,9 @@ import { CloneSourcePanel } from '../brush/RetouchOptions';
 import { pathSvg } from '../workspace/ShapeOptions';
 import { CharacterPanel, ParagraphPanel } from '../type/TypePanels';
 import { CharacterStylesPanel, GlyphsPanel, ParagraphStylesPanel } from '../type/GlyphsPanel';
-import { FILL_LABEL, FILTER_BY_ID, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
+import { FILL_LABEL, FILTER_BY_ID, type LayerSummary, type LayerEffects, type FillSummary, type ProbePoint, type SmartFilterSummary, type SmartSummary } from '@umbra/engine';
 import { Icon } from '@umbra/ui/icons/Icon';
+import type { MenuBarNode } from '@umbra/ui/menu/MenuBar';
 import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Select, Checkbox, Slider } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
@@ -100,7 +101,138 @@ function Placeholder(props: { name: string; milestone: string; what: string }) {
 
 // ---- Layers ---------------------------------------------------------------------------
 
+const LABEL_COLORS: [LayerSummary['color'], string][] = [
+  ['none', 'No Color'],
+  ['red', 'Red'],
+  ['orange', 'Orange'],
+  ['yellow', 'Yellow'],
+  ['green', 'Green'],
+  ['blue', 'Blue'],
+  ['violet', 'Violet'],
+  ['gray', 'Gray'],
+];
+
+/** The Layers panel's row tint for a colour label, as Photoshop tints the eye column. */
+const LABEL_CSS: Record<LayerSummary['color'], string | undefined> = {
+  none: undefined,
+  red: '#8c3a3a',
+  orange: '#94603a',
+  yellow: '#8f8438',
+  green: '#4c7a3e',
+  blue: '#3d5f8c',
+  violet: '#6a4c8c',
+  gray: '#6b6b6b',
+};
+
+/**
+ * Right-clicking a layer, as in Photoshop: the Layer menu's commands for that layer, in
+ * Photoshop's order, with the entries that only make sense for some kinds of layer shown
+ * only for those.
+ */
+function layerContextItems(l: LayerSummary, selectedCount: number): MenuBarNode[] {
+  const sep: MenuBarNode = { separator: true };
+  const rasterize: MenuBarNode[] =
+    l.kind === 'type' ? [{ label: 'Rasterize Type', cmd: 'rasterize.type' }]
+    : l.kind === 'shape' ? [{ label: 'Rasterize Layer', cmd: 'rasterize.shape' }]
+    : l.kind === 'smart' ? [{ label: 'Rasterize Layer', cmd: 'rasterize.smartObject' }]
+    : l.kind === 'fill' ? [{ label: 'Rasterize Layer', cmd: 'rasterize.fillContent' }]
+    : l.kind === 'pixel' ? [{ label: 'Rasterize Layer', cmd: 'rasterize.layer' }]
+    : [];
+  const masks: MenuBarNode[] = [];
+  if (l.hasMask) {
+    masks.push(
+      { label: l.maskEnabled ? 'Disable Layer Mask' : 'Enable Layer Mask', cmd: 'mask.enable' },
+      { label: 'Apply Layer Mask', cmd: 'mask.apply' },
+      { label: 'Delete Layer Mask', cmd: 'mask.delete' },
+    );
+  }
+  if (l.vectorMask) {
+    masks.push(
+      { label: l.vectorMask.enabled ? 'Disable Vector Mask' : 'Enable Vector Mask', cmd: 'vmask.enable' },
+      { label: 'Rasterize Vector Mask', cmd: 'rasterize.vectorMask' },
+      { label: 'Delete Vector Mask', cmd: 'vmask.delete' },
+    );
+  }
+  masks.push({ label: l.clipped ? 'Release Clipping Mask' : 'Create Clipping Mask', cmd: 'layer.clippingMask' });
+  return [
+    { label: 'Blending Options…', cmd: 'style.blendingOptions' },
+    ...(l.kind === 'adjustment' || l.kind === 'fill' ? [{ label: l.kind === 'fill' ? 'Edit Fill…' : 'Edit Adjustment…', cmd: 'layer.editAdjustment' }] : []),
+    sep,
+    { label: 'Copy CSS', cmd: 'layer.copyCss' },
+    { label: 'Copy SVG', cmd: 'layer.copySvg' },
+    { label: selectedCount > 1 ? 'Duplicate Layers…' : 'Duplicate Layer…', cmd: 'layer.duplicate' },
+    { label: selectedCount > 1 ? 'Delete Layers' : 'Delete Layer', cmd: 'layer.delete' },
+    sep,
+    { label: 'Group from Layers…', cmd: 'layer.group' },
+    ...(l.kind === 'group' ? [{ label: 'Ungroup Layers', cmd: 'layer.ungroup' }] : []),
+    sep,
+    { label: 'Quick Export as PNG', cmd: 'layer.quickExport' },
+    { label: 'Export As…', cmd: 'layer.exportAs' },
+    sep,
+    { label: 'Artboard from Layers…', cmd: 'layer.artboardFromLayers' },
+    { label: 'Frame from Layers…', cmd: 'layer.frameFromLayers' },
+    sep,
+    { label: 'Convert to Smart Object', cmd: 'so.convert' },
+    ...(l.kind === 'smart' ? [{ label: 'Edit Contents', cmd: 'so.editContents' }] : []),
+    sep,
+    ...rasterize,
+    { label: 'Rasterize Layer Style', cmd: 'rasterize.layerStyle' },
+    sep,
+    ...masks,
+    sep,
+    { label: 'Link Layers', cmd: 'layer.link' },
+    { label: 'Select Linked Layers', cmd: 'layer.selectLinked' },
+    sep,
+    { label: 'Copy Layer Style', cmd: 'style.copy' },
+    { label: 'Paste Layer Style', cmd: 'style.paste' },
+    { label: 'Clear Layer Style', cmd: 'style.clear' },
+    sep,
+    { label: 'Merge Down', cmd: 'layer.mergeDown' },
+    { label: 'Merge Visible', cmd: 'layer.mergeVisible' },
+    { label: 'Flatten Image', cmd: 'layer.flatten' },
+    sep,
+    ...LABEL_COLORS.map(([c, label]): MenuBarNode => ({ label, cmd: `layerColor.${c}`, checkable: true })),
+  ];
+}
+
+/** A layer's or mask's pixels, drawn at the thumbnail's size inside its box. */
+function LayerThumbCanvas(props: { thumb: { width: number; height: number; pixels: Uint8Array }; mask?: boolean }) {
+  let canvas!: HTMLCanvasElement;
+  createEffect(() => {
+    const t = props.thumb;
+    canvas.width = t.width;
+    canvas.height = t.height;
+    canvas.getContext('2d')?.putImageData(new ImageData(new Uint8ClampedArray(t.pixels), t.width, t.height), 0, 0);
+  });
+  // Requested at twice the box so it stays sharp on HiDPI screens.
+  return (
+    <canvas
+      ref={canvas}
+      class="layer-thumb-canvas"
+      classList={{ mask: props.mask }}
+      style={{ width: `${props.thumb.width / 2}px`, height: `${props.thumb.height / 2}px` }}
+    />
+  );
+}
+
+/** Thumbnails are requested at this size (twice the 30 px box). */
+const LAYER_THUMB_SIZE = 60;
+
 function LayersPanel() {
+  // Thumbnails follow the document: re-requested shortly after every change, so a burst of
+  // edits costs one round trip. The engine memoises per plane, so unchanged layers are free.
+  let thumbTimer: ReturnType<typeof setTimeout> | undefined;
+  createEffect(() => {
+    const d = store.doc();
+    clearTimeout(thumbTimer);
+    if (!d) {
+      store.setLayerThumbs(new Map());
+      return;
+    }
+    thumbTimer = setTimeout(() => store.engine?.({ t: 'requestLayerThumbs', size: LAYER_THUMB_SIZE }), 120);
+  });
+  onCleanup(() => clearTimeout(thumbTimer));
+
   const [fxMenu, setFxMenu] = createSignal(false);
   const [adjMenu, setAdjMenu] = createSignal(false);
   // Effect lists show until folded, as Photoshop shows a new style's.
@@ -196,10 +328,18 @@ function LayersPanel() {
                 classList={{ selected: active().includes(l.id) }}
                 style={{ 'padding-left': `${6 + l.depth * 14}px` }}
                 onClick={() => store.engine?.({ t: 'selectLayer', id: l.id })}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  // Photoshop acts on the layer under the pointer, keeping a multi-selection it is part of.
+                  const inSelection = active().includes(l.id);
+                  if (!inSelection) store.engine?.({ t: 'selectLayer', id: l.id });
+                  store.setContextMenu({ x: e.clientX, y: e.clientY, items: layerContextItems(l, inSelection ? active().length : 1) });
+                }}
               >
                 <button
                   type="button"
                   class="layer-eye"
+                  style={{ background: LABEL_CSS[l.color] }}
                   title="Toggle layer visibility"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -226,6 +366,7 @@ function LayersPanel() {
                 <div
                   class="layer-thumb"
                   classList={{
+                    pixels: (l.kind === 'pixel' || l.kind === 'smart') && !!store.layerThumbs().get(l.id)?.layer,
                     group: l.kind === 'group',
                     adjustment: l.kind === 'adjustment',
                     fill: l.kind === 'fill',
@@ -249,8 +390,11 @@ function LayersPanel() {
                     if (l.kind === 'smart') store.engine?.({ t: 'editContents' });
                   }}
                 >
+                  <Show when={(l.kind === 'pixel' || l.kind === 'smart') && store.layerThumbs().get(l.id)?.layer}>
+                    {(t) => <LayerThumbCanvas thumb={t()} />}
+                  </Show>
                   <Show when={l.kind === 'group'}>
-                    <Icon name="folder" size={14} />
+                    <Icon name="folder" size={16} />
                   </Show>
                   <Show when={l.kind === 'adjustment' && l.adjustment}>
                     {(a) => <Icon name={ADJUSTMENT_ICON[a().kind]} size={15} />}
@@ -299,7 +443,11 @@ function LayersPanel() {
                       // Select the layer (the row's own handler) and make its mask the target.
                       store.engine?.({ t: 'setMaskTarget', id: l.id, mask: true });
                     }}
-                  />
+                  >
+                    <Show when={store.layerThumbs().get(l.id)?.mask}>
+                      {(t) => <LayerThumbCanvas thumb={t()} mask />}
+                    </Show>
+                  </div>
                 </Show>
 
                 <Show when={l.vectorMask}>

@@ -281,7 +281,7 @@ export function openPsd(buffer: ArrayBuffer | ArrayBufferView, name = 'Untitled.
         blendMode: (PSD_BLEND_MODE[it.blendMode] ?? 'normal') as BlendMode,
         clipped: it.clipping,
         locks: NO_LOCKS,
-        color: 'none' as const,
+        color: it.color ?? 'none',
         blending: it.blending ? blendingFromPsd(it.blending) : DEFAULT_BLENDING_STATE,
         seed: it.index,
         mask: masks.get(it.index),

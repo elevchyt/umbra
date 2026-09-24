@@ -133,6 +133,60 @@ export function MenuBar(props: MenuBarProps) {
   );
 }
 
+/**
+ * A right-click menu at a point: the menu bar's panel, anchored to the pointer, closed by a
+ * pick, Escape, or a press anywhere outside it.
+ */
+export function ContextMenu(props: {
+  items: MenuBarNode[];
+  x: number;
+  y: number;
+  onCommand: (cmd: string) => void;
+  onClose: () => void;
+  isEnabled?: (cmd: string) => boolean;
+  isChecked?: (cmd: string) => boolean;
+}) {
+  onMount(() => {
+    const onDown = (e: PointerEvent) => {
+      if (!(e.target as HTMLElement).closest('.menu-panel')) props.onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        props.onClose();
+      }
+    };
+    // Deferred, so the press that opened the menu does not close it.
+    const t = setTimeout(() => document.addEventListener('pointerdown', onDown, true));
+    document.addEventListener('keydown', onKey, true);
+    window.addEventListener('blur', props.onClose);
+    onCleanup(() => {
+      clearTimeout(t);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('blur', props.onClose);
+    });
+  });
+  const enabled = (n: MenuBarNode): boolean => {
+    if (n.items) return n.items.some((c) => !c.separator && enabled(c));
+    if (!n.cmd) return false;
+    return props.isEnabled ? props.isEnabled(n.cmd) : !!n.done;
+  };
+  return (
+    <MenuPanel
+      items={props.items}
+      anchor={{ x: props.x, y: props.y, right: props.x, bottom: props.y }}
+      submenu={false}
+      enabled={enabled}
+      isChecked={props.isChecked}
+      onPick={(cmd) => {
+        props.onClose();
+        props.onCommand(cmd);
+      }}
+    />
+  );
+}
+
 function MenuPanel(props: {
   items: MenuBarNode[];
   anchor: Anchor;
@@ -142,16 +196,18 @@ function MenuPanel(props: {
   onPick: (cmd: string) => void;
 }) {
   const [sub, setSub] = createSignal<{ index: number; anchor: Anchor } | null>(null);
-  const [el, setEl] = createSignal<HTMLDivElement | null>(null);
+  // Measured once the panel is in the document: at `ref` time it has no layout yet, which left
+  // a long menu opened near the bottom (a right-click menu) running off the window.
+  const [size, setSize] = createSignal<{ w: number; h: number } | null>(null);
+  const setEl = (node: HTMLDivElement) => queueMicrotask(() => setSize({ w: node.offsetWidth, h: node.offsetHeight }));
   let timer: ReturnType<typeof setTimeout> | undefined;
   onCleanup(() => clearTimeout(timer));
 
   /** Keep the panel inside the window, flipping rather than overflowing. */
   const placement = () => {
     const a = props.anchor;
-    const node = el();
-    const w = node?.offsetWidth ?? MENU_MIN_WIDTH;
-    const h = node?.offsetHeight ?? 0;
+    const w = size()?.w ?? MENU_MIN_WIDTH;
+    const h = size()?.h ?? 0;
     let left = props.submenu ? a.right : a.x;
     let top = props.submenu ? a.y : a.bottom;
     if (left + w > window.innerWidth - 4) {

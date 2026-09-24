@@ -6,7 +6,8 @@
  * Choosing a preset replaces the tip and every Brush Settings section; opacity, flow and mode
  * stay the tool's own unless the preset carries them, as in Photoshop.
  */
-import { For, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from 'solid-js';
+import { Portal } from 'solid-js/web';
 import { reconcile } from 'solid-js/store';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { physicalTip, DEFAULT_BRUSH, beginBrushStroke, brushStrokeTo, renderDabs, type BrushParams, type BrushPreset, type Dab, type TipBitmap } from '@umbra/engine';
@@ -96,6 +97,10 @@ export function BrushPresetList(props: { compact?: boolean; onPick?: () => void 
     <div class="brush-list" classList={{ compact: props.compact }}>
       <div class="brush-list-top">
         <Slide label="Size" value={store.brush.size} min={1} max={5000} suffix="px" onChange={(v) => store.setBrush('size', v)} />
+        {/* Hardness belongs to computed round tips only, as in Photoshop's picker. */}
+        <Show when={(store.brush.tip?.kind ?? 'computed') === 'computed'}>
+          <Slide label="Hardness" value={Math.round(store.brush.hardness * 100)} min={0} max={100} suffix="%" onChange={(v) => store.setBrush('hardness', v / 100)} />
+        </Show>
         <input class="font-menu-search" placeholder="Search brushes" value={query()} onInput={(e) => setQuery(e.currentTarget.value)} />
       </div>
       <div class="brush-groups">
@@ -251,5 +256,43 @@ export function BrushPicker() {
         )}
       </Show>
     </>
+  );
+}
+
+/**
+ * The brush preset picker Photoshop opens on a right-click over the canvas with a painting
+ * tool: Size, Hardness and the presets, at the pointer. It stays up while presets are tried;
+ * Enter, Escape or a press outside it closes it.
+ */
+export function BrushPickerPopup(props: { x: number; y: number; onClose: () => void }) {
+  let el!: HTMLDivElement;
+  const [pos, setPos] = createSignal({ left: props.x, top: props.y });
+  onMount(() => {
+    // Keep it inside the window.
+    const r = el.getBoundingClientRect();
+    setPos({ left: Math.max(4, Math.min(props.x, window.innerWidth - r.width - 4)), top: Math.max(4, Math.min(props.y, window.innerHeight - r.height - 4)) });
+    const onDown = (e: PointerEvent) => {
+      if (!el.contains(e.target as Node)) props.onClose();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' || e.key === 'Enter') {
+        e.stopPropagation();
+        props.onClose();
+      }
+    };
+    const t = setTimeout(() => document.addEventListener('pointerdown', onDown, true));
+    document.addEventListener('keydown', onKey, true);
+    onCleanup(() => {
+      clearTimeout(t);
+      document.removeEventListener('pointerdown', onDown, true);
+      document.removeEventListener('keydown', onKey, true);
+    });
+  });
+  return (
+    <Portal>
+      <div ref={el} class="brush-picker-pop" style={{ left: `${pos().left}px`, top: `${pos().top}px` }} onContextMenu={(e) => e.preventDefault()}>
+        <BrushPresetList compact />
+      </div>
+    </Portal>
   );
 }

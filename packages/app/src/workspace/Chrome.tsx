@@ -66,7 +66,8 @@ function tabTitle(t: { name: string; dirty: boolean }): string {
   const stats = store.stats();
   const zoom = stats ? `${(stats.zoom * 100).toFixed(1)}%` : '';
   const mode = doc ? 'RGB/8' : '';
-  return `${t.name} @ ${zoom} (${mode})${t.dirty ? ' *' : ''}`;
+  // Photoshop's asterisk: changes that are not saved to disk.
+  return `${t.name} @ ${zoom} (${mode})${t.dirty || doc?.dirty ? '*' : ''}`;
 }
 
 /**

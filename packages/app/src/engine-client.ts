@@ -14,7 +14,7 @@ import {
   FLAG_COALESCED,
   nowAbs,
 } from '@umbra/engine/input/ring';
-import { DEFAULT_BRUSH, type BrushParams, type DocSummary, type EngineStats, type FromEngine, type ToEngine, type GpuCaps } from '@umbra/engine';
+import { DEFAULT_BRUSH, type BrushParams, type DocSummary, type EngineStats, type FromEngine, type ToEngine, type GpuCaps, type LayerThumbs } from '@umbra/engine';
 
 export interface EngineClientEvents {
   onReady?: (caps: GpuCaps) => void;
@@ -28,11 +28,12 @@ export interface EngineClientEvents {
   onReplaceColorPreview?: (p: { pixels: Uint8Array; width: number; height: number }) => void;
   onPatterns?: (list: import('@umbra/engine').PatternSummary[]) => void;
   onHistogram?: (h: { source: 'layer' | 'below' | 'composite'; r: Uint32Array; g: Uint32Array; b: Uint32Array; lum: Uint32Array }) => void;
+  onLayerThumbs?: (thumbs: LayerThumbs[]) => void;
   onThumbnail?: (t: { pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }) => void;
   onRecovery?: (info: { name: string; savedAt: number; width: number; height: number }) => void;
   onNoRecovery?: () => void;
   onSpikes?: (pass: boolean, text: string) => void;
-  onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
+  onPsdSaved?: (name: string, buffer: ArrayBuffer, document: boolean) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
   onSymmetryPath?: (id: number | null) => void;
   onCafState?: (msg: import('@umbra/engine').CafState) => void;
@@ -131,6 +132,9 @@ export class EngineClient {
       case 'thumbnail':
         this.events.onThumbnail?.(msg);
         break;
+      case 'layerThumbs':
+        this.events.onLayerThumbs?.(msg.thumbs);
+        break;
       case 'probe':
         this.events.onProbe?.(msg);
         break;
@@ -183,7 +187,7 @@ export class EngineClient {
         this.events.onParity?.(msg.pass, msg.text);
         break;
       case 'psdSaved':
-        this.events.onPsdSaved?.(msg.name, msg.buffer);
+        this.events.onPsdSaved?.(msg.name, msg.buffer, !!msg.document);
         break;
       case 'contextLost':
         this.events.onContextLost?.();
@@ -426,6 +430,8 @@ export class EngineClient {
         this.send(this.clickAction(p.x, p.y) as never);
         return;
       }
+      // A right-click with a painting tool opens the brush picker (the canvas's contextmenu).
+      if (this.paintMode && e.button === 2) return;
       if (this.paintMode && e.button === 0 && this.altSamples && e.altKey) {
         const p = toLocal(e);
         this.send({ t: 'setCloneSource', x: p.x, y: p.y });

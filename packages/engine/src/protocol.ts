@@ -58,6 +58,13 @@ export interface PatternSummary {
 import type { GpuCaps } from './gpu/caps.js';
 
 
+/** One row's Layers-panel thumbnails (straight RGBA 8-bit; a mask comes back grey). */
+export interface LayerThumbs {
+  id: number;
+  layer?: { width: number; height: number; pixels: Uint8Array };
+  mask?: { width: number; height: number; pixels: Uint8Array };
+}
+
 export interface LayerSummary {
   id: number;
   name: string;
@@ -88,6 +95,8 @@ export interface LayerSummary {
   hasMask: boolean;
   maskEnabled: boolean;
   locks: { transparency: boolean; pixels: boolean; position: boolean; all: boolean };
+  /** Colour label. */
+  color: 'none' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray';
   expanded: boolean;
   tiles: number;
 }
@@ -151,6 +160,8 @@ export interface DocSummary {
   filterMaskTarget: number | null;
   /** Set while a smart object's contents are open: the documents above them, and whether they changed since saved. */
   editingContents: { path: string[]; dirty: boolean } | null;
+  /** The document has changes that are not saved to disk (the tab's asterisk). */
+  dirty: boolean;
   /** Filter ▸ Last Filter's filter, once one has been applied. */
   lastFilter: { id: string; label: string } | null;
   /** What Edit ▸ Fade would fade, while it can ("Gaussian Blur"); null otherwise. */
@@ -245,7 +256,12 @@ export type ToEngine =
   | { t: 'nudge'; dx: number; dy: number }
   | { t: 'transformAgain' }
   | { t: 'requestThumbnail'; size: number }
+  /** Layers-panel thumbnails of every layer's own pixels and mask; replied with `layerThumbs`. */
+  | { t: 'requestLayerThumbs'; size: number }
+  /** The last `savePsd` result was written to disk: the current state is now the saved one. */
+  | { t: 'markSaved' }
   | { t: 'setCentre'; x: number; y: number }
+  | { t: 'setLayerColor'; ids: number[]; color: 'none' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray' }
   | { t: 'setLayerLocks'; id: number; locks: Partial<{ transparency: boolean; pixels: boolean; position: boolean; all: boolean }> }
   | { t: 'maskCommand'; command: string; id?: number }
   /** `filter`: the smart object's filter mask rather than its layer mask. */
@@ -468,10 +484,12 @@ export type FromEngine =
   | { t: 'spikes'; pass: boolean; text: string }
   | { t: 'parity'; pass: boolean; text: string }
   | { t: 'error'; message: string }
-  | { t: 'psdSaved'; name: string; buffer: ArrayBuffer }
+  /** A file to hand the user; `document` when it is the open document saved as a PSD. */
+  | { t: 'psdSaved'; name: string; buffer: ArrayBuffer; document?: boolean }
   | { t: 'sampled'; color: [number, number, number]; toBackground: boolean; pick?: boolean }
   | { t: 'transform'; active: boolean }
   | { t: 'thumbnail'; pixels: Uint8Array; width: number; height: number; docWidth: number; docHeight: number }
+  | { t: 'layerThumbs'; thumbs: LayerThumbs[] }
   | { t: 'recovery'; name: string; savedAt: number; width: number; height: number }
   | { t: 'noRecovery' };
 

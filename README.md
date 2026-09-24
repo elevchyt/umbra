@@ -7,6 +7,8 @@ fidelity with a GPU-first engine and a native desktop shell.
 
 Working name — "Photoshop" never appears in the product.
 
+![Umbra with a layered PSD open: tools on the left, the document in the middle, Color, Properties and Layers panels on the right](docs/screenshot.png)
+
 ## Status
 
 **M0–M8 complete.** Selections, painting, transforms, the clipboard, PSD open/save, all of

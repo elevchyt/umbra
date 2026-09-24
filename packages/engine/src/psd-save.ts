@@ -181,6 +181,7 @@ function toAgLayer(layer: Layer, doc: Doc, linked: LinkedOut): AgLayer {
     clipping: layer.clipped,
     transparencyProtected: layer.locks.transparency,
   };
+  if (layer.color !== 'none') common.layerColor = layer.color;
   // ag-psd only writes fillOpacity when it differs from full.
   if (layer.fill < 1) (common as { fillOpacity?: number }).fillOpacity = layer.fill;
   Object.assign(common, blendingToPsd(layer.blending ?? DEFAULT_BLENDING_STATE));

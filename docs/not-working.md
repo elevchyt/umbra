@@ -27,6 +27,26 @@ handler ever disagree.
 
 **All cleared 2026-09-23.** Kept for the record, with what each turned out to be.
 
+Cleared 2026-09-24 (user report):
+
+- [x] **Alt toggled Electron's own menu bar.** It was only auto-hidden; the window now has no
+      native menu at all (the in-app menu bar is the menu), so Alt is free for painting.
+- [x] **Layer thumbnails were always the empty checkerboard.** The engine now sends real ones
+      (`requestLayerThumbs` → `engine/src/layer-thumbs.ts`, memoised per plane) for pixel and
+      smart layers and for masks; they follow every edit.
+- [x] **Right-clicking a layer did nothing.** It opens Photoshop's layer context menu
+      (Blending Options, Duplicate/Delete, Convert to Smart Object, Rasterize, masks, clipping,
+      layer styles, Merge, colour labels — labels are stored and round-trip through PSD).
+- [x] **Right-clicking the canvas with a painting tool did nothing** (it panned). It opens the
+      brush preset picker with Size and Hardness, as in Photoshop.
+- [x] **The painting cursor was a plain crosshair.** It is the brush outline at its on-screen
+      size (size × zoom, roundness, angle, view rotation), in difference mode.
+- [x] **No unsaved-changes tracking.** The tab shows `*` while the document differs from what
+      was last saved (undoing back clears it), and Close, New, Open and quitting ask
+      Save / Don't Save / Cancel.
+- [x] Icons: the Eyedropper was a pencil, Spot Healing a capsule, the Pen a diamond — now a
+      pipette, a bandage and a pen nib. Layers panel footer buttons are larger.
+
 - [x] **Layers panel footer buttons were all hardcoded `disabled`.** New layer, delete, new
       group and add mask now work (Alt-click Add Mask hides instead of reveals). Link, layer
       style and fill/adjustment layer are not built yet, so they stay disabled — but now look

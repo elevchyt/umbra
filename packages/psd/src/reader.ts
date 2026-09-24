@@ -47,6 +47,8 @@ export interface PsdLayerInfo {
   visible: boolean;
   blendMode: string;
   clipping: boolean;
+  /** Layers-panel colour label. */
+  color?: 'none' | 'red' | 'orange' | 'yellow' | 'green' | 'blue' | 'violet' | 'gray';
   left: number;
   top: number;
   right: number;
@@ -156,6 +158,7 @@ export function readPsdDocument(
         visible: !layer.hidden,
         blendMode: layer.blendMode ?? 'normal',
         clipping: !!layer.clipping,
+        color: layer.layerColor,
         left,
         top,
         right: layer.right ?? 0,

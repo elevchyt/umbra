@@ -1,4 +1,4 @@
-import { app, BrowserWindow, protocol, net, ipcMain, shell, dialog } from 'electron';
+import { app, BrowserWindow, Menu, protocol, net, ipcMain, shell, dialog } from 'electron';
 import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, sep } from 'node:path';
@@ -99,8 +99,6 @@ async function createWindow(): Promise<BrowserWindow> {
     minHeight: 480,
     show: false,
     backgroundColor: '#282828',
-    // Frameless so the in-app menu bar owns the titlebar area (spec 01 §1).
-    autoHideMenuBar: true,
     webPreferences: {
       preload: join(here, 'preload.cjs'),
       contextIsolation: true,
@@ -112,6 +110,17 @@ async function createWindow(): Promise<BrowserWindow> {
       spellcheck: false,
     },
   });
+
+  // The in-app menu bar owns the titlebar area (spec 01 §1). Electron's default menu has to
+  // go entirely: merely auto-hidden, it pops up on every Alt press — and Alt is a painting
+  // modifier (sample, subtract, duplicate).
+  win.removeMenu();
+  // That also drops the default menu's accelerators; keep the DevTools one outside release.
+  if (!app.isPackaged) {
+    win.webContents.on('before-input-event', (_e, input) => {
+      if (input.type === 'keyDown' && input.control && input.shift && input.key.toLowerCase() === 'i') win.webContents.toggleDevTools();
+    });
+  }
 
   win.once('ready-to-show', () => {
     if (!HEADLESS) win.show();
@@ -138,6 +147,7 @@ app.on('window-all-closed', () => {
 });
 
 void app.whenReady().then(async () => {
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
   serveApp();
 
   ipcMain.handle('umbra:save-file', async (event, name: string, data: ArrayBuffer) => {

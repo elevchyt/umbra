@@ -1,12 +1,13 @@
 import { For, Show, createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 import { produce } from 'solid-js/store';
-import { MenuBar } from '@umbra/ui/menu/MenuBar';
+import { ContextMenu, MenuBar } from '@umbra/ui/menu/MenuBar';
 import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
-import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS, type LayerSummary } from '@umbra/engine';
 import { addImportedPresets } from '../brush/ToolPresets';
 import { SymmetryGuide, symmetryPathMade } from './SymmetryGuide';
+import { BrushPickerPopup } from '../brush/BrushesPanel';
 import { ContentAwareFillWorkspace, openContentAwareFill } from '../brush/ContentAwareFill';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
@@ -68,11 +69,14 @@ const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
  * a browser download otherwise. The engine only ever hands us bytes; where they land is a
  * shell concern (spec 03 §2.1).
  */
-async function deliverFile(name: string, buffer: ArrayBuffer): Promise<void> {
+/** Resolves true when the file reached the disk (false: the user cancelled the dialog). */
+async function deliverFile(name: string, buffer: ArrayBuffer): Promise<boolean> {
   const shell = (globalThis as Record<string, any>).umbraShell;
+  let saved = true;
   if (shell?.saveFile) {
     const path = await shell.saveFile(name, buffer);
     store.setStatusMessage(path ? `Saved ${path}` : 'Save cancelled');
+    saved = !!path;
   } else {
     const url = URL.createObjectURL(new Blob([buffer], { type: 'image/vnd.adobe.photoshop' }));
     const a = document.createElement('a');
@@ -83,6 +87,7 @@ async function deliverFile(name: string, buffer: ArrayBuffer): Promise<void> {
     store.setStatusMessage(`Downloaded ${name}`);
   }
   setTimeout(() => store.setStatusMessage(null), 4000);
+  return saved;
 }
 
 /** Hand a headless harness its result; the Electron main process is waiting on this. */
@@ -108,6 +113,8 @@ export function Workspace() {
 
   const [pickerTarget, setPickerTarget] = createSignal<'foreground' | 'background'>('foreground');
   const [quickMask, setQuickMask] = createSignal(false);
+  /** Where the right-click brush picker is open, if it is. */
+  const [brushPop, setBrushPop] = createSignal<{ x: number; y: number } | null>(null);
   const [transforming, setTransforming] = createSignal(false);
   const [recovery, setRecovery] = createSignal<{ name: string; savedAt: number } | null>(null);
   const [error, setError] = createSignal<string | null>(null);
@@ -168,13 +175,21 @@ export function Workspace() {
         },
         onSpikes: (pass, text) => reportToShell(pass, text),
         onParity: (pass, text) => reportToShell(pass, text),
-        onPsdSaved: (name, buffer) => void deliverFile(name, buffer),
+        onPsdSaved: (name, buffer, isDocument) =>
+          void deliverFile(name, buffer).then((saved) => {
+            if (!isDocument) return;
+            if (saved) send({ t: 'markSaved' });
+            const done = afterSave;
+            afterSave = null;
+            done?.(saved);
+          }),
         onTransform: setTransforming,
         onThumbnail: (t) => {
           // Dev aid: the rendered thumbnail itself, independent of the Navigator's drawing.
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraThumb = t;
           store.setThumbnail(t);
         },
+        onLayerThumbs: (thumbs) => store.setLayerThumbs(new Map(thumbs.map((t) => [t.id, t]))),
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
@@ -510,6 +525,39 @@ export function Workspace() {
   // ---- commands ------------------------------------------------------------------------
   const send = (m: Parameters<EngineClient['send']>[0]) => client?.send(m);
 
+  // ---- unsaved changes ------------------------------------------------------------------
+  /** What the Save Changes prompt goes on to do once answered (close, open a file, quit…). */
+  let afterPrompt: (() => void) | null = null;
+  /** A Save started from the prompt: called with whether the file reached the disk. */
+  let afterSave: ((saved: boolean) => void) | null = null;
+  /** Set once the user has agreed to quit, so the unload guard lets the window go. */
+  let leaving = false;
+
+  /**
+   * Run `then` — something that would throw the open document away — asking first, as
+   * Photoshop does, when it has changes that are not on disk: Save, Don't Save, or Cancel.
+   */
+  function guardUnsaved(then: () => void, reason = 'closing'): void {
+    if (!store.doc()?.dirty) return then();
+    afterPrompt = then;
+    store.openDialog('saveChanges', { reason });
+  }
+  const quit = () => {
+    leaving = true;
+    window.close();
+  };
+  onMount(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (leaving || !store.doc()?.dirty) return;
+      e.preventDefault();
+      e.returnValue = 'unsaved';
+      // A browser asks by itself; the desktop shell just cancels the close, so ask in-app.
+      if ((globalThis as Record<string, any>).umbraShell?.kind === 'electron') guardUnsaved(quit, 'quitting');
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    onCleanup(() => window.removeEventListener('beforeunload', onBeforeUnload));
+  });
+
   function runCommand(cmd: string): void {
     // Panel toggles are generated, so handle them before the explicit switch.
     const panelId = PANEL_BY_COMMAND[cmd];
@@ -519,6 +567,16 @@ export function Workspace() {
     }
     if (cmd.startsWith('workspace.') && WORKSPACE_BY_ID.has(cmd.slice('workspace.'.length))) {
       store.resetLayout(WORKSPACE_BY_ID.get(cmd.slice('workspace.'.length))!.layout);
+      return;
+    }
+    // The Layers panel's right-click menu: colour labels, and an adjustment's settings.
+    if (cmd.startsWith('layerColor.')) {
+      const ids = store.doc()?.activeLayerIds ?? [];
+      if (ids.length) send({ t: 'setLayerColor', ids: [...ids], color: cmd.slice('layerColor.'.length) as LayerSummary['color'] });
+      return;
+    }
+    if (cmd === 'layer.editAdjustment') {
+      store.openPanel('properties');
       return;
     }
     // Filters come from the registry, like panel toggles: one handler for all of them.
@@ -630,7 +688,7 @@ export function Workspace() {
         send({ t: 'smartCommand', cmd: 'clearFilters' });
         return;
       case 'file.new':
-        store.openDialog('newDocument');
+        guardUnsaved(() => store.openDialog('newDocument'));
         break;
       case 'file.open':
         void openFile();
@@ -642,13 +700,13 @@ export function Workspace() {
           else send({ t: 'closeContents', save: false });
           break;
         }
-        send({ t: 'closeDoc' });
+        guardUnsaved(() => send({ t: 'closeDoc' }));
         break;
       case 'file.closeAll':
-        send({ t: 'closeDoc' });
+        guardUnsaved(() => send({ t: 'closeDoc' }));
         break;
       case 'file.exit':
-        window.close();
+        guardUnsaved(quit, 'quitting');
         break;
       case 'file.save':
         // Saving contents puts them back into the smart object, as Photoshop's Ctrl+S does.
@@ -1384,13 +1442,14 @@ export function Workspace() {
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
+      // The file replaces the open document, so its unsaved changes are asked about first.
       if (/\.psb?$|\.psd$/i.test(file.name)) {
         // PSD goes to the engine as raw bytes; the worker parses and tiles it.
         const buffer = await file.arrayBuffer();
-        client?.send({ t: 'openPsd', buffer, name: file.name }, [buffer]);
+        guardUnsaved(() => client?.send({ t: 'openPsd', buffer, name: file.name }, [buffer]), 'opening another file');
       } else {
         const bitmap = await createImageBitmap(file);
-        client?.send({ t: 'openBitmap', bitmap, name: file.name }, [bitmap]);
+        guardUnsaved(() => client?.send({ t: 'openBitmap', bitmap, name: file.name }, [bitmap]), 'opening another file');
       }
     };
     input.click();
@@ -1525,6 +1584,10 @@ export function Workspace() {
   const isChecked = (cmd: string): boolean => {
     const panelId = PANEL_BY_COMMAND[cmd];
     if (panelId) return store.isPanelOpen(panelId);
+    if (cmd.startsWith('layerColor.')) {
+      const d = store.doc();
+      return d?.layers.find((l) => l.id === d.activeLayerIds[0])?.color === cmd.slice('layerColor.'.length);
+    }
     switch (cmd) {
       case 'view.rulers':
         return store.extras.rulers;
@@ -1644,7 +1707,19 @@ export function Workspace() {
             onCloseContents={() => runCommand('file.close')}
           />
           <div class="doc-area" ref={docAreaRef} classList={{ 'with-rulers': store.extras.rulers }}>
-            <canvas ref={canvasRef} class={cursorClass(store.activeTool())} />
+            <canvas
+              ref={canvasRef}
+              class={cursorClass(store.activeTool())}
+              onContextMenu={(e) => {
+                if (!PAINT_TOOLS.has(store.activeTool()) || !store.doc()) return;
+                e.preventDefault();
+                setBrushPop({ x: e.clientX, y: e.clientY });
+              }}
+            />
+            <BrushCursor canvas={() => canvasRef} />
+            <Show when={brushPop()}>
+              {(p) => <BrushPickerPopup x={p().x} y={p().y} onClose={() => setBrushPop(null)} />}
+            </Show>
             <SamplerMarkers />
             <SymmetryGuide />
             <Show when={store.extras.rulers}>
@@ -1822,6 +1897,42 @@ export function Workspace() {
       <Show when={store.dialog()?.id === 'gallery'}>
         <GalleryDialog payload={store.dialog()!.payload as GalleryPayload | undefined} send={(m) => send(m as Parameters<typeof send>[0])} onClose={store.closeDialog} />
       </Show>
+      <Show when={store.dialog()?.id === 'saveChanges'}>
+        <Dialog
+          title="Umbra"
+          width={380}
+          okLabel="Save"
+          onOk={() => {
+            const then = afterPrompt;
+            afterPrompt = null;
+            store.closeDialog();
+            // Carry on only once the file is on disk; cancelling the save dialog cancels it all.
+            afterSave = (saved) => saved && then?.();
+            send({ t: 'savePsd', name: psdName() });
+          }}
+          onCancel={() => {
+            afterPrompt = null;
+            store.closeDialog();
+          }}
+          footer={
+            <Button
+              width={90}
+              onClick={() => {
+                const then = afterPrompt;
+                afterPrompt = null;
+                store.closeDialog();
+                then?.();
+              }}
+            >
+              Don't Save
+            </Button>
+          }
+        >
+          <p class="dialog-text">
+            Save changes to the document “{store.doc()?.name}” before {(store.dialog()?.payload as { reason?: string } | undefined)?.reason ?? 'closing'}?
+          </p>
+        </Dialog>
+      </Show>
       <Show when={store.dialog()?.id === 'closeContents'}>
         <Dialog
           title="Umbra"
@@ -1977,6 +2088,19 @@ export function Workspace() {
           }}
         />
       </Show>
+      <Show when={store.contextMenu()}>
+        {(m) => (
+          <ContextMenu
+            items={m().items}
+            x={m().x}
+            y={m().y}
+            onCommand={runCommand}
+            isEnabled={isEnabled}
+            isChecked={isChecked}
+            onClose={() => store.setContextMenu(null)}
+          />
+        )}
+      </Show>
       <Show when={store.dialog()?.id === 'about'}>
         <AboutDialog onCancel={store.closeDialog} />
       </Show>
@@ -1991,12 +2115,69 @@ export function Workspace() {
 }
 
 function cursorClass(toolId: string): string {
-  if (PAINT_TOOLS.has(toolId)) return 'cursor-paint';
+  // BrushCursor draws the tip outline; the system cursor would only hide its centre.
+  if (PAINT_TOOLS.has(toolId)) return 'cursor-brush';
   if (toolId === 'hand') return 'cursor-hand';
   if (toolId === 'zoom') return 'cursor-zoom';
   if (toolId === 'move') return 'cursor-move';
   if (TOOL_BY_ID.get(toolId)?.icon.startsWith('marquee')) return 'cursor-cross';
   return 'cursor-default';
+}
+
+/**
+ * The painting tools' cursor, as Photoshop's "Normal Brush Tip": the tip's outline at its
+ * true on-screen size — diameter × zoom, flattened by Roundness and turned by Angle and the
+ * view rotation — drawn in difference so it shows on any colour. A tip too small to read
+ * becomes a crosshair.
+ */
+function BrushCursor(props: { canvas: () => HTMLCanvasElement | undefined }) {
+  const [at, setAt] = createSignal<{ x: number; y: number } | null>(null);
+  onMount(() => {
+    const canvas = props.canvas();
+    if (!canvas) return;
+    const move = (e: PointerEvent) => {
+      // Relative to the doc area, which positions this overlay.
+      const r = canvas.parentElement!.getBoundingClientRect();
+      setAt({ x: e.clientX - r.left, y: e.clientY - r.top });
+    };
+    const leave = () => setAt(null);
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerleave', leave);
+    onCleanup(() => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerleave', leave);
+    });
+  });
+  const shape = () => {
+    const p = at();
+    if (!p || !store.doc() || !PAINT_TOOLS.has(store.activeTool())) return null;
+    const s = store.stats();
+    const d = Math.max(0, store.brush.size * (s?.zoom ?? 1));
+    const rot = -store.brush.angle + ((s?.viewRotation ?? 0) * 180) / Math.PI;
+    return { ...p, rx: d / 2, ry: (d / 2) * Math.max(0.01, store.brush.roundness), rot };
+  };
+  return (
+    <Show when={shape()}>
+      {(c) => {
+        const box = () => Math.ceil(c().rx) * 2 + 4;
+        return (
+          <svg
+            class="brush-cursor"
+            width={box()}
+            height={box()}
+            style={{ transform: `translate(${c().x - box() / 2}px, ${c().y - box() / 2}px)` }}
+          >
+            <Show
+              when={c().rx >= 4}
+              fallback={<path d={`M${box() / 2 - 5} ${box() / 2}h10M${box() / 2} ${box() / 2 - 5}v10`} />}
+            >
+              <ellipse cx={box() / 2} cy={box() / 2} rx={c().rx} ry={c().ry} transform={`rotate(${c().rot} ${box() / 2} ${box() / 2})`} />
+            </Show>
+          </svg>
+        );
+      }}
+    </Show>
+  );
 }
 
 /**

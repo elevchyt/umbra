@@ -417,6 +417,19 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .doc-area.with-rulers canvas { padding: 0; }
 
 .cursor-paint { cursor: crosshair; }
+.cursor-brush { cursor: none; }
+.brush-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  overflow: visible;
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1;
+  mix-blend-mode: difference;
+  z-index: 5;
+}
 .cursor-hand { cursor: grab; }
 .cursor-zoom { cursor: zoom-in; }
 .cursor-move { cursor: move; }
@@ -571,8 +584,8 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
-  height: 26px;
+  gap: 4px;
+  height: 34px;
   flex: 0 0 auto;
   border-top: 1px solid var(--border-dark);
   background: var(--panel-sunken);
@@ -604,8 +617,8 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .layer-row.selected { background: var(--row-selected); }
 .layer-eye { background: transparent; border: 0; color: var(--icon); cursor: default; padding: 0; }
 .layer-thumb {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   border: 1px solid var(--border-dark);
   background-image:
@@ -621,8 +634,8 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .layer-twirl:hover { color: var(--text); }
 .layer-thumb.group { display: flex; align-items: center; justify-content: center; background: var(--panel-sunken); background-image: none; color: var(--text-dim); }
 .layer-mask-thumb {
-  width: 26px;
-  height: 26px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   border: 1px solid var(--border-dark);
   background: linear-gradient(to bottom, #fff 50%, #000 50%);
@@ -1280,3 +1293,31 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .sym-locator { display: inline-grid; grid-template-columns: repeat(3, 7px); gap: 1px; margin: 0 4px; }
 .sym-locator button { width: 7px; height: 7px; padding: 0; border: 1px solid var(--border-dark); background: var(--panel-raised); border-radius: 1px; }
 .sym-locator button.on { background: var(--accent); }
+
+/* Panel footers (Layers, Channels, Paths…): Photoshop-sized targets, not toolbar minis. */
+.panel-footer .mini-icon { width: 28px; height: 28px; }
+.panel-footer .mini-icon svg { width: 19px; height: 19px; }
+
+/* Layers-panel thumbnails: the layer's own pixels (or mask) fitted to the document's aspect,
+   over a checkerboard only where the document is. */
+.layer-thumb.pixels, .layer-mask-thumb:has(.layer-thumb-canvas) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel-sunken);
+  background-image: none;
+}
+.layer-thumb-canvas {
+  display: block;
+  background-image:
+    linear-gradient(45deg, #bbb 25%, transparent 25%),
+    linear-gradient(-45deg, #bbb 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #bbb 75%),
+    linear-gradient(-45deg, transparent 75%, #bbb 75%);
+  background-size: 6px 6px;
+  background-position: 0 0, 0 3px, 3px -3px, -3px 0;
+  background-color: #fff;
+}
+.layer-thumb-canvas.mask { background: #000; }
+.layer-row { height: 38px; }
+.layer-eye { align-self: stretch; width: 20px; display: flex; align-items: center; justify-content: center; }

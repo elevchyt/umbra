@@ -27,10 +27,21 @@ export class History {
   private states: HistoryState[] = [];
   private cursor = -1;
   private options: HistoryOptions = { limit: 50, nonLinear: false };
+  /**
+   * The document as it stands on disk (or as it was created): the current state differing
+   * from it is "unsaved changes". null when no state is on disk, as for a recovered file.
+   */
+  saved: Doc | null;
 
   constructor(initial: Doc, name = 'Open') {
     this.states = [{ name, doc: initial, time: Date.now(), snapshot: true }];
     this.cursor = 0;
+    this.saved = initial;
+  }
+
+  /** Photoshop's asterisk: the current state is not the one last saved. Undoing back to it clears it. */
+  get dirty(): boolean {
+    return this.current !== this.saved;
   }
 
   configure(patch: Partial<HistoryOptions>): void {

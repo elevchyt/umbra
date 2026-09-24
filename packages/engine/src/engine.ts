@@ -40,6 +40,7 @@ import {
 import { PointerRing, FLAG_DOWN, FLAG_UP, nowAbs, type PointerSample } from './input/ring.js';
 import { Plane, PlaneWriter, Tile, tileMemory } from './tiles/plane.js';
 import { MipPlane } from './tiles/mip.js';
+import { planeThumb } from './layer-thumbs.js';
 import { planeFromImageBitmap, RGBA8 } from './tiles/import.js';
 import {
   docRect,
@@ -58,6 +59,7 @@ import {
   walkLayers,
   type Doc,
   type Layer,
+  type LabelColor,
   type PixelLayer,
   type SmartObjectLayer,
   type SmartSource,
@@ -166,7 +168,7 @@ import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
 import { Journal } from './journal.js';
 import { openPsd, type PendingSource } from './psd-open.js';
-import type { DocSummary, EngineStats } from './protocol.js';
+import type { DocSummary, EngineStats, LayerThumbs } from './protocol.js';
 
 /** The Free Transform options bar's numbers, derived from the live matrix. */
 function transformReadout(box: Rect, m: Mat) {
@@ -887,7 +889,24 @@ export class Engine {
 
   /** Serialise the document to a PSD for the shell to write to disk. */
   toPsd(): ArrayBuffer {
+    // What is being written, so `markSaved` can clear the asterisk once it is on disk. The
+    // contents of a smart object are not a file of their own.
+    this.savingDoc = this.parents.length ? null : this.history.current;
     return savePsd(this.doc);
+  }
+
+  private savingDoc: Doc | null = null;
+
+  /** The file `toPsd` produced reached the disk (the user did not cancel the save dialog). */
+  markSaved(): void {
+    if (this.savingDoc && !this.parents.length) this.history.saved = this.savingDoc;
+    this.savingDoc = null;
+  }
+
+  /** The outermost document has changes that are not on disk. */
+  get dirty(): boolean {
+    if (!this.open) return false;
+    return (this.parents.length ? this.parents[0]!.history : this.history).dirty;
   }
 
   undo(): boolean {
@@ -2197,6 +2216,20 @@ export class Engine {
     return this.renderer.renderThumbnail(this.doc, maxSize);
   }
 
+  /** Every layer's own pixels and mask, shrunk for the Layers panel (spec 01 §5). */
+  layerThumbs(size: number): LayerThumbs[] {
+    if (!this.open || !(size >= 1)) return [];
+    const { width: w, height: h } = this.doc;
+    const out: LayerThumbs[] = [];
+    for (const { layer } of walkLayers(this.doc.layers)) {
+      const t: LayerThumbs = { id: layer.id };
+      if (layer.kind === 'pixel' || layer.kind === 'smart') t.layer = planeThumb(layer.plane.base, w, h, size);
+      if (layer.mask) t.mask = planeThumb(layer.mask.plane.base, w, h, size);
+      if (t.layer || t.mask) out.push(t);
+    }
+    return out;
+  }
+
   setZoom(zoom: number): void {
     this.fitPending = false;
     this.view = zoomAt(this.view, zoom / this.view.zoom, this.view.width / 2, this.view.height / 2);
@@ -2323,6 +2356,15 @@ export class Engine {
       { ...this.doc, layers: updateLayer(this.doc.layers, id, (l) => ({ ...l, locks })) },
       'Lock',
     );
+  }
+
+  /** Layer ▸ context menu colour label (the Layers panel tints the row's eye cell). */
+  setLayerColor(ids: readonly number[], color: LabelColor): void {
+    const targets = ids.filter((id) => findLayer(this.doc.layers, id)?.color !== color);
+    if (!targets.length) return;
+    let layers = this.doc.layers;
+    for (const id of targets) layers = updateLayer(layers, id, (l) => ({ ...l, color }));
+    this.commit({ ...this.doc, layers }, 'Layer Color');
   }
 
   // ---- adjustments -------------------------------------------------------------------------
@@ -5421,6 +5463,7 @@ export class Engine {
       activeLayerIds: [...this.doc.activeLayerIds],
       maskTarget: this.paintTarget()?.mask && !this.paintTarget()?.filter ? (this.doc.activeLayerIds[0] ?? null) : null,
       editingContents: this.editingContents,
+      dirty: this.dirty,
       globalLight: this.doc.globalLight ?? DEFAULT_GLOBAL_LIGHT,
       paths: (this.doc.paths ?? []).map((p) => ({ id: p.id, name: p.name, work: p.work, path: p.path })),
       activePathId: this.targetPath()?.id ?? null,
@@ -5492,6 +5535,7 @@ export class Engine {
         hasMask: !!layer.mask,
         maskEnabled: layer.mask ? layer.mask.enabled : false,
         locks: layer.locks,
+        color: layer.color,
         expanded: layer.kind === 'group' ? layer.expanded : false,
         tiles: hasPlane(layer) ? layer.plane.base.tileCount : 0,
       })),
