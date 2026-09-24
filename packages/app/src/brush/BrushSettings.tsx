@@ -15,6 +15,17 @@ import {
   DEFAULT_SMOOTHING,
   DEFAULT_TEXTURE,
   DEFAULT_TRANSFER,
+  DEFAULT_BRISTLE,
+  DEFAULT_ERODIBLE,
+  DEFAULT_AIRBRUSH,
+  BRISTLE_SHAPES,
+  ERODIBLE_SHAPES,
+  isPhysical,
+  physicalTip,
+  type AirbrushTip,
+  type BristleTip,
+  type ErodibleTip,
+  type TipRef,
   beginBrushStroke,
   brushStrokeTo,
   renderDabs,
@@ -120,8 +131,9 @@ function BrushPreview() {
       pressureOpacity: false,
       ...(b.dual ? { dual: { ...b.dual, size: b.dual.size * k } } : {}),
       // Sampled tips and textures need the engine's bitmaps; the preview draws the shape.
-      // (The dual brush is drawn: its tip is computed unless sampled.)
-      tip: { kind: 'computed' },
+      // Physical tips are generated here as in the engine. (The dual brush is drawn: its tip
+      // is computed unless sampled.)
+      tip: isPhysical(b.tip) ? b.tip : { kind: 'computed' },
       texture: undefined,
       symmetry: undefined,
     };
@@ -134,7 +146,7 @@ function BrushPreview() {
       const y = H / 2 + Math.sin(t * Math.PI * 2) * (H / 2 - size / 2 - 4);
       dabs.push(...brushStrokeTo(s, { x, y, pressure: Math.sin(t * Math.PI), time: i * 16, tiltX: 0, tiltY: 0, twist: t * 360 }));
     }
-    const cov = renderDabs(dabs, W, H, { noise: !!p.noise, ...(p.dual?.enabled ? { dual: { hardness: p.dual.hardness, mode: p.dual.mode } } : {}) });
+    const cov = renderDabs(dabs, W, H, { tips: physicalTip, noise: !!p.noise, ...(p.dual?.enabled ? { dual: { hardness: p.dual.hardness, mode: p.dual.mode } } : {}) });
     const img = ctx.createImageData(W, H);
     const colorAt = new Float32Array(W * H * 3).fill(0);
     // Colour Dynamics: the last dab over a pixel gives its colour (good enough to see jitter).
@@ -153,6 +165,82 @@ function BrushPreview() {
     ctx.putImageData(img, 0, 0);
   });
   return <canvas ref={canvas} class="bs-preview" width={260} height={70} />;
+}
+
+const TIP_KINDS = [
+  { value: 'computed', label: 'Round (computed)' },
+  { value: 'bristle', label: 'Bristle' },
+  { value: 'erodible', label: 'Erodible' },
+  { value: 'airbrush', label: 'Airbrush' },
+];
+
+const SHAPE_LABEL = (s: string) => s.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+
+/** Which kind of tip: computed round, a sampled bitmap, or one of the physical tips. */
+function TipKind() {
+  const kind = () => store.brush.tip?.kind ?? 'computed';
+  const choose = (v: string) => {
+    const tip: TipRef = v === 'bristle' ? DEFAULT_BRISTLE : v === 'erodible' ? DEFAULT_ERODIBLE : v === 'airbrush' ? DEFAULT_AIRBRUSH : { kind: 'computed' };
+    store.setBrush('tip', { ...tip });
+    // Photoshop's physical tips paint with close spacing.
+    if (v !== 'computed' && store.brush.spacing > 0.1) store.setBrush('spacing', 0.02);
+  };
+  return (
+    <Select
+      label="Tip"
+      value={kind()}
+      width={150}
+      options={kind() === 'sampled' ? [{ value: 'sampled', label: 'Sampled' }, ...TIP_KINDS] : TIP_KINDS}
+      onChange={choose}
+    />
+  );
+}
+
+function BristleQualities() {
+  const t = () => store.brush.tip as BristleTip;
+  const setT = (patch: Partial<BristleTip>) => store.setBrush('tip', { ...t(), ...patch });
+  return (
+    <>
+      <div class="bs-subhead">Bristle Qualities</div>
+      <Select label="Shape" value={t().shape} width={130} options={BRISTLE_SHAPES.map((s) => ({ value: s, label: SHAPE_LABEL(s) }))} onChange={(v) => setT({ shape: v as BristleTip['shape'] })} />
+      <Slide label="Bristles" value={pct(t().bristles)} min={1} max={100} suffix="%" onChange={(v) => setT({ bristles: v / 100 })} />
+      <Slide label="Length" value={pct(t().length)} min={25} max={500} suffix="%" onChange={(v) => setT({ length: v / 100 })} />
+      <Slide label="Thickness" value={pct(t().thickness)} min={1} max={200} suffix="%" onChange={(v) => setT({ thickness: v / 100 })} />
+      <Slide label="Stiffness" value={pct(t().stiffness)} min={1} max={100} suffix="%" onChange={(v) => setT({ stiffness: v / 100 })} />
+    </>
+  );
+}
+
+function ErodibleQualities() {
+  const t = () => store.brush.tip as ErodibleTip;
+  const setT = (patch: Partial<ErodibleTip>) => store.setBrush('tip', { ...t(), ...patch });
+  return (
+    <>
+      <div class="bs-subhead">Erodible Tip</div>
+      <Select label="Shape" value={t().shape} width={110} options={ERODIBLE_SHAPES.map((s) => ({ value: s, label: SHAPE_LABEL(s) }))} onChange={(v) => setT({ shape: v as ErodibleTip['shape'] })} />
+      <Slide label="Softness" value={pct(1 - t().hardness)} min={0} max={100} suffix="%" onChange={(v) => setT({ hardness: 1 - v / 100 })} />
+      <div class="bs-row">
+        <button type="button" class="button" title="Put the point back on the tip" onClick={() => store.engine?.({ t: 'sharpenTip' } as never)}>
+          Sharpen Tip
+        </button>
+      </div>
+    </>
+  );
+}
+
+function AirbrushQualities() {
+  const t = () => store.brush.tip as AirbrushTip;
+  const setT = (patch: Partial<AirbrushTip>) => store.setBrush('tip', { ...t(), ...patch });
+  return (
+    <>
+      <div class="bs-subhead">Airbrush Tip</div>
+      <Slide label="Hardness" value={pct(t().hardness)} min={0} max={100} suffix="%" onChange={(v) => setT({ hardness: v / 100 })} />
+      <Slide label="Distortion" value={Math.round(((t().cutoffAngle - 1) / 89) * 100)} min={0} max={100} suffix="%" onChange={(v) => setT({ cutoffAngle: 1 + (v / 100) * 89 })} />
+      <Slide label="Granularity" value={pct(t().granularity)} min={0} max={100} suffix="%" onChange={(v) => setT({ granularity: v / 100 })} />
+      <Slide label="Spatter Size" value={pct(t().spatterSize)} min={0} max={100} suffix="%" onChange={(v) => setT({ spatterSize: v / 100 })} />
+      <Slide label="Spatter Amount" value={t().spatterAmount} min={1} max={200} onChange={(v) => setT({ spatterAmount: v })} />
+    </>
+  );
 }
 
 export function BrushSettingsPanel() {
@@ -244,8 +332,18 @@ export function BrushSettingsPanel() {
         </div>
         <Slide label="Angle" value={b.angle} min={-180} max={180} suffix="°" onChange={(v) => set('angle', v)} />
         <Slide label="Roundness" value={pct(b.roundness)} min={1} max={100} suffix="%" onChange={(v) => set('roundness', v / 100)} />
-        <Show when={b.tip?.kind !== 'sampled'}>
+        <TipKind />
+        <Show when={!b.tip || b.tip.kind === 'computed'}>
           <Slide label="Hardness" value={pct(b.hardness)} min={0} max={100} suffix="%" onChange={(v) => set('hardness', v / 100)} />
+        </Show>
+        <Show when={b.tip?.kind === 'bristle'}>
+          <BristleQualities />
+        </Show>
+        <Show when={b.tip?.kind === 'erodible'}>
+          <ErodibleQualities />
+        </Show>
+        <Show when={b.tip?.kind === 'airbrush'}>
+          <AirbrushQualities />
         </Show>
         <Slide label="Spacing" value={pct(b.spacing)} min={1} max={1000} suffix="%" onChange={(v) => set('spacing', v / 100)} />
       </>

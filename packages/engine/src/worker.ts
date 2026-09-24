@@ -330,6 +330,12 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'replaceFonts':
         if (engine?.replaceFonts(msg.map)) post({ t: 'doc', doc: engine.summary() });
         break;
+      case 'setCloneOverlay':
+        engine?.setCloneOverlay(msg.overlay);
+        break;
+      case 'sharpenTip':
+        engine?.sharpenTip();
+        break;
       case 'patchPointer':
         if (engine?.patchPointer(msg, msg.options) && msg.phase !== 'move') post({ t: 'doc', doc: engine.summary() });
         break;

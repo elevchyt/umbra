@@ -9,7 +9,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onMount } from 'solid-js';
 import { reconcile } from 'solid-js/store';
 import { Icon } from '@umbra/ui/icons/Icon';
-import { DEFAULT_BRUSH, beginBrushStroke, brushStrokeTo, renderDabs, type BrushParams, type BrushPreset, type Dab, type TipBitmap } from '@umbra/engine';
+import { physicalTip, DEFAULT_BRUSH, beginBrushStroke, brushStrokeTo, renderDabs, type BrushParams, type BrushPreset, type Dab, type TipBitmap } from '@umbra/engine';
 import { store } from '../state/store';
 import { Slide } from '../fx/controls';
 
@@ -67,7 +67,7 @@ function StrokeThumb(props: { preset: BrushPreset; tips: Record<string, TipBitma
       const t = i / 60;
       dabs.push(...brushStrokeTo(s, { x: 6 + t * (W - 12), y: H / 2 + Math.sin(t * Math.PI * 2) * (H / 2 - size / 2 - 2), pressure: 0.3 + 0.7 * Math.sin(t * Math.PI), time: i * 16 }));
     }
-    const cov = renderDabs(dabs, W, H, { tips: (id) => props.tips[id], ...(p.dual?.enabled ? { dual: { hardness: p.dual.hardness, mode: p.dual.mode, tip: p.dual.tip.kind === 'sampled' ? props.tips[p.dual.tip.id] : undefined } } : {}) });
+    const cov = renderDabs(dabs, W, H, { tips: (id) => props.tips[id] ?? physicalTip(id), ...(p.dual?.enabled ? { dual: { hardness: p.dual.hardness, mode: p.dual.mode, tip: p.dual.tip.kind === 'sampled' ? props.tips[p.dual.tip.id] : undefined } } : {}) });
     const img = ctx.createImageData(W, H);
     for (let i = 0; i < W * H; i++) {
       const a = Math.min(1, p.wetEdges ? cov[i]! * (0.5 + 2 * cov[i]! * (1 - cov[i]!)) : cov[i]!);

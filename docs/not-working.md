@@ -188,18 +188,23 @@ implementation.
       Extend), Red Eye, Edit ▸ Content-Aware Fill, Dodge / Burn / Sponge, Blur / Sharpen /
       Smudge, Mixer Brush, Color Replacement, Background and Magic Eraser, History and Art
       History Brush.
-- [ ] **Bristle and erodible tips are drawn as round tips** (the preset's other settings are
-      kept, and importing says which): 135 of the 643 presets in Photoshop 2020's own `.abr`
-      files use them.
+- [x] **Bristle, erodible and airbrush tips** (2026-09-24): generated from their settings
+      (`kernels/src/brush/physical.ts`, `[fit]` — Photoshop's 3-D simulation is not
+      documented). Bristles streak and splay with pressure, erodible leads wear until Sharpen
+      Tip, airbrushes spray grain and spatter. They read from and write to `.abr`, and all
+      135 such presets in Photoshop 2020's own files draw. Bristle tips do not bend with the
+      direction of the stroke or with tilt, as Photoshop's 3-D bristles do.
+- [x] **The Healing Brush heals as it paints** (2026-09-24) and commits what it showed. Spot
+      Healing, Remove, Patch and Content-Aware Move run on release, as in Photoshop.
+- [x] **Clone Source ▸ Show Overlay** (2026-09-24): opacity, Clipped, Auto Hide, Invert and
+      blend mode, following the source's offset, scale, rotation and flips. A clipped overlay for a
+      brush wider than 800 px is shown unclipped.
 - [ ] **Symmetry has 6 of Photoshop's 11 types** (no wavy, circle, spiral, parallel lines or
       path-based symmetry) and its axis is always the canvas centre, with no on-canvas path.
 - [ ] **Tool presets (`.tpl`) are not read**; tool presets are kept with the app, not in a
-      file, and the Clone Source panel's overlay (a ghost of the source under the brush) is
-      not drawn.
+      file.
 - [ ] **Content-Aware Fill is a dialog, not Photoshop's workspace**: sampling is Auto,
       Rectangular or the whole image, with no painted sampling area or live preview panel.
-      Healing, Spot Healing, Patch, Content-Aware Move and Remove all run when the stroke or
-      drag ends (≈0.1–0.5 s for a blemish-sized area), not live while painting.
 - [ ] **Magic Eraser renders the document per click** to sample all layers; fine for a click,
       but it is the slowest tool on a big document.
 

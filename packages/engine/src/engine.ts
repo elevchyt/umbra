@@ -137,6 +137,9 @@ import type { LayerLocks } from './document.js';
 import {
   DEFAULT_BRUSH,
   beginStroke as beginBrushStroke,
+  isPhysical,
+  physicalTip,
+  physicalTipId,
   catchUp as catchUpStroke,
   dabAlpha,
   finishStroke,
@@ -214,6 +217,27 @@ export const RETOUCH_NAMES: Record<RetouchToolId, string> = {
   healingBrush: 'Healing Brush',
 };
 
+/** Clone Source ▸ Show Overlay: how the source is shown under (or around) the brush. */
+export interface CloneOverlay {
+  show: boolean;
+  /** 0…1 */
+  opacity: number;
+  /** Only under the brush tip. */
+  clipped: boolean;
+  /** Hidden while painting. */
+  autoHide: boolean;
+  invert: boolean;
+  mode: 'normal' | 'darken' | 'lighten' | 'difference';
+  sample: 'current' | 'currentBelow' | 'all';
+  aligned: boolean;
+  /** The brush's radius, px (for Clipped). */
+  radius: number;
+  transform: { scaleX: number; scaleY: number; angle: number; flipX: boolean; flipY: boolean };
+}
+
+/** The overlay's synthetic layer id: never a document layer's. */
+const OVERLAY_ID = -1001;
+
 export interface PatchOptions {
   tool: 'patch' | 'contentAwareMove';
   patchMode: 'normal' | 'contentAware';
@@ -277,6 +301,10 @@ export class Engine {
   private retouchLayer: PlaneWriter | null = null;
   private retouchDirty = false;
   private retouchTool: RetouchToolId | null = null;
+  /** Healing Brush: the stroke's healed colours (same coverage), healed as it is painted. */
+  private healWriter: PlaneWriter | null = null;
+  /** Dabs painted since the last heal (x, y, reach). */
+  private healPending: { x: number; y: number; r: number }[] = [];
   /** Clone Stamp / Healing: the Alt-clicked source point, and the offset the first aligned stroke fixed. */
   cloneSource: { x: number; y: number } | null = null;
   private cloneOffset: { dx: number; dy: number } | null = null;
@@ -2875,6 +2903,7 @@ export class Engine {
    * previewing, which is when Photoshop shows before/after pairs.
    */
   probe(cursor: { x: number; y: number } | null, samplers: readonly { x: number; y: number }[]): ProbeReply {
+    this.cursorScreen = cursor;
     const before = this.documentPixels();
     const after = this.previewPixels();
     const read = (px: { pixels: Uint8Array; width: number; height: number } | null, x: number, y: number): [number, number, number, number] | null => {
@@ -3083,6 +3112,19 @@ export class Engine {
   /** Brush preset groups, as the Brushes panel shows them: the built-ins, then imports. */
   brushGroups: BrushGroup[] = builtinBrushes();
   private tipThumbs = new Map<string, TipBitmap>();
+
+  /** A tip bitmap by id: the library's sampled tips, else a generated physical tip. */
+  private tipOf(id: string): TipBitmap | undefined {
+    return this.brushTips.get(id) ?? physicalTip(id);
+  }
+
+  /** How worn each erodible tip is (by its settings), carried from stroke to stroke. */
+  private tipWear = new Map<string, number>();
+
+  /** Brush Settings ▸ Sharpen Tip: every erodible tip back to its point. */
+  sharpenTip(): void {
+    this.tipWear.clear();
+  }
 
   /** Tips shrunk to fit 48 px, for the panel's previews (sent once, cached). */
   private tipThumb(id: string): TipBitmap | null {
@@ -3954,16 +3996,16 @@ export class Engine {
     this.paintMode = mode;
     this.strokeColor = color;
     this.strokeParams = { size: params.size, hardness: params.hardness, color: [...color, 1] };
-    this.strokeState = beginBrushStroke(params, { fg: color, bg, zoom: this.view.zoom });
+    this.strokeState = beginBrushStroke(params, { fg: color, bg, zoom: this.view.zoom, wear: params.tip?.kind === 'erodible' ? (this.tipWear.get(JSON.stringify(params.tip)) ?? 0) : 0 });
     this.lastDab = null;
     // What the dab shader (and the CPU reference) need beyond each dab.
     const style: DabStyle = { noise: !!params.noise, noiseSeed: seed & 0xffff };
-    const ctx: CoverageContext = { tips: (id) => this.brushTips.get(id), noise: !!params.noise, noiseSeed: seed & 0xffff };
+    const ctx: CoverageContext = { tips: (id) => this.tipOf(id), noise: !!params.noise, noiseSeed: seed & 0xffff };
     const d = params.dual?.enabled ? params.dual : null;
     if (d) {
-      const tip = d.tip.kind === 'sampled' ? d.tip.id : undefined;
+      const tip = d.tip.kind === 'sampled' ? d.tip.id : isPhysical(d.tip) ? physicalTipId(d.tip, 0) : undefined;
       style.dual = { tip, hardness: d.hardness, mode: DUAL_MODES.indexOf(d.mode) };
-      ctx.dual = { tip: tip ? this.brushTips.get(tip) : undefined, hardness: d.hardness, mode: d.mode };
+      ctx.dual = { tip: tip ? this.tipOf(tip) : undefined, hardness: d.hardness, mode: d.mode };
     }
     const t = params.texture?.enabled ? params.texture : null;
     const pat = t ? this.brushPattern(t.patternId) : null;
@@ -4094,6 +4136,8 @@ export class Engine {
     }
     const pat = tool === 'patternStamp' || (tool === 'healingBrush' && options.healSource === 'pattern') ? (this.findPattern(options.patternId ?? '') ?? this.patternLibrary[0] ?? null) : null;
     const direct = ['dodgeTool', 'burnTool', 'spongeTool', 'blurTool', 'sharpenTool', 'smudgeTool', 'mixerBrush'].includes(tool);
+    this.healWriter = tool === 'healingBrush' ? Plane.empty(RGBA8).writer() : null;
+    this.healPending = [];
     this.retouchLayer = direct ? orig.writer() : null;
     this.retouchTool = tool;
     this.retouch = new RetouchStroke({
@@ -4124,6 +4168,8 @@ export class Engine {
 
   private finishRetouch(): void {
     this.retouch = null;
+    this.healWriter = null;
+    this.healPending = [];
     this.retouchLayer = null;
     this.retouchTool = null;
     this.retouchDirty = false;
@@ -4134,6 +4180,122 @@ export class Engine {
     this.painting = false;
     this.lastDab = null;
   }
+
+  // ---- Clone Source overlay ----------------------------------------------------------------
+
+  private cloneOverlayOpts: CloneOverlay | null = null;
+  /** The pointer over the canvas (screen px), from the Info probe; null when it is outside. */
+  private cursorScreen: { x: number; y: number } | null = null;
+  private overlayBase: PixelLayer | null = null;
+  private overlayClip: { key: string; plane: MipPlane } | null = null;
+  private overlayComposite: { doc: Doc; below: boolean; plane: MipPlane } | null = null;
+  private overlayInverted: { from: MipPlane; plane: MipPlane } | null = null;
+
+  /** Set by the UI while the Clone Stamp or Healing Brush is the tool (null otherwise). */
+  setCloneOverlay(o: CloneOverlay | null): void {
+    this.cloneOverlayOpts = o;
+  }
+
+  /** Where a source pixel shows on the canvas: about the source, flip, scale, rotate, then offset. */
+  private cloneMatrix(o: CloneOverlay, off: { dx: number; dy: number }): Mat {
+    const src = this.cloneSource!;
+    const t = o.transform;
+    return composeAll(
+      translateMat(-src.x, -src.y),
+      scaleMat(t.flipX ? -1 : 1, t.flipY ? -1 : 1),
+      scaleMat(t.scaleX / 100, t.scaleY / 100),
+      rotateMat((t.angle * Math.PI) / 180),
+      translateMat(src.x + off.dx, src.y + off.dy),
+    );
+  }
+
+  /** The source the overlay shows: the layer being cloned into, or a composite. */
+  private overlaySource(o: CloneOverlay): MipPlane | null {
+    const target = this.activePixelLayer();
+    if (o.sample === 'current') return target?.plane ?? null;
+    const below = o.sample === 'currentBelow';
+    const c = this.overlayComposite;
+    if (c && c.doc === this.doc && c.below === below) return c.plane;
+    let doc = this.doc;
+    if (below && target) {
+      const i = doc.layers.findIndex((l) => l.id === target.id);
+      if (i >= 0) doc = { ...doc, layers: doc.layers.slice(0, i + 1) };
+    }
+    const { pixels, width, height } = this.renderer.renderToBuffer(doc, this.caps.maxTextureSize);
+    const plane = new MipPlane(planeFromBitmap({ data: pixels, width, height, left: 0, top: 0 }));
+    this.overlayComposite = { doc: this.doc, below, plane };
+    return plane;
+  }
+
+  /**
+   * The overlay as a layer to draw on top, and the matrix it draws through (none when it is
+   * already in canvas space). Clipped, it is the source sampled under the brush on the CPU;
+   * otherwise the whole source, drawn through the clone mapping on the GPU.
+   */
+  private cloneOverlayLayer(): { layer: PixelLayer; matrix: Mat | null } | null {
+    const o = this.cloneOverlayOpts;
+    const src = this.cloneSource;
+    if (!o?.show || !src || (o.autoHide && this.painting) || this.previewDoc) return null;
+    const cur = this.cursorScreen ? docPointAtScreen(this.view, this.cursorScreen.x, this.cursorScreen.y) : null;
+    // Before an aligned offset exists (or for each unaligned stroke), the source point sits
+    // under the pointer.
+    const off = (o.aligned || this.painting) && this.cloneOffset ? this.cloneOffset : cur ? { dx: cur.x - src.x, dy: cur.y - src.y } : null;
+    const source = this.overlaySource(o);
+    if (!off || !source) return null;
+    this.overlayBase ??= makePixelLayer('Clone Source Overlay', Plane.empty(RGBA8), { id: OVERLAY_ID });
+    const base = { ...this.overlayBase, opacity: o.opacity, blendMode: o.mode };
+    const m = this.cloneMatrix(o, off);
+    // A brush bigger than this is shown unclipped: sampling it on the CPU per move is too slow.
+    if (o.clipped && o.radius <= 400) {
+      if (!cur) return null;
+      const inv = invertMat(m);
+      if (!inv) return null;
+      const r = Math.max(1, o.radius);
+      const key = `${Math.round(cur.x * 4)},${Math.round(cur.y * 4)},${off.dx},${off.dy},${r},${JSON.stringify(o.transform)},${o.invert}`;
+      if (this.overlayClip?.key !== key || this.overlayClipFrom !== source) {
+        const w = Plane.empty(RGBA8).writer();
+        const W = this.doc.width;
+        const H = this.doc.height;
+        const px = new Float32Array(4);
+        for (let y = Math.max(0, Math.floor(cur.y - r - 1)); y < Math.min(H, Math.ceil(cur.y + r + 1)); y++) {
+          for (let x = Math.max(0, Math.floor(cur.x - r - 1)); x < Math.min(W, Math.ceil(cur.x + r + 1)); x++) {
+            const cov = Math.max(0, Math.min(1, r + 0.5 - Math.hypot(x + 0.5 - cur.x, y + 0.5 - cur.y)));
+            if (cov <= 0) continue;
+            const sp = applyMat(inv, { x: x + 0.5, y: y + 0.5 });
+            readPixel(source.base, Math.min(W - 1, Math.max(0, Math.floor(sp.x))), Math.min(H - 1, Math.max(0, Math.floor(sp.y))), px);
+            const d = w.mutable(x >> TILE_SHIFT, y >> TILE_SHIFT);
+            const q = ((y & (TILE_SIZE - 1)) * TILE_SIZE + (x & (TILE_SIZE - 1))) * 4;
+            for (let c = 0; c < 3; c++) d[q + c] = Math.round((o.invert ? 1 - px[c]! : px[c]!) * 255);
+            d[q + 3] = Math.round(px[3]! * cov * 255);
+          }
+        }
+        this.overlayClip = { key, plane: new MipPlane(w.commit(), 0) };
+        this.overlayClipFrom = source;
+      }
+      return { layer: { ...base, plane: this.overlayClip.plane }, matrix: null };
+    }
+    let plane = source;
+    if (o.invert) {
+      if (this.overlayInverted?.from !== source) {
+        const w = source.base.writer();
+        const all = { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height };
+        const { rgb, alpha } = HealCmd.readRect(source.base, all);
+        for (let i = 0; i < alpha.length; i++) {
+          if (alpha[i]! <= 0) continue;
+          const x = i % this.doc.width;
+          const y = (i - x) / this.doc.width;
+          const d = w.mutable(x >> TILE_SHIFT, y >> TILE_SHIFT);
+          const q = ((y & (TILE_SIZE - 1)) * TILE_SIZE + (x & (TILE_SIZE - 1))) * 4;
+          for (let c = 0; c < 3; c++) d[q + c] = Math.round((1 - rgb[i * 3 + c]!) * 255);
+        }
+        this.overlayInverted = { from: source, plane: new MipPlane(w.commit()) };
+      }
+      plane = this.overlayInverted.plane;
+    }
+    return { layer: { ...base, plane }, matrix: m };
+  }
+
+  private overlayClipFrom: MipPlane | null = null;
 
   // ---- Patch, Content-Aware Move, Content-Aware Fill, Red Eye ------------------------------
 
@@ -4303,27 +4465,63 @@ export class Engine {
     return true;
   }
 
-  /** Healing Brush: the cloned stroke's colours healed into the layer (its coverage kept). */
-  private healStrokePlane(stroke: Plane): Plane {
-    const layer = findLayer(this.doc.layers, this.strokeLayerId!);
-    if (layer?.kind !== 'pixel') return stroke;
-    const b = tightBounds(stroke);
-    if (rectIsEmpty(b)) return stroke;
-    const r = HealCmd.grow(b, 3, this.doc.width, this.doc.height);
-    const st = HealCmd.readRect(stroke, r);
-    const healed = HealCmd.healStroke(layer.plane.base, st.rgb, st.alpha, r, this.retouch?.s.options.diffusion ?? 5);
-    // Keep the stroke's coverage; replace its colour.
-    const w = stroke.writer();
-    const rw = r.x1 - r.x0;
-    for (let y = r.y0; y < r.y1; y++)
-      for (let x = r.x0; x < r.x1; x++) {
-        const i = (y - r.y0) * rw + (x - r.x0);
-        if (st.alpha[i]! <= 0) continue;
-        const d = w.mutable(x >> TILE_SHIFT, y >> TILE_SHIFT);
-        const o = ((y & (TILE_SIZE - 1)) * TILE_SIZE + (x & (TILE_SIZE - 1))) * 4;
-        for (let c = 0; c < 3; c++) d[o + c] = Math.round(Math.max(0, Math.min(1, healed[i * 3 + c]!)) * 255);
+  /**
+   * Healing Brush: heal the dabs painted since the last frame into the healed plane. Dabs are
+   * taken in runs whose box stays small, so a fast stroke is healed in pieces, each joining the
+   * pieces before it.
+   */
+  private healNow(): void {
+    const hw = this.healWriter;
+    const layer = this.strokeLayerId !== null ? findLayer(this.doc.layers, this.strokeLayerId) : undefined;
+    if (!hw || !this.strokeWriter || layer?.kind !== 'pixel' || !this.healPending.length) return;
+    const pending = this.healPending;
+    this.healPending = [];
+    const diffusion = this.retouch?.s.options.diffusion ?? 5;
+    const stroke = this.strokeWriter.preview();
+    const W = this.doc.width;
+    const H = this.doc.height;
+    for (let at = 0; at < pending.length; ) {
+      // One run: dabs while the box stays within 256².
+      let box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      let end = at;
+      for (; end < pending.length; end++) {
+        const d = pending[end]!;
+        const next = { x0: Math.min(box.x0, d.x - d.r), y0: Math.min(box.y0, d.y - d.r), x1: Math.max(box.x1, d.x + d.r), y1: Math.max(box.y1, d.y + d.r) };
+        if (end > at && (next.x1 - next.x0) * (next.y1 - next.y0) > 256 * 256) break;
+        box = next;
       }
-    return w.commit();
+      const run = pending.slice(at, end);
+      at = end;
+      const r = HealCmd.grow({ x0: Math.floor(box.x0), y0: Math.floor(box.y0), x1: Math.ceil(box.x1), y1: Math.ceil(box.y1) }, 3, W, H);
+      if (rectIsEmpty(r)) continue;
+      const w = r.x1 - r.x0;
+      const h = r.y1 - r.y0;
+      const fresh = new Uint8Array(w * h);
+      for (const d of run) {
+        const rr = d.r * d.r;
+        for (let y = Math.max(r.y0, Math.floor(d.y - d.r)); y < Math.min(r.y1, Math.ceil(d.y + d.r)); y++)
+          for (let x = Math.max(r.x0, Math.floor(d.x - d.r)); x < Math.min(r.x1, Math.ceil(d.x + d.r)); x++)
+            if ((x + 0.5 - d.x) ** 2 + (y + 0.5 - d.y) ** 2 <= rr) fresh[(y - r.y0) * w + (x - r.x0)] = 1;
+      }
+      const out = HealCmd.healLive(layer.plane.base, stroke, hw.preview(), r, fresh, diffusion);
+      const touched = new Set<string>();
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const i = y * w + x;
+          if (!out.region[i]) continue;
+          const X = r.x0 + x;
+          const Y = r.y0 + y;
+          const d = hw.mutable(X >> TILE_SHIFT, Y >> TILE_SHIFT);
+          const o = ((Y & (TILE_SIZE - 1)) * TILE_SIZE + (X & (TILE_SIZE - 1))) * 4;
+          for (let c = 0; c < 3; c++) d[o + c] = Math.round(Math.max(0, Math.min(1, out.rgb[i * 3 + c]!)) * 255);
+          d[o + 3] = Math.round(out.alpha[i]! * 255);
+          touched.add(`${X >> TILE_SHIFT},${Y >> TILE_SHIFT}`);
+        }
+      for (const k of touched) {
+        const [tx, ty] = k.split(',').map(Number) as [number, number];
+        this.atlas.invalidate(hw.mutableTile(tx, ty));
+      }
+    }
   }
 
   /** Spot Healing / Remove: the painted area, filled when the stroke ends. */
@@ -4443,6 +4641,9 @@ export class Engine {
   endStroke(): void {
     // Catch-up on Stroke End: the brush runs on to where the pointer let go.
     if (this.painting && this.strokeState) for (const dab of finishStroke(this.strokeState)) this.stampDab(dab);
+    // An erodible tip stays as worn as the stroke left it.
+    const tip = this.strokeState?.params.tip;
+    if (tip?.kind === 'erodible') this.tipWear.set(JSON.stringify(tip), this.strokeState!.wear);
     if (this.quickMask) {
       if (!this.painting) return;
       this.painting = false;
@@ -4481,8 +4682,10 @@ export class Engine {
       this.finishRegionStroke();
       return;
     }
+    // The Healing Brush commits what it showed: the healed colours, healed as it painted.
+    if (this.healWriter) this.healNow();
     let strokePlane = this.strokeWriter.commit();
-    if (this.retouchTool === 'healingBrush' && this.strokeLayerId !== null) strokePlane = this.healStrokePlane(strokePlane);
+    if (this.healWriter) strokePlane = this.healWriter.commit();
     const id = this.strokeLayerId;
     const before = this.doc;
     const intoMask = this.strokeIntoMask;
@@ -4611,7 +4814,7 @@ export class Engine {
       },
       this.selectionTexture(),
       this.dabStyle,
-      (id) => this.brushTips.get(id),
+      (id) => this.tipOf(id),
     );
   }
 
@@ -4631,6 +4834,8 @@ export class Engine {
       if (!sel || a <= 0) return a;
       return a * (sel.mask[Math.floor(y) * sel.width + Math.floor(x)] ?? 0) / 255;
     });
+    // The Healing Brush heals what the dab laid down on the next frame.
+    if (this.healWriter) this.healPending.push({ x: dab.x, y: dab.y, r: dab.radius * (dab.tip ? 1.5 : 1) + 1 });
     // Refresh what the dab wrote on the GPU.
     const writer = r.family === 'direct' ? this.retouchLayer : this.strokeWriter;
     for (const [tx, ty] of r.takeTouched()) if (writer) this.atlas.invalidate(writer.mutableTile(tx, ty));
@@ -4734,10 +4939,12 @@ export class Engine {
           }
         : null,
     );
+    // The Healing Brush heals what was painted since the last frame, then shows the healed plane.
+    if (this.healWriter && this.healPending.length) this.healNow();
     this.renderer.setStrokeOverlay(
       this.strokeWriter && this.strokeLayerId !== null && !this.strokeIntoMask && this.paintMode !== 'clear'
         ? {
-            plane: new MipPlane(this.strokeWriter.preview(), 0),
+            plane: new MipPlane((this.healWriter ?? this.strokeWriter).preview(), 0),
             layerId: this.strokeLayerId,
             opacity: this.brush.opacity,
             // Behind previews as Normal; the difference only shows where the layer already has
@@ -4748,16 +4955,19 @@ export class Engine {
         : null,
     );
     // Layers under a live transform draw through its matrix rather than being rewritten.
+    const cloneOverlay = this.transform ? null : this.cloneOverlayLayer();
     this.renderer.setLiveTransform(
       this.transform && !this.transform.selectionOnly && !isIdentity(this.transform.matrix)
         ? { ids: new Set(this.transform.ids), matrix: this.transform.matrix }
-        : null,
+        : cloneOverlay?.matrix
+          ? { ids: new Set([OVERLAY_ID]), matrix: cloneOverlay.matrix, bounded: true }
+          : null,
     );
     this.renderer.setAdjustPreview(this.adjustPreview);
     const overlay = this.quickMask ? this.selectionTexture() : null;
     this.renderer.pathOverlay = this.pathOverlay();
     const s = this.renderer.render(
-      this.previewDoc ?? this.doc,
+      this.previewDoc ?? (cloneOverlay ? { ...this.doc, layers: [...this.doc.layers, cloneOverlay.layer] } : this.doc),
       this.view,
       docRect(this.doc),
       undefined,

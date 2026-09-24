@@ -3,7 +3,7 @@ import { TILE_SIZE } from '@umbra/core/pixels';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import { readPixel } from './retouch.js';
-import { patchArea, redEye, spotHeal, writeRect } from './heal-tools.js';
+import { healLive, patchArea, redEye, spotHeal, writeRect } from './heal-tools.js';
 
 const W = 96;
 const H = 64;
@@ -60,6 +60,38 @@ describe('heal tools', () => {
     const { rgb, weight } = patchArea(orig, all, mask, { dx: 48, dy: 0 }, false);
     const out = writeRect(orig, all, rgb, weight);
     expect(Math.abs(px(out, 24, 32)[0]! - 51)).toBeLessThan(6);
+  });
+
+  it('live healing: a stroke healed in two steps takes the destination tone with no seam', () => {
+    const layer = plane(() => [0.2, 0.2, 0.2, 1]);
+    // The cloned stroke: a bright band with a texture, full coverage.
+    const stroke = plane((x, y) => (y >= 20 && y < 44 && x >= 10 && x < 86 ? [0.8 + (x % 3) * 0.03, 0.8, 0.8, 1] : [0, 0, 0, 0]));
+    let healed = plane(() => [0, 0, 0, 0]);
+    const step = (x0: number, x1: number) => {
+      const fresh = new Uint8Array(W * H);
+      for (let y = 20; y < 44; y++) for (let x = x0; x < x1; x++) fresh[y * W + x] = 1;
+      const out = healLive(layer, stroke, healed, all, fresh, 5);
+      const w = healed.writer();
+      for (let i = 0; i < W * H; i++) {
+        if (!out.region[i]) continue;
+        const d = w.mutable(0, 0);
+        const o = (Math.floor(i / W) * TILE_SIZE + (i % W)) * 4;
+        for (let c = 0; c < 3; c++) d[o + c] = Math.round(out.rgb[i * 3 + c]! * 255);
+        d[o + 3] = Math.round(out.alpha[i]! * 255);
+      }
+      healed = w.commit();
+    };
+    step(10, 48);
+    step(48, 86);
+    const at = (x: number) => px(healed, x, 32)[0]!;
+    // The dark destination's tone, not the bright source's.
+    expect(Math.abs(at(30) - 51)).toBeLessThan(12);
+    expect(Math.abs(at(66) - 51)).toBeLessThan(12);
+    // No seam where the second step met the first (beyond the source's own 3-px texture).
+    const src = (x: number) => px(stroke, x, 32)[0]!;
+    expect(Math.abs(at(47) - at(48) - (src(47) - src(48)))).toBeLessThan(5);
+    // …and the texture itself survives the heal.
+    expect(Math.abs(at(30) - at(31) - (src(30) - src(31)))).toBeLessThan(5);
   });
 
   it('Red Eye darkens and desaturates only the pupil', () => {

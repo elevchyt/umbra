@@ -24,6 +24,13 @@ export {
   DEFAULT_SMOOTHING,
   DEFAULT_SYMMETRY,
   NO_DYNAMIC,
+  DEFAULT_BRISTLE,
+  DEFAULT_ERODIBLE,
+  DEFAULT_AIRBRUSH,
+  BRISTLE_SHAPES,
+  ERODIBLE_SHAPES,
+  physicalTip,
+  isPhysical,
   renderDabs,
   beginStroke as beginBrushStroke,
   strokeTo as brushStrokeTo,
@@ -35,11 +42,17 @@ export {
   type TextureMode,
   type SymmetryMode,
   type TipBitmap,
+  type TipRef,
+  type BristleTip,
+  type BristleShape,
+  type ErodibleTip,
+  type ErodibleShape,
+  type AirbrushTip,
   type Dab,
   type BrushGroup,
   type BrushPreset,
 } from '@umbra/kernels/brush';
-export type { BrushLibraryOp, PatchOptions } from './engine.js';
+export type { BrushLibraryOp, PatchOptions, CloneOverlay } from './engine.js';
 export {
   FOREGROUND_TO_BACKGROUND,
   FOREGROUND_TO_TRANSPARENT,

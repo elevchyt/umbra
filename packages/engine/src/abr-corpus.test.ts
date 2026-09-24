@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { PHYSICAL_LEVELS, isPhysical, physicalTip, physicalTipId } from '@umbra/kernels/brush';
 import { readAbrFile, writeAbrFile } from './abr.js';
 
 function corpus(): string[] {
@@ -56,8 +57,16 @@ describe.skipIf(files.length === 0)('ABR corpus', () => {
         expect(t!.data.length).toBe(t!.width * t!.height);
         expect(t!.data.some((v) => v > 0)).toBe(true);
       }
-      // Nothing was lost outright. Bristle and erodible tips are drawn round (a known gap).
-      expect(abr.lost.filter((l) => !l.endsWith('tip drawn as a round tip'))).toEqual([]);
+      // Nothing was lost, and every physical tip (bristle, erodible, airbrush) draws.
+      expect(abr.lost).toEqual([]);
+      for (const p of abr.presets) {
+        const tip = p.params.tip;
+        if (!isPhysical(tip)) continue;
+        for (const v of [0, PHYSICAL_LEVELS - 1]) {
+          const bmp = physicalTip(physicalTipId(tip, v))!;
+          expect(bmp.data.some((x) => x > 0), `${p.name}: ${tip.kind} variant ${v}`).toBe(true);
+        }
+      }
       expect(abr.presets.every((p) => !p.name.startsWith('$$$'))).toBe(true);
       // Written back out and read again: the same presets with the same settings.
       const again = readAbrFile(writeAbrFile(abr.presets, abr.tips, abr.patterns), 'again');

@@ -22,8 +22,63 @@ export interface Dynamic {
 
 export const NO_DYNAMIC: Dynamic = { control: 'off', fadeSteps: 25, jitter: 0, minimum: 0 };
 
-/** A brush tip: computed (round, hardness) or a sampled bitmap from the tip library. */
-export type TipRef = { kind: 'computed' } | { kind: 'sampled'; id: string };
+/**
+ * A brush tip: computed (round, hardness), a sampled bitmap from the tip library, or one of
+ * Photoshop's physical tips — bristle, erodible or airbrush — generated from its settings
+ * (`brush/physical.ts`).
+ */
+export type TipRef = { kind: 'computed' } | { kind: 'sampled'; id: string } | BristleTip | ErodibleTip | AirbrushTip;
+
+/** Bristle tip shapes, in Photoshop's (and the ABR descriptor's) order. */
+export const BRISTLE_SHAPES = ['roundPoint', 'roundBlunt', 'roundCurve', 'roundAngle', 'roundFan', 'flatPoint', 'flatBlunt', 'flatCurve', 'flatAngle', 'flatFan'] as const;
+export type BristleShape = (typeof BRISTLE_SHAPES)[number];
+
+/** Bristle Qualities: all 0…1 fractions of Photoshop's percentages (Length and Thickness go past 1). */
+export interface BristleTip {
+  kind: 'bristle';
+  shape: BristleShape;
+  /** Bristles (density), 0.01…1. */
+  bristles: number;
+  /** Length, 0.25…5. */
+  length: number;
+  /** Thickness, 0.01…2. */
+  thickness: number;
+  /** Stiffness, 0.01…1. */
+  stiffness: number;
+  /** Clumping (not in Photoshop's panel, kept from ABR files), 0…1. */
+  clumping: number;
+}
+
+/** Erodible tip shapes, in the ABR descriptor's order. */
+export const ERODIBLE_SHAPES = ['point', 'flat', 'round', 'square', 'triangle'] as const;
+export type ErodibleShape = (typeof ERODIBLE_SHAPES)[number];
+
+/** An erodible tip (pencils, pastels, charcoal): it wears as it paints until sharpened. */
+export interface ErodibleTip {
+  kind: 'erodible';
+  shape: ErodibleShape;
+  /** 0…1, the descriptor's tip hardness; Photoshop's Softness is 1 − this. */
+  hardness: number;
+}
+
+/** An airbrush tip: a spray of grain and spatter. */
+export interface AirbrushTip {
+  kind: 'airbrush';
+  /** 0…1 */
+  hardness: number;
+  /** The descriptor's cutoff angle, degrees (1…90); Photoshop's Distortion slider. */
+  cutoffAngle: number;
+  /** 0…1 */
+  granularity: number;
+  /** 0…1 */
+  spatterSize: number;
+  /** Spatter Amount, 1…200 droplets. */
+  spatterAmount: number;
+}
+
+export const DEFAULT_BRISTLE: BristleTip = { kind: 'bristle', shape: 'roundPoint', bristles: 0.35, length: 1.25, thickness: 0.02, stiffness: 0.75, clumping: 0.25 };
+export const DEFAULT_ERODIBLE: ErodibleTip = { kind: 'erodible', shape: 'point', hardness: 0.5 };
+export const DEFAULT_AIRBRUSH: AirbrushTip = { kind: 'airbrush', hardness: 0.01, cutoffAngle: 15, granularity: 0.5, spatterSize: 0.1, spatterAmount: 25 };
 
 export interface ShapeDynamics {
   enabled: boolean;

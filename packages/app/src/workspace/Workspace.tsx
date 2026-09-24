@@ -449,6 +449,21 @@ export function Workspace() {
     client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
   });
 
+  // The Clone Source overlay: the engine draws it while the Clone Stamp or Healing Brush is
+  // the tool, with the brush's size (for Clipped) and the slot's transform.
+  createEffect(() => {
+    const tool = store.activeTool();
+    const ov = store.cloneOverlay();
+    const ro = store.retouchOptions();
+    const slot = store.cloneSlots()[store.cloneSlot()]!;
+    const radius = store.brush.size / 2;
+    const on = tool === 'cloneStamp' || (tool === 'healingBrush' && ro.healSource !== 'pattern');
+    store.engine?.({
+      t: 'setCloneOverlay',
+      overlay: on ? { ...ov, sample: ro.sample, aligned: ro.aligned, radius, transform: { scaleX: slot.scaleX, scaleY: slot.scaleY, angle: slot.angle, flipX: slot.flipX, flipY: slot.flipY } } : null,
+    } as never);
+  });
+
   // Theme + UI scale live on <html> so CSS variables cascade everywhere.
   createEffect(() => {
     document.documentElement.dataset.theme = store.theme();

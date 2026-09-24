@@ -30,6 +30,7 @@ import { rng } from './brush/rng.js';
 
 export * from './brush/model.js';
 export { rng, hash01 } from './brush/rng.js';
+import { isPhysical, physicalExtent, physicalTipId, physicalVariant, wearPerDab } from './brush/physical.js';
 
 export interface BrushParams {
   /** Diameter in document pixels. */
@@ -146,6 +147,8 @@ export interface StrokeOptions {
   bg?: [number, number, number];
   /** The view's zoom, for Adjust for Zoom and the Pulled String leash. */
   zoom?: number;
+  /** An erodible tip's wear (0…1) carried over from earlier strokes. */
+  wear?: number;
 }
 
 export interface StrokeState {
@@ -171,6 +174,8 @@ export interface StrokeState {
   strokeColor: [number, number, number] | null;
   dualCarry: number;
   dualRecent: DualStamp[];
+  /** An erodible tip's wear, 0 (sharp) … 1; read it back after the stroke to carry it on. */
+  wear: number;
 }
 
 export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): StrokeState {
@@ -191,6 +196,7 @@ export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): Stro
     strokeColor: null,
     dualCarry: 0,
     dualRecent: [],
+    wear: opts.wear ?? 0,
   };
   const cd = params.colorDynamics;
   if (cd?.enabled && !cd.eachTip) s.strokeColor = dynamicColor(s, 1);
@@ -356,6 +362,11 @@ function stepDabs(state: StrokeState, x: number, y: number, p: PenState): Dab[] 
     if (flipX) dab.flipX = true;
     if (flipY) dab.flipY = true;
     if (b.tip?.kind === 'sampled') dab.tip = b.tip.id;
+    else if (isPhysical(b.tip)) {
+      dab.tip = physicalTipId(b.tip, physicalVariant(b.tip, p.pressure, state.wear, state.rand));
+      dab.radius *= physicalExtent(b.tip);
+      if (b.tip.kind === 'erodible') state.wear = Math.min(1, state.wear + wearPerDab(b.tip, b.spacing));
+    }
     if (tx) dab.textureDepth = Math.max(tx.minDepth, tx.depth * factor(tx.depthJitter, state, p));
     if (cd) dab.color = cd.eachTip ? dynamicColor(state, p.pressure) : (state.strokeColor ?? dynamicColor(state, p.pressure));
     out.push(dab);
@@ -621,3 +632,4 @@ export function dabCoverage(dab: Dab, x: number, y: number): number {
 }
 export * from './brush/coverage.js';
 export * from './brush/library.js';
+export * from './brush/physical.js';

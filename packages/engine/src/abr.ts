@@ -19,6 +19,11 @@ import {
   type Dynamic,
   type TextureMode,
   type TipBitmap,
+  BRISTLE_SHAPES,
+  ERODIBLE_SHAPES,
+  type AirbrushTip,
+  type BristleTip,
+  type ErodibleTip,
 } from '@umbra/kernels/brush';
 import { ByteWriter, ang, bool, doub, en, list, long, obj, pct, px, text, writeDescriptor, type DV } from './descriptor-writer.js';
 
@@ -33,7 +38,38 @@ export interface AbrContents {
 // ---- v6+ through ag-psd --------------------------------------------------------------------
 
 type AgDynamics = { control: string; steps: number; jitter: number; minimum: number };
-type AgShape = { type: string; size: number; angle: number; roundness?: number; hardness?: number; spacing: number; spacingOn: boolean; flipX: boolean; flipY: boolean; name?: string; sampledData?: string };
+type AgShape = {
+  type: string;
+  size: number;
+  angle: number;
+  roundness?: number;
+  hardness?: number;
+  spacing: number;
+  spacingOn: boolean;
+  flipX: boolean;
+  flipY: boolean;
+  name?: string;
+  sampledData?: string;
+  // Bristle ('dynamic'); ag-psd reads these a hundred times too small (Photoshop stores 0.31 %Prc for 31 %).
+  shape?: string;
+  density?: number;
+  length?: number;
+  clumping?: number;
+  thickness?: number;
+  stiffness?: number;
+  // Erodible and airbrush ('tips').
+  tipsType?: string;
+  tipsHardness?: number;
+  tipsAirbrushCutoffAngle?: number;
+  tipsAirbrushGranularity?: number;
+  tipsAirbrushSplatSize?: number;
+  tipsAirbrushSplatCount?: number;
+};
+
+/** ag-psd's names for the descriptor's 'Shp ' index (bristle shapes; erodible shapes by index). */
+const AG_SHAPES = ['round point', 'round blunt', 'round curve', 'round angle', 'round fan', 'flat point', 'flat blunt', 'flat curve', 'flat angle', 'flat fan'];
+/** Six decimals: percentages survive a write and read unchanged. */
+const r6 = (v: number) => Math.round(v * 1e6) / 1e6;
 
 const CONTROL_FROM: Record<string, ControlSource> = {
   off: 'off',
@@ -66,6 +102,34 @@ function shapeParams(shape: AgShape, tipPrefix: string): Partial<BrushParams> & 
     flipY: !!shape.flipY,
   };
   if (shape.type === 'sampled' && shape.sampledData) return { ...base, hardness: 1, tip: { kind: 'sampled', id: tipPrefix + shape.sampledData } };
+  if (shape.type === 'dynamic') {
+    const tip: BristleTip = {
+      kind: 'bristle',
+      shape: BRISTLE_SHAPES[Math.max(0, AG_SHAPES.indexOf(shape.shape ?? ''))]!,
+      bristles: r6((shape.density ?? 0.0035) * 100),
+      length: r6((shape.length ?? 0.0125) * 100),
+      thickness: r6((shape.thickness ?? 0.0002) * 100),
+      stiffness: r6((shape.stiffness ?? 0.0075) * 100),
+      clumping: r6((shape.clumping ?? 0.0025) * 100),
+    };
+    return { ...base, hardness: 1, tip };
+  }
+  if (shape.type === 'tips') {
+    // ag-psd calls the descriptor's tip type 1 'erodible flat'; it is Photoshop's Airbrush.
+    if (shape.tipsType === 'erodible flat') {
+      const tip: AirbrushTip = {
+        kind: 'airbrush',
+        hardness: r6(shape.tipsHardness ?? 0.01),
+        cutoffAngle: shape.tipsAirbrushCutoffAngle ?? 15,
+        granularity: r6(shape.tipsAirbrushGranularity ?? 0),
+        spatterSize: r6(shape.tipsAirbrushSplatSize ?? 0.01),
+        spatterAmount: shape.tipsAirbrushSplatCount ?? 100,
+      };
+      return { ...base, hardness: 1, tip };
+    }
+    const tip: ErodibleTip = { kind: 'erodible', shape: ERODIBLE_SHAPES[Math.max(0, Math.min(4, AG_SHAPES.indexOf(shape.shape ?? '')))]!, hardness: r6(shape.tipsHardness ?? 0.5) };
+    return { ...base, hardness: 1, tip };
+  }
   return { ...base, hardness: shape.hardness ?? 1, tip: { kind: 'computed' } };
 }
 
@@ -94,7 +158,6 @@ function fromAgBrush(b: Record<string, unknown>, tipPrefix: string, lost: string
     toolOptions?: { flow: number; opacity: number; smoothing: boolean; smoothingValue: number; smoothingRadiusMode: boolean; smoothingCatchup: boolean; smoothingCatchupAtEnd: boolean; smoothingZoomCompensation: boolean; usePressureOverridesSize: boolean; usePressureOverridesOpacity: boolean };
   };
   const name = displayName(br.name);
-  if (br.shape.type === 'dynamic' || br.shape.type === 'tips') lost.push(`${name}: ${br.shape.type === 'dynamic' ? 'bristle' : 'erodible/airbrush'} tip drawn as a round tip`);
   const p: Partial<BrushParams> & { size: number } = shapeParams(br.shape, tipPrefix);
   const sd = br.shapeDynamics;
   if (sd)
@@ -306,6 +369,37 @@ function shapeDV(p: { size: number; angle?: number; roundness?: number; hardness
     ['flipY', bool(!!p.flipY)],
   ];
   if (p.tip?.kind === 'sampled') return obj('sampledBrush', [...common, ['Nm  ', text(tipName(p.tip.id))], ['sampledData', text(p.tip.id)]]);
+  if (p.tip?.kind === 'bristle') {
+    const t = p.tip;
+    return obj('dBrush', [
+      ...common,
+      ['Shp ', long(BRISTLE_SHAPES.indexOf(t.shape))],
+      // Photoshop's own scale: the fraction, tagged as a percentage.
+      ['Dnst', pct(t.bristles)],
+      ['Lngt', pct(t.length)],
+      ['clumping', pct(t.clumping)],
+      ['thickness', pct(t.thickness)],
+      ['stiffness', pct(t.stiffness)],
+      ['physics', bool(true)],
+    ]);
+  }
+  if (p.tip?.kind === 'erodible' || p.tip?.kind === 'airbrush') {
+    const t = p.tip;
+    const air = t.kind === 'airbrush' ? t : null;
+    return obj('dTips', [
+      ...common,
+      ['Shp ', long(t.kind === 'erodible' ? ERODIBLE_SHAPES.indexOf(t.shape) : 5)],
+      ['physics', bool(true)],
+      ['dtipsType', long(air ? 1 : 0)],
+      ['dtipsLengthRatio', pct(100)],
+      ['dtipsHardness', pct(t.hardness * 100)],
+      ['dtipsAirbrushCutoffAngle', doub(air?.cutoffAngle ?? 15)],
+      ['dtipsAirbrushGranularity', pct((air?.granularity ?? 0) * 100)],
+      ['dtipsAirbrushStreakiness', pct(1)],
+      ['dtipsAirbrushSplatSize', pct((air?.spatterSize ?? 0.01) * 100)],
+      ['dtipsAirbrushSplatCount', long(air?.spatterAmount ?? 100)],
+    ]);
+  }
   return obj('computedBrush', [...common, ['Hrdn', pct((p.hardness ?? 1) * 100)]]);
 }
 

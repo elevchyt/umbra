@@ -5,7 +5,7 @@
  */
 import type { BrushParams } from '../brush.js';
 import type { TipBitmap } from './coverage.js';
-import { DEFAULT_COLOR_DYNAMICS, DEFAULT_SCATTERING, DEFAULT_SHAPE_DYNAMICS, DEFAULT_TRANSFER, NO_DYNAMIC } from './model.js';
+import { DEFAULT_AIRBRUSH, DEFAULT_BRISTLE, DEFAULT_ERODIBLE, DEFAULT_COLOR_DYNAMICS, DEFAULT_SCATTERING, DEFAULT_SHAPE_DYNAMICS, DEFAULT_TRANSFER, NO_DYNAMIC } from './model.js';
 import { hash01, rng } from './rng.js';
 
 export interface BrushPreset {
@@ -120,6 +120,10 @@ export function builtinBrushes(): BrushGroup[] {
       name: 'Dry Media Brushes',
       presets: [
         round('Chalk', 'chalk', { size: 60, spacing: 0.2, hardness: 1, tip: { kind: 'sampled', id: 'builtin:chalk' }, shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, angle: { ...NO_DYNAMIC, jitter: 1 }, size: { ...NO_DYNAMIC, control: 'pressure' } } }),
+        round('Pencil', 'pencil', { size: 9, spacing: 0.08, hardness: 1, tip: { ...DEFAULT_ERODIBLE, shape: 'point', hardness: 0.8 } }),
+        round('Square Pastel', 'square-pastel', { size: 25, spacing: 0.02, hardness: 1, tip: { ...DEFAULT_ERODIBLE, shape: 'square', hardness: 0.48 } }),
+        round('Round Point Stiff', 'round-point-stiff', { size: 25, spacing: 0.02, hardness: 1, tip: { ...DEFAULT_BRISTLE, shape: 'roundPoint', bristles: 0.31, length: 1.37, thickness: 0.01, stiffness: 0.85 } }),
+        round('Flat Fan', 'flat-fan', { size: 36, spacing: 0.02, hardness: 1, tip: { ...DEFAULT_BRISTLE, shape: 'flatFan', bristles: 0.4, length: 0.62, thickness: 0.3, stiffness: 0.68 } }),
         round('Charcoal', 'charcoal', { size: 45, spacing: 0.1, hardness: 1, tip: { kind: 'sampled', id: 'builtin:charcoal' }, shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, angle: { ...NO_DYNAMIC, control: 'direction' }, size: { ...NO_DYNAMIC, control: 'pressure', minimum: 0.4 } }, transfer: { ...DEFAULT_TRANSFER, enabled: true, flow: { ...NO_DYNAMIC, jitter: 0.3 } } }),
       ],
     },
@@ -127,6 +131,7 @@ export function builtinBrushes(): BrushGroup[] {
       name: 'Wet Media Brushes',
       presets: [
         round('Watercolor Wash', 'watercolor', { size: 90, hardness: 0.2, spacing: 0.1, flow: 0.3, tip: { kind: 'computed' }, wetEdges: true, shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, size: { ...NO_DYNAMIC, jitter: 0.2 } } }),
+        round('Airbrush Soft Grainy', 'airbrush-grainy', { size: 80, spacing: 0.05, hardness: 1, tip: { ...DEFAULT_AIRBRUSH, hardness: 0.01, cutoffAngle: 22, granularity: 1, spatterSize: 0.01, spatterAmount: 200 } }),
         round('Wet Sponge', 'wet-sponge', { size: 70, spacing: 0.25, hardness: 1, tip: { kind: 'sampled', id: 'builtin:sponge' }, wetEdges: true, shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, angle: { ...NO_DYNAMIC, jitter: 1 } }, scattering: { ...DEFAULT_SCATTERING, enabled: true, scatter: { ...NO_DYNAMIC, jitter: 0.3 } } }),
       ],
     },

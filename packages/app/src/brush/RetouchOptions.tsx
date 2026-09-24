@@ -234,6 +234,33 @@ export function RetouchToolOptions() {
 }
 
 /** Window ▸ Clone Source: five source slots and the transform the active one applies. */
+/** Show Overlay: the source drawn over the canvas where it would clone to. */
+function OverlayOptions() {
+  const ov = () => store.cloneOverlay();
+  const setOv = (patch: Partial<ReturnType<typeof ov>>) => store.setCloneOverlay({ ...ov(), ...patch });
+  return (
+    <div class="type-grid">
+      <Checkbox checked={ov().show} label="Show Overlay" onChange={(v) => setOv({ show: v })} />
+      <NumberField label="Opacity" value={Math.round(ov().opacity * 100)} min={1} max={100} suffix="%" width={38} onChange={(v) => setOv({ opacity: v / 100 })} />
+      <Checkbox checked={ov().clipped} label="Clipped" onChange={(v) => setOv({ clipped: v })} />
+      <Checkbox checked={ov().autoHide} label="Auto Hide" onChange={(v) => setOv({ autoHide: v })} />
+      <Checkbox checked={ov().invert} label="Invert" onChange={(v) => setOv({ invert: v })} />
+      <Select
+        label=""
+        value={ov().mode}
+        width={90}
+        options={[
+          { value: 'normal', label: 'Normal' },
+          { value: 'darken', label: 'Darken' },
+          { value: 'lighten', label: 'Lighten' },
+          { value: 'difference', label: 'Difference' },
+        ]}
+        onChange={(v) => setOv({ mode: v as 'normal' })}
+      />
+    </div>
+  );
+}
+
 export function CloneSourcePanel() {
   const slot = () => store.cloneSlots()[store.cloneSlot()]!;
   const setSlot = (patch: Partial<ReturnType<typeof slot>>) => store.setCloneSlots(store.cloneSlots().map((s, i) => (i === store.cloneSlot() ? { ...s, ...patch } : s)));
@@ -269,6 +296,7 @@ export function CloneSourcePanel() {
       <button type="button" class="dialog-button" onClick={() => setSlot({ scaleX: 100, scaleY: 100, angle: 0, flipX: false, flipY: false })}>
         Reset Transform
       </button>
+      <OverlayOptions />
     </div>
   );
 }

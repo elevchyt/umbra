@@ -162,6 +162,16 @@ export interface CloneSlot {
 }
 const [cloneSlots, setCloneSlots] = createSignal<CloneSlot[]>(Array.from({ length: 5 }, () => ({ point: null, scaleX: 100, scaleY: 100, angle: 0, flipX: false, flipY: false })));
 const [cloneSlot, setCloneSlot] = createSignal(0);
+/** Clone Source ▸ Show Overlay and its options (Photoshop's defaults). */
+export interface CloneOverlaySettings {
+  show: boolean;
+  opacity: number;
+  clipped: boolean;
+  autoHide: boolean;
+  invert: boolean;
+  mode: 'normal' | 'darken' | 'lighten' | 'difference';
+}
+const [cloneOverlay, setCloneOverlay] = createSignal<CloneOverlaySettings>({ show: true, opacity: 1, clipped: true, autoHide: true, invert: false, mode: 'normal' });
 /** The brush library as the engine last sent it, and the preset last chosen. */
 const [brushLibrary, setBrushLibrary] = createSignal<{ groups: BrushGroup[]; tips: Record<string, TipBitmap> } | null>(null);
 const [brushPresetId, setBrushPresetId] = createSignal<string | null>(null);
@@ -398,6 +408,8 @@ export const store = {
   setCloneSlots,
   cloneSlot,
   setCloneSlot,
+  cloneOverlay,
+  setCloneOverlay,
   brushPresetId,
   setBrushPresetId,
   fonts,

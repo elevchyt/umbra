@@ -106,6 +106,31 @@ export function healStroke(layer: Plane, strokeRgb: Float32Array, strokeAlpha: F
   return heal(src, dest, region, w, h, diffusion);
 }
 
+/**
+ * The Healing Brush while it paints: heal the pixels under the newest dabs (`fresh`, over
+ * `r`). What is already healed is the boundary where the stroke carries on, and the layer is
+ * the boundary at the stroke's rim, so each step joins the last without a seam. Returns the
+ * healed colours and the region they cover (stroke pixels near the fresh ones).
+ */
+export function healLive(layer: Plane, stroke: Plane, healed: Plane, r: IRect, fresh: Uint8Array, diffusion: number): { rgb: Float32Array; alpha: Float32Array; region: Uint8Array } {
+  const w = r.x1 - r.x0;
+  const h = r.y1 - r.y0;
+  const st = readRect(stroke, r);
+  const done = readRect(healed, r);
+  const { rgb: under } = readRect(layer, r);
+  const near = dilate(fresh, w, h, 1);
+  const region = new Uint8Array(w * h);
+  const dest = new Float32Array(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    region[i] = near[i] && st.alpha[i]! > 0 ? 1 : 0;
+    const from = !fresh[i] && done.alpha[i]! > 0 ? done.rgb : under;
+    dest[i * 3] = from[i * 3]!;
+    dest[i * 3 + 1] = from[i * 3 + 1]!;
+    dest[i * 3 + 2] = from[i * 3 + 2]!;
+  }
+  return { rgb: heal(st.rgb, dest, region, w, h, diffusion), alpha: st.alpha, region };
+}
+
 export type SpotType = 'contentAware' | 'createTexture' | 'proximityMatch';
 
 /**

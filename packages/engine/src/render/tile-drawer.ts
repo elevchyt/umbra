@@ -19,14 +19,18 @@ precision highp float;
 layout(location = 0) in vec2 a_corner;
 layout(location = 1) in vec3 a_tile;
 uniform mat3 u_docToClip;
+/** The live transform alone (plane → document), for clipping to the canvas. */
+uniform mat3 u_live;
 uniform float u_tileSpan;
 const float PAGE_TILES = 8.0;
 out vec2 v_uv;
+out vec2 v_doc;
 flat out float v_page;
 flat out vec2 v_cell;
 void main() {
   vec2 doc = a_tile.xy + a_corner * u_tileSpan;
   vec3 clip = u_docToClip * vec3(doc, 1.0);
+  v_doc = (u_live * vec3(doc, 1.0)).xy;
   gl_Position = vec4(clip.xy, 0.0, 1.0);
   float perPage = PAGE_TILES * PAGE_TILES;
   float page = floor(a_tile.z / perPage);
@@ -41,6 +45,7 @@ const FRAG = /* glsl */ `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
 in vec2 v_uv;
+in vec2 v_doc;
 flat in float v_page;
 flat in vec2 v_cell;
 uniform sampler2DArray u_atlas;
@@ -51,10 +56,14 @@ uniform float u_opacity;
 uniform float u_premultiply;
 /** 1.0 for a live Wet Edges stroke: coverage through the pooling curve (kernels' wetEdges). */
 uniform float u_wet;
+/** x0, y0, x1, y1 in document space; used when u_useBounds is 1 (a transformed overlay). */
+uniform vec4 u_bounds;
+uniform float u_useBounds;
 const float PAGE_TILES = 8.0;
 const float PAGE_SIZE = 2048.0;
 out vec4 fragColor;
 void main() {
+  if (u_useBounds > 0.5 && (v_doc.x < u_bounds.x || v_doc.y < u_bounds.y || v_doc.x > u_bounds.z || v_doc.y > u_bounds.w)) discard;
   vec2 lo = v_cell / PAGE_TILES + 0.5 / PAGE_SIZE;
   vec2 hi = (v_cell + 1.0) / PAGE_TILES - 0.5 / PAGE_SIZE;
   vec4 c = texture(u_atlas, vec3(clamp(v_uv, lo, hi), v_page));
@@ -133,6 +142,8 @@ export class TileDrawer {
      * so dragging costs nothing and the pixels are only resampled once, on commit.
      */
     matrix: Mat = IDENTITY,
+    /** Discard what the transform carries outside this document rect (the Clone Source overlay). */
+    bounds: Rect | null = null,
   ): number {
     const gl = this.gl;
     const visible = rectIntersect(visibleDocRect(view), clip);
@@ -186,6 +197,9 @@ export class TileDrawer {
     this.program.u1f('u_opacity', opacity);
     this.program.u1f('u_premultiply', premultiply ? 1 : 0);
     this.program.u1f('u_wet', this.wet ? 1 : 0);
+    this.program.uMat3('u_live', new Float32Array([matrix.a, matrix.b, 0, matrix.c, matrix.d, 0, matrix.e, matrix.f, 1]));
+    this.program.u1f('u_useBounds', bounds ? 1 : 0);
+    if (bounds) this.program.u4f('u_bounds', bounds.x0, bounds.y0, bounds.x1, bounds.y1);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.instances);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.data, 0, n * 3);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, n);

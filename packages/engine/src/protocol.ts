@@ -10,7 +10,7 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp, PatchOptions } from './engine.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp, PatchOptions, CloneOverlay } from './engine.js';
 import type { BrushGroup, BrushPreset, TipBitmap } from '@umbra/kernels/brush';
 import type { RetouchOptions, RetouchToolId } from './retouch.js';
 import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
@@ -300,6 +300,8 @@ export type ToEngine =
   | { t: 'patchPointer'; phase: 'down' | 'move' | 'up'; x: number; y: number; options: PatchOptions }
   | { t: 'contentAwareFill'; sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }
   | { t: 'redEye'; x: number; y: number; pupilSize: number; darken: number }
+  | { t: 'sharpenTip' }
+  | { t: 'setCloneOverlay'; overlay: CloneOverlay | null }
   | { t: 'setCloneSource'; x: number; y: number; /** Document coordinates (a Clone Source slot), not screen. */ doc?: boolean }
   | { t: 'magicErase'; x: number; y: number; tolerance: number; contiguous: boolean; antiAlias: boolean; sampleAll: boolean; opacity: number }
   | { t: 'setHistoryBrushSource'; index: number }

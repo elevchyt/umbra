@@ -167,14 +167,14 @@ export class DocumentRenderer {
    * A live Move or Free Transform. The listed layers draw through `matrix` instead of being
    * rewritten, so dragging is free and the pixels are resampled exactly once, on commit.
    */
-  private liveTransform: { ids: ReadonlySet<number>; matrix: Mat } | null = null;
+  private liveTransform: { ids: ReadonlySet<number>; matrix: Mat; bounded?: boolean } | null = null;
   /** The vector tools' overlay (target path, anchors, handles), set by the engine. */
   pathOverlay: PathOverlay | null = null;
   private paths!: PathOverlayRenderer;
   /** Rendered layer effects, per layer, reused while nothing they depend on changes. */
   private readonly fxCache = new EffectsCache();
 
-  setLiveTransform(t: { ids: ReadonlySet<number>; matrix: Mat } | null): void {
+  setLiveTransform(t: { ids: ReadonlySet<number>; matrix: Mat; bounded?: boolean } | null): void {
     this.liveTransform = t;
   }
 
@@ -298,6 +298,8 @@ export class DocumentRenderer {
       // A layer's generated effect layers move with it.
       this.liveTransform && this.liveTransform.ids.has((layer as { effectOf?: number }).effectOf ?? layer.id) ? this.liveTransform.matrix : IDENTITY;
 
+    // A bounded transform (the Clone Source overlay) stays inside the canvas.
+    const bounds = live !== IDENTITY && this.liveTransform?.bounded ? clip : null;
     const erase = this.eraseOverlay?.layerId === layer.id ? this.eraseOverlay : null;
     const maskPlane = layer.mask && layer.mask.enabled ? layer.mask.plane : null;
     const maskStroke = maskPlane && this.maskStrokeOverlay?.layerId === layer.id ? this.maskStrokeOverlay : null;
@@ -346,7 +348,7 @@ export class DocumentRenderer {
       const plane = layer.plane;
       out.drawSource = (_t: RenderTarget) => {
         this.stats.layerPasses++;
-        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, 1, false, live);
+        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, 1, false, live, bounds);
       };
       const ch = layer.blending?.channels;
       out.plain =
@@ -359,7 +361,7 @@ export class DocumentRenderer {
         (!ch || (ch.r && ch.g && ch.b));
       out.drawBatched = (opacity: number) => {
         this.stats.batchedLayers++;
-        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, opacity, true, live);
+        this.stats.tileInstances += this.tiles.draw(plane, view, clip, false, opacity, true, live, bounds);
       };
     }
     return out;

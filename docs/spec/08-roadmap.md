@@ -562,7 +562,8 @@ dynamics enabled; healing/PatchMatch results qualitatively on par (blind A/B rev
 reads its three brush files in place (they are Adobe's, so they stay out of the repository):
 643 presets, 268 sampled tips and 44 texture patterns. Every sampled tip decodes, every preset
 keeps its dynamics, texture and dual brush, and every preset survives a write-and-read round
-trip. The 135 bristle and erodible presets are drawn with a round tip and reported. Perf: in
+trip. The 135 bristle, erodible and airbrush presets draw their generated tips (added
+2026-09-24; before that they were drawn round). Perf: in
 the Electron spikes harness, a 500 px sampled tip on a 4K layer with every Brush Settings
 section on paints input→pixels at **2.56 ms p95** (plain round brush 1.51 ms;
 budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch are checked by what they must do:
@@ -585,15 +586,24 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests.
+Parity 133/133; 873 tests (877 after the follow-up).
 
 Deferred:
-- bristle and erodible tip simulation
 - reading `.tpl` tool presets
-- the Clone Source overlay
 - the Content-Aware Fill workspace (a dialog here) and its live preview
 - five symmetry types
-- healing that runs live while painting (it runs on release)
+
+Follow-up (2026-09-24), each of these was deferred above and is now built:
+- **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
+  (`kernels/src/brush/physical.ts`, `[fit]`). Each is a small family of bitmaps, chosen per
+  dab by pressure, wear or at random, so they need nothing new in the GPU dab path.
+- **Live healing.** The Healing Brush heals the area under each frame's new dabs, with what it
+  has already healed as the boundary, so the pieces join without seams. It commits what it
+  showed.
+- **Clone Source overlay.** When Clipped, it is sampled under the brush on the CPU. Otherwise
+  it is the whole source drawn through the clone mapping on the GPU, clipped to the canvas.
+
+  The overlay's matrix is checked to be the exact inverse of the stamp's mapping.
 
 **Findings.**
 1. **Healing needs a boundary where both images are known.** The membrane took its
@@ -624,6 +634,12 @@ Deferred:
    ≈2.5 MB of it is the bundled Noto Sans styles. Core UI is 255 KB and the worker 67 KB,
    both well inside budget. Loading the Bold/Italic files on first use, or synthesising
    them, would bring it back; that is a product call, so it is left open here.
+7. **ag-psd misreads the physical tips.** It divides bristle qualities by 100 a second
+   time: Photoshop stores 31 % as the percentage 0.31, so ag-psd returns 0.0031. It also
+   calls tip type 1 "erodible flat", but that type is Photoshop's Airbrush. For erodible tips,
+   the lead's shape (point, flat, round, square or triangle) is carried in the bristle-shape
+   index. Every airbrush preset in the corpus confirmed this reading. The importer corrects
+   for all of it, and the writer produces what Photoshop does.
 
 ### M9 — Advanced selection + advanced transform (XL)
 Quick Selection, Magnetic Lasso, Color Range, Focus Area, **Select and Mask** workspace (all
