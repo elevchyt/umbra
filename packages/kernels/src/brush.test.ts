@@ -180,6 +180,7 @@ import {
   symmetryCurve,
   symmetryMirror,
   symmetryPlacement,
+  symmetryFigure,
 } from './brush.js';
 
 function line(p: BrushParams, n = 20, opts = {}): Dab[] {
@@ -331,6 +332,34 @@ describe('dynamics', () => {
     const q = place.toFigure(place.toDoc(7, -3).x, place.toDoc(7, -3).y);
     expect(q.x).toBeCloseTo(7, 9);
     expect(q.y).toBeCloseTo(-3, 9);
+  });
+
+  it('the figure is the lines and curves it mirrors across, placed and cut to the canvas', () => {
+    const base0 = { segments: 2, cx: 100, cy: 50, angle: 0 };
+    // Vertical: one line down the canvas through the centre.
+    const v = symmetryFigure({ ...base0, mode: 'vertical' }, 200, 100);
+    const r6 = (polys: { x: number; y: number }[][]) => polys.map((p) => p.map((q) => ({ x: Math.round(q.x * 1e6) / 1e6 + 0, y: Math.round(q.y * 1e6) / 1e6 + 0 })));
+    expect(r6(v.polys)).toEqual([[{ x: 100, y: 0 }, { x: 100, y: 100 }]]);
+    expect(v.straight).toEqual([true]);
+    // Parallel Lines 40 apart, turned 90°: two vertical lines at x = 80 and 120.
+    const pl = symmetryFigure({ ...base0, mode: 'parallelLines', size: 40, angle: 90 }, 200, 100);
+    expect(pl.polys.map((p) => Math.round(p[0]!.x)).sort()).toEqual([120, 80].sort());
+    // A circle inside the canvas stays one closed ring; stretched to 150 % it spans x ± 45.
+    const c = symmetryFigure({ ...base0, mode: 'circle', size: 30, transform: { scaleX: 1.5, scaleY: 1, skew: 0 } }, 200, 100);
+    expect(c.closed).toEqual([true]);
+    expect(Math.max(...c.polys[0]!.map((p) => p.x))).toBeCloseTo(145, 6);
+    // Path symmetry: an open path runs on past its ends — a short vertical stub mirrors like
+    // the whole line.
+    const stub = [{ points: [{ x: 100, y: 40 }, { x: 100, y: 60 }], closed: false }];
+    expect(symmetryMirror({ ...base0, mode: 'path', path: stub }, 30, 90)).toEqual({ x: 170, y: 90 });
+    // Two sub-paths: two mirrors per dab.
+    const two = [
+      { points: [{ x: 80, y: 0 }, { x: 80, y: 100 }], closed: false },
+      { points: [{ x: 120, y: 0 }, { x: 120, y: 100 }], closed: false },
+    ];
+    const st = beginStroke({ ...base, spacing: 10, symmetry: { ...base0, mode: 'path', path: two } });
+    const dabs = strokeTo(st, { x: 100, y: 50, pressure: 1, time: 0, tiltX: 0, tiltY: 0, twist: 0 });
+    expect(dabs.map((d) => d.x)).toEqual([100, 60, 140]);
   });
 
   it('pulled string waits inside its leash; catch-up on end finishes the line', () => {

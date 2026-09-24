@@ -176,8 +176,8 @@ export interface StrokeState {
   dualRecent: DualStamp[];
   /** An erodible tip's wear, 0 (sharp) … 1; read it back after the stroke to carry it on. */
   wear: number;
-  /** A curved symmetry's last dab and its mirror, to fill gaps the mapping stretches open. */
-  symPrev: { src: Dab; mir: Dab } | null;
+  /** A curved symmetry's last dab and its mirror (per sub-path), to fill gaps the mapping opens. */
+  symPrev: ({ src: Dab; mir: Dab } | undefined)[];
 }
 
 export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): StrokeState {
@@ -199,7 +199,7 @@ export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): Stro
     dualCarry: 0,
     dualRecent: [],
     wear: opts.wear ?? 0,
-    symPrev: null,
+    symPrev: [],
   };
   const cd = params.colorDynamics;
   if (cd?.enabled && !cd.eachTip) s.strokeColor = dynamicColor(s, 1);
@@ -535,30 +535,46 @@ export function symmetryCurve(s: Symmetry): Pt[][] {
 }
 
 /** Curves cut into runs of segments, each with its bounding box, so a search can skip runs. */
-type Chunk = { pts: Pt[]; x0: number; y0: number; x1: number; y1: number };
+type Chunk = { pts: Pt[]; x0: number; y0: number; x1: number; y1: number; openStart: boolean; openEnd: boolean };
 const chunkCache = new WeakMap<Pt[][], Chunk[]>();
 function chunksOf(curves: Pt[][]): Chunk[] {
   const hit = chunkCache.get(curves);
   if (hit) return hit;
   const out: Chunk[] = [];
   for (const c of curves) {
+    // A curve is closed when it comes back to its start (symmetryCurve repeats it).
+    const open = c.length > 1 && (c[0]!.x !== c[c.length - 1]!.x || c[0]!.y !== c[c.length - 1]!.y);
     for (let i = 0; i + 1 < c.length; i += 64) {
       const pts = c.slice(i, Math.min(c.length, i + 65));
-      out.push({ pts, x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) });
+      out.push({
+        pts,
+        x0: Math.min(...pts.map((p) => p.x)),
+        y0: Math.min(...pts.map((p) => p.y)),
+        x1: Math.max(...pts.map((p) => p.x)),
+        y1: Math.max(...pts.map((p) => p.y)),
+        openStart: open && i === 0,
+        openEnd: open && i + pts.length >= c.length,
+      });
     }
   }
   chunkCache.set(curves, out);
   return out;
 }
 
-/** The nearest point on the curves, and the curve's direction there. */
+/**
+ * The nearest point on the curves, and the curve's direction there. The curves are polylines
+ * standing for smooth ones, so the foot is refined past the chord: along the segment, the
+ * normal is blended from its ends' vertex normals, and the foot is where that normal passes
+ * through the point — otherwise a mirror would slip sideways by the chord's angle.
+ */
 function nearestOnCurves(curves: Pt[][], x: number, y: number): { x: number; y: number; tx: number; ty: number } | null {
-  let best: { x: number; y: number; tx: number; ty: number } | null = null;
+  let best: { c: Pt[]; i: number; t: number; lo: number; hi: number } | null = null;
   let bestD = Infinity;
   for (const ch of chunksOf(curves)) {
+    // An open curve's ends run on straight, so the chunk holding one cannot be skipped.
     const bx = Math.max(ch.x0 - x, 0, x - ch.x1);
     const by = Math.max(ch.y0 - y, 0, y - ch.y1);
-    if (bx * bx + by * by >= bestD) continue;
+    if (!ch.openStart && !ch.openEnd && bx * bx + by * by >= bestD) continue;
     const c = ch.pts;
     for (let i = 0; i + 1 < c.length; i++) {
       const a = c[i]!;
@@ -567,18 +583,51 @@ function nearestOnCurves(curves: Pt[][], x: number, y: number): { x: number; y: 
       const dy = b.y - a.y;
       const len2 = dx * dx + dy * dy;
       if (len2 === 0) continue;
-      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
-      const px = a.x + dx * t;
-      const py = a.y + dy * t;
-      const d = (x - px) ** 2 + (y - py) ** 2;
+      const lo = ch.openStart && i === 0 ? -Infinity : 0;
+      const hi = ch.openEnd && i + 2 === c.length ? Infinity : 1;
+      const t = Math.max(lo, Math.min(hi, ((x - a.x) * dx + (y - a.y) * dy) / len2));
+      const d = (x - a.x - dx * t) ** 2 + (y - a.y - dy * t) ** 2;
       if (d < bestD) {
         bestD = d;
-        const l = Math.sqrt(len2);
-        best = { x: px, y: py, tx: dx / l, ty: dy / l };
+        best = { c, i, t, lo, hi };
       }
     }
   }
-  return best;
+  if (!best) return null;
+  const { c, i, lo, hi } = best;
+  const a = c[i]!;
+  const b = c[i + 1]!;
+  const e = { x: b.x - a.x, y: b.y - a.y };
+  const unit = (v: Pt) => {
+    const l = Math.hypot(v.x, v.y) || 1;
+    return { x: v.x / l, y: v.y / l };
+  };
+  const normalOf = (p: Pt, q: Pt) => unit({ x: -(q.y - p.y), y: q.x - p.x });
+  const ns = normalOf(a, b);
+  const prev = c[i - 1];
+  const next = c[i + 2];
+  const na = prev ? unit({ x: ns.x + normalOf(prev, a).x, y: ns.y + normalOf(prev, a).y }) : ns;
+  const nb = next ? unit({ x: ns.x + normalOf(b, next).x, y: ns.y + normalOf(b, next).y }) : ns;
+  // (p − a − t·e) × (na + t·(nb − na)) = 0: a quadratic in t.
+  const cross = (u: Pt, v: Pt) => u.x * v.y - u.y * v.x;
+  const P = { x: x - a.x, y: y - a.y };
+  const dn = { x: nb.x - na.x, y: nb.y - na.y };
+  const A = cross(P, na);
+  const B = cross(P, dn) - cross(e, na);
+  const C = -cross(e, dn);
+  let t = best.t;
+  const roots = Math.abs(C) < 1e-12 ? (Math.abs(B) < 1e-12 ? [] : [-A / B]) : (() => {
+    const disc = B * B - 4 * A * C;
+    if (disc < 0) return [];
+    const r = Math.sqrt(disc);
+    return [(-B + r) / (2 * C), (-B - r) / (2 * C)];
+  })();
+  const inRange = roots.filter((r) => r >= Math.max(lo, -0.5) && r <= Math.min(hi, 1.5) && Number.isFinite(r));
+  if (inRange.length) t = inRange.reduce((m, r) => (Math.abs(r - best!.t) < Math.abs(m - best!.t) ? r : m));
+  const n = unit({ x: na.x + dn.x * Math.max(0, Math.min(1, t)), y: na.y + dn.y * Math.max(0, Math.min(1, t)) });
+  // The tangent: across the blended normal, pointing along the segment.
+  const tan = n.x * e.y - n.y * e.x < 0 ? { x: n.y, y: -n.x } : { x: -n.y, y: n.x };
+  return { x: a.x + e.x * t, y: a.y + e.y * t, tx: tan.x, ty: tan.y };
 }
 
 /** A dab mirrored across a curve: through the nearest point, the tip reflected across its tangent. */
@@ -685,6 +734,124 @@ export function symmetryLinear(s: Symmetry): [number, number, number, number] {
   return [cos * sx - sin * sy * ky, sin * sx + cos * sy * ky, cos * sx * kx - sin * sy, sin * sx * kx + cos * sy];
 }
 
+/**
+ * A symmetry's figure on the document — the lines, rays or curves it mirrors across, placed
+ * (centre, angle, scale, skew) — clipped to the canvas grown by `margin` on every side. What
+ * the guide draws, and what Edit Points turns into a path. Path symmetry gives its path.
+ */
+export function symmetryFigure(s: Symmetry, width: number, height: number, margin = 0): { polys: Pt[][]; closed: boolean[]; straight: boolean[] } {
+  const polys: Pt[][] = [];
+  const closed: boolean[] = [];
+  const straight: boolean[] = [];
+  const box = { x0: -margin, y0: -margin, x1: width + margin, y1: height + margin };
+  if (s.mode === 'off') return { polys, closed, straight };
+  if (s.mode === 'path') {
+    for (const c of s.path ?? []) {
+      polys.push(c.points);
+      closed.push(c.closed);
+      straight.push(false);
+    }
+    return { polys, closed, straight };
+  }
+  const [a, b, c, d] = symmetryLinear(s);
+  const place = (p: Pt): Pt => ({ x: s.cx + a * p.x + c * p.y, y: s.cy + b * p.x + d * p.y });
+  const t = s.transform;
+  const far = (Math.hypot(width, height) + margin * 2) * 2 / Math.max(0.05, Math.min(Math.abs(t?.scaleX ?? 1), Math.abs(t?.scaleY ?? 1)));
+  /** A straight run in figure space, placed and cut to the box (Liang–Barsky). */
+  const segment = (p0: Pt, p1: Pt) => {
+    const A = place(p0);
+    const B = place(p1);
+    let lo = 0;
+    let hi = 1;
+    const dx = B.x - A.x;
+    const dy = B.y - A.y;
+    for (const [p, q] of [
+      [-dx, A.x - box.x0],
+      [dx, box.x1 - A.x],
+      [-dy, A.y - box.y0],
+      [dy, box.y1 - A.y],
+    ] as const) {
+      if (p === 0) {
+        if (q < 0) return;
+        continue;
+      }
+      const r = q / p;
+      if (p < 0) lo = Math.max(lo, r);
+      else hi = Math.min(hi, r);
+    }
+    if (lo >= hi) return;
+    polys.push([
+      { x: A.x + dx * lo, y: A.y + dy * lo },
+      { x: A.x + dx * hi, y: A.y + dy * hi },
+    ]);
+    closed.push(false);
+    straight.push(true);
+  };
+  const line = (ang: number, off = 0) => {
+    const u = { x: Math.cos(ang), y: Math.sin(ang) };
+    const n = { x: -u.y * off, y: u.x * off };
+    segment({ x: n.x - u.x * far, y: n.y - u.y * far }, { x: n.x + u.x * far, y: n.y + u.y * far });
+  };
+  const ray = (ang: number) => segment({ x: 0, y: 0 }, { x: Math.cos(ang) * far, y: Math.sin(ang) * far });
+  const size = s.size ?? 100;
+  const nSeg = Math.max(2, Math.min(12, Math.round(s.segments)));
+  switch (s.mode) {
+    case 'vertical':
+      line(Math.PI / 2);
+      break;
+    case 'horizontal':
+      line(0);
+      break;
+    case 'dualAxis':
+      line(0);
+      line(Math.PI / 2);
+      break;
+    case 'diagonal':
+      line(Math.PI / 4);
+      break;
+    case 'parallelLines':
+      line(0, size / 2);
+      line(0, -size / 2);
+      break;
+    case 'radial':
+      for (let k = 0; k < nSeg; k++) ray((2 * Math.PI * k) / nSeg);
+      break;
+    case 'mandala':
+      for (let k = 0; k < 2 * nSeg; k++) ray((Math.PI * k) / nSeg);
+      break;
+    default: {
+      // Wavy, Circle, Spiral: the curve, placed, kept to the box (a wave leaves and re-enters).
+      const fig = symmetryCurve({ ...s, cx: 0, cy: 0, angle: 0, transform: undefined });
+      const inside = (p: Pt) => p.x >= box.x0 && p.y >= box.y0 && p.x <= box.x1 && p.y <= box.y1;
+      for (const poly of fig) {
+        const isClosed = s.mode === 'circle';
+        let run: Pt[] = [];
+        const flush = () => {
+          if (run.length > 1) {
+            polys.push(run);
+            closed.push(false);
+            straight.push(false);
+          }
+          run = [];
+        };
+        const pts = poly.map(place);
+        if (isClosed && pts.every(inside)) {
+          polys.push(pts.slice(0, -1));
+          closed.push(true);
+          straight.push(false);
+          continue;
+        }
+        for (const p of pts) {
+          if (inside(p)) run.push(p);
+          else flush();
+        }
+        flush();
+      }
+    }
+  }
+  return { polys, closed, straight };
+}
+
 /** A dab carried through an affine map (position, tip direction, dual stamps). */
 function carried(dab: Dab, to: (x: number, y: number) => Pt, lin: [number, number, number, number]): Dab {
   const p = to(dab.x, dab.y);
@@ -722,33 +889,43 @@ function withSymmetry(state: StrokeState, dabs: Dab[]): Dab[] {
 
 /** Mirror dabs by a symmetry laid out in their own frame; `scale` is that frame's size per px. */
 function mirrorDabs(state: StrokeState, s: Symmetry, dabs: Dab[], scale: number): Dab[] {
-  if (s.mode === 'wavy' || s.mode === 'circle' || s.mode === 'spiral' || s.mode === 'path') {
+  if (s.mode === 'path') {
+    // Each sub-path is a mirror of its own (two lines: two mirrors, as Parallel Lines).
     const curves = symmetryCurve(s);
-    // The mapping stretches the stroke where the figure bends (a steep wave, far out on a
-    // spiral), so the mirror is filled in: dabs mirrored from between the source's dabs.
-    const step = Math.max(0.5, state.params.size * Math.max(0.01, state.params.spacing)) / scale;
-    return dabs.flatMap((d) => {
-      const m = mirroredAcross(d, curves, s);
-      if (!m) return [d];
-      const out: Dab[] = [d];
-      const prev = state.symPrev;
-      const gap = prev ? Math.hypot(m.x - prev.mir.x, m.y - prev.mir.y) : 0;
-      if (prev && gap > step * 1.5 && Math.hypot(d.x - prev.src.x, d.y - prev.src.y) < step * 3) {
-        const n = Math.min(64, Math.ceil(gap / step) - 1);
-        for (let k = 1; k <= n; k++) {
-          const t = k / (n + 1);
-          const mid: Dab = { ...d, x: prev.src.x + (d.x - prev.src.x) * t, y: prev.src.y + (d.y - prev.src.y) * t, radius: prev.src.radius + (d.radius - prev.src.radius) * t, flow: prev.src.flow + (d.flow - prev.src.flow) * t };
-          const mm = mirroredAcross(mid, curves, s);
-          if (mm) out.push(mm);
-        }
-      }
-      out.push(m);
-      state.symPrev = { src: d, mir: m };
-      return out;
-    });
+    return dabs.flatMap((d) => [d, ...curves.flatMap((c, k) => mirrorsOf(state, s, [c], scale, k, d))]);
+  }
+  if (s.mode === 'wavy' || s.mode === 'circle' || s.mode === 'spiral') {
+    const curves = symmetryCurve(s);
+    return dabs.flatMap((d) => [d, ...mirrorsOf(state, s, curves, scale, 0, d)]);
   }
   const maps = symmetryMaps(s);
   return dabs.flatMap((d) => maps.map((m, i) => (i === 0 ? d : mirrored(d, m, s.cx, s.cy))));
+}
+
+/**
+ * A dab's mirror across curves — and, where the mapping stretches the stroke (a steep wave, far
+ * out on a spiral), the mirrors of points between it and the last dab, so the mirror has no
+ * gaps. `key` keeps each sub-path's last dab apart.
+ */
+function mirrorsOf(state: StrokeState, s: Symmetry, curves: Pt[][], scale: number, key: number, d: Dab): Dab[] {
+  const m = mirroredAcross(d, curves, s);
+  if (!m) return [];
+  const step = Math.max(0.5, state.params.size * Math.max(0.01, state.params.spacing)) / scale;
+  const out: Dab[] = [];
+  const prev = state.symPrev[key];
+  const gap = prev ? Math.hypot(m.x - prev.mir.x, m.y - prev.mir.y) : 0;
+  if (prev && gap > step * 1.5 && Math.hypot(d.x - prev.src.x, d.y - prev.src.y) < step * 3) {
+    const n = Math.min(64, Math.ceil(gap / step) - 1);
+    for (let k = 1; k <= n; k++) {
+      const t = k / (n + 1);
+      const mid: Dab = { ...d, x: prev.src.x + (d.x - prev.src.x) * t, y: prev.src.y + (d.y - prev.src.y) * t, radius: prev.src.radius + (d.radius - prev.src.radius) * t, flow: prev.src.flow + (d.flow - prev.src.flow) * t };
+      const mm = mirroredAcross(mid, curves, s);
+      if (mm) out.push(mm);
+    }
+  }
+  out.push(m);
+  state.symPrev[key] = { src: d, mir: m };
+  return out;
 }
 
 // ---- the stroke --------------------------------------------------------------------------

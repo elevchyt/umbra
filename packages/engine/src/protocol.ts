@@ -1,5 +1,5 @@
 /** Message protocol between the UI thread and the engine worker (spec 03 §2). */
-import type { BrushParams } from '@umbra/kernels/brush';
+import type { BrushParams, Symmetry } from '@umbra/kernels/brush';
 import type { Gradient } from '@umbra/kernels/gradient';
 import type { Adjustment } from '@umbra/kernels/adjust';
 import type { FillContent } from '@umbra/kernels/fill';
@@ -302,6 +302,7 @@ export type ToEngine =
   | { t: 'contentAwareFill'; sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }
   | { t: 'redEye'; x: number; y: number; pupilSize: number; darken: number }
   | { t: 'sharpenTip' }
+  | { t: 'symmetryToPath'; symmetry: Symmetry }
   | { t: 'cafBegin'; options: CafOptions }
   | { t: 'cafOptions'; options: CafOptions }
   | { t: 'cafPaint'; phase: 'down' | 'move' | 'up'; x: number; y: number; size: number; subtract: boolean }
@@ -450,6 +451,7 @@ export type FromEngine =
   | { t: 'fonts'; list: { family: string; styles: { style: string; postscript: string }[] }[]; added?: number }
   | { t: 'typeSelection'; text: string }
   | ({ t: 'cafState' } & CafState)
+  | { t: 'symmetryPath'; id: number | null }
   | { t: 'toolPresets'; presets: ToolPresetImport[]; note?: string }
   | { t: 'brushes'; groups: BrushGroup[]; tips: Record<string, TipBitmap>; defined?: BrushPreset; note?: string }
   | { t: 'glyphs'; font: string; from: number; upem: number; total: number; glyphs: { cp: number; d: string; adv: number }[] }

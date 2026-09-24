@@ -5,6 +5,7 @@
 import { VectorTool, arrangeSubpaths, mergeComponents, overlayOutline, type PathArrange, type VectorOptions, type VectorToolId } from './vector-tool.js';
 import type { PathOverlay } from './render/path-overlay.js';
 import { flattenSubpath, transformPath, type Path } from '@umbra/kernels/vector/path';
+import { symmetryPath } from './symmetry-path.js';
 import { rasterizePath } from '@umbra/kernels/vector/raster';
 import { coverageToPath } from '@umbra/kernels/vector/trace';
 import { BUILTIN_SHAPES, readCsh, type CustomShape } from '@umbra/kernels/vector/custom';
@@ -137,6 +138,7 @@ import type { LayerLocks } from './document.js';
 import {
   DEFAULT_BRUSH,
   beginStroke as beginBrushStroke,
+  type Symmetry,
   isPhysical,
   physicalTip,
   physicalTipId,
@@ -3230,6 +3232,29 @@ export class Engine {
     return t.presets;
   }
 
+  /**
+   * Edit Points on the symmetry path: its figure (lines, arcs, curves — placed as its box has
+   * it) becomes a saved path named "Symmetry", selected, for the Direct Selection tool. Its id
+   * is what Path symmetry follows from then on. Radial and Mandala repeat by turning, which a
+   * path cannot say, so they stay as they are. Returns the path's id.
+   */
+  symmetryToPath(sym: Symmetry): number | null {
+    if (sym.mode === 'off' || sym.mode === 'path') return null;
+    if (sym.mode === 'radial' || sym.mode === 'mandala') {
+      this.statusNote = 'Radial and Mandala symmetry repeat by turning, which a path cannot hold: transform them with the box instead.';
+      return null;
+    }
+    const path = symmetryPath(sym, this.doc.width, this.doc.height);
+    if (!path) return null;
+    const paths = this.doc.paths ?? [];
+    const old = paths.find((p) => p.name === 'Symmetry' && !p.work);
+    const id = old?.id ?? this.nextPathId++;
+    const saved = { id, name: 'Symmetry', path, work: false };
+    this.activePathId = id;
+    this.commit({ ...this.doc, paths: old ? paths.map((p) => (p.id === id ? saved : p)) : [...paths, saved] }, 'Symmetry Path');
+    return id;
+  }
+
   /** Save Tool Presets… (.tpl): the presets with the sampled tips and patterns they use. */
   exportTpl(presets: readonly ToolPresetExport[]): Uint8Array {
     return writeTplFile(presets, this.brushTips, this.patternLibrary);
@@ -4045,9 +4070,11 @@ export class Engine {
     const seed = params.seed ?? 1 + Math.floor(Math.random() * 0x7ffffffe);
     // Tools that carry or blend the pixels they pass over step closely, or each dab's rim shows.
     const close = retouch && ['smudgeTool', 'blurTool', 'sharpenTool', 'mixerBrush'].includes(retouch.tool);
-    // Path symmetry mirrors across the Paths panel's selected path (or the layer's own).
+    // Path symmetry mirrors across the symmetry path (after Edit Points), else the Paths
+    // panel's selected path (or the layer's own).
     if (params.symmetry?.mode === 'path' && !params.symmetry.path?.length) {
-      const path = this.editPath();
+      const own = params.symmetry.pathId !== undefined ? (this.doc.paths ?? []).find((p) => p.id === params.symmetry!.pathId) : undefined;
+      const path = params.symmetry.pathId !== undefined ? (own?.path ?? null) : this.editPath();
       if (path?.subpaths.length) params = { ...params, symmetry: { ...params.symmetry, path: path.subpaths.map((sp) => ({ points: flattenSubpath(sp, 0.25), closed: sp.closed })) } };
       else {
         this.statusNote = 'Path symmetry: select a path in the Paths panel to mirror across.';

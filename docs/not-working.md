@@ -219,8 +219,16 @@ implementation.
 
       A stretched or skewed symmetry mirrors in its own frame (a stretched Circle mirrors
       across the ellipse).
-- [ ] **The symmetry path is not an ordinary path**: its anchors cannot be edited with the
-      Direct Selection tool. Path symmetry shows its path only while a path tool is active. Past twice a
+- [x] **Edit Points on the symmetry path** (2026-09-24): the Direct Selection button beside the
+      symmetry controls (or the Paths panel's symmetry row while a path tool is active) turns
+      the figure into a "Symmetry" path — lines cut to the canvas, curves fitted with Béziers —
+      and switches to Direct Selection. From then on the symmetry follows that path: drag
+      its points, and strokes mirror across what it has become; the guide draws it while
+      painting. Each sub-path mirrors on its own, and an open path runs on straight past its
+      ends.
+- [ ] **Edit Points is one-way and path-shaped**: Radial and Mandala cannot become a path (they
+      repeat by turning). A stretched Circle, once a path, mirrors through its nearest point
+      rather than in its stretched frame, and Dual Axis loses its 180° turn. Past twice a
       Circle's radius, a mirror crosses the centre.
 - [x] **Load Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel. It maps onto
       Umbra's tools and options:

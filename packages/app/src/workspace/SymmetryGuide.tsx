@@ -15,7 +15,7 @@
  */
 import { For, Show, createEffect, createMemo, onCleanup } from 'solid-js';
 import { reconcile } from 'solid-js/store';
-import { screenPointAtDoc, docPointAtScreen, symmetryCurve, symmetryLinear, IDENTITY_SYMMETRY_TRANSFORM, type Symmetry, type SymmetryTransform, type ViewState } from '@umbra/engine';
+import { screenPointAtDoc, docPointAtScreen, flattenSubpath, symmetryCurve, symmetryLinear, IDENTITY_SYMMETRY_TRANSFORM, type Symmetry, type SymmetryTransform, type ViewState } from '@umbra/engine';
 import { store } from '../state/store';
 import { PAINT_TOOLS } from '../tools/registry';
 
@@ -103,6 +103,31 @@ export function moveSymmetryRefTo(x: number, y: number): void {
   store.setBrush('symmetry', { ...s, cx: s.cx + x - r.x, cy: s.cy + y - r.y });
 }
 
+/** The tools that edit paths: with one of them, the Paths panel's symmetry row means Edit Points. */
+export const PATH_TOOLS = new Set(['pathSelect', 'directSelect', 'pen', 'freeformPen', 'curvaturePen', 'addAnchor', 'deleteAnchor', 'convertPoint']);
+
+/**
+ * Edit Points: the engine turns the symmetry's figure into the "Symmetry" path, and symmetry
+ * follows that path from then on — edited with the Direct Selection tool like any path.
+ */
+export function editSymmetryPoints(): void {
+  const s = store.brush.symmetry;
+  if (!s || s.mode === 'off' || s.mode === 'path') return;
+  store.engine?.({ t: 'symmetryToPath', symmetry: JSON.parse(JSON.stringify(s)) } as never);
+}
+
+/** The engine made the symmetry path: bind the symmetry to it and pick up Direct Selection. */
+export function symmetryPathMade(id: number | null): void {
+  if (id === null) return;
+  const s = store.brush.symmetry;
+  if (!s) return;
+  const { path: _path, ...rest } = JSON.parse(JSON.stringify(s)) as Symmetry;
+  store.setSymmetryEdit(null);
+  store.setBrush('symmetry', reconcile({ ...rest, mode: 'path', pathId: id }));
+  store.setActiveTool('directSelect');
+  store.setStatusMessage('The symmetry is now the Symmetry path: drag its points with the Direct Selection tool, then paint.');
+}
+
 /** The options bar's locator: the reference point to a corner, a side's middle, or the centre. */
 export function setSymmetryRef(u: number, v: number): void {
   const e = store.symmetryEdit();
@@ -112,7 +137,9 @@ export function setSymmetryRef(u: number, v: number): void {
 export function SymmetryGuide() {
   const sym = () => {
     const s = store.brush.symmetry;
-    return s && s.mode !== 'off' && s.mode !== 'path' && PAINT_TOOLS.has(store.activeTool()) && store.doc() ? s : null;
+    // Path symmetry shows here when it is the symmetry path (the selected path shows itself).
+    const shown = s && s.mode !== 'off' && (s.mode !== 'path' || s.pathId !== undefined);
+    return shown && PAINT_TOOLS.has(store.activeTool()) && store.doc() ? s : null;
   };
   const editing = () => !!store.symmetryEdit() && !!sym();
 
@@ -139,6 +166,14 @@ export function SymmetryGuide() {
     const s = sym();
     const d = store.doc();
     if (!s || !d) return [] as Pt[][];
+    if (s.mode === 'path') {
+      // The symmetry path, as the document has it now (edited with Direct Selection).
+      const saved = d.paths.find((p) => p.id === s.pathId);
+      return (saved?.path.subpaths ?? []).map((sp) => {
+        const pts = flattenSubpath(sp, 0.5);
+        return sp.closed && pts.length ? [...pts, pts[0]!] : pts;
+      });
+    }
     const place = placementOf(s);
     const t = s.transform ?? IDENTITY_SYMMETRY_TRANSFORM;
     // Long enough in figure space to cross the canvas after the placement's scale.

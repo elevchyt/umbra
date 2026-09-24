@@ -4,7 +4,7 @@ import { NumberField } from '@umbra/ui/widgets/NumberField';
 import { Checkbox, Select, Separator, Spacer, IconButton } from '@umbra/ui/widgets/controls';
 import { BLEND_MENU, BLEND_LABEL, type BlendMode } from '@umbra/core/blend';
 import { TOOL_BY_ID, PAINT_TOOLS } from '../tools/registry';
-import { beginSymmetryEdit, endSymmetryEdit, moveSymmetryRefTo, setSymmetryRef, symmetryAboutRef, symmetryRef } from './SymmetryGuide';
+import { beginSymmetryEdit, editSymmetryPoints, endSymmetryEdit, moveSymmetryRefTo, setSymmetryRef, symmetryAboutRef, symmetryRef } from './SymmetryGuide';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, sampleGradient, DEFAULT_SYMMETRY, RETOUCH_TOOLS, IDENTITY_SYMMETRY_TRANSFORM, type SymmetryMode, type Symmetry, type SymmetryTransform } from '@umbra/engine';
 import { store } from '../state/store';
 import { PathAlignOptions, ShapeToolOptions } from './ShapeOptions';
@@ -230,7 +230,7 @@ export function OptionsBar(props: OptionsBarProps) {
               { value: 'parallelLines', label: 'Parallel Lines' },
               { value: 'radial', label: 'Radial' },
               { value: 'mandala', label: 'Mandala' },
-              { value: 'path', label: 'Selected Path' },
+              { value: 'path', label: 'Path' },
             ]}
             onChange={(mode) => {
               const d = store.doc();
@@ -246,6 +246,9 @@ export function OptionsBar(props: OptionsBarProps) {
           />
           <Show when={brush.symmetry && brush.symmetry.mode !== 'off' && brush.symmetry.mode !== 'path'}>
             <IconButton icon="arrange" title="Transform the symmetry path (its box: scale, skew, turn, move)" active={!!store.symmetryEdit()} onClick={() => (store.symmetryEdit() ? endSymmetryEdit(true) : beginSymmetryEdit())} />
+            <Show when={brush.symmetry!.mode !== 'radial' && brush.symmetry!.mode !== 'mandala'}>
+              <IconButton icon="directSelect" title="Edit Points: make the symmetry a path to reshape with the Direct Selection tool" onClick={editSymmetryPoints} />
+            </Show>
           </Show>
           <Show when={brush.symmetry?.mode === 'radial' || brush.symmetry?.mode === 'mandala'}>
             <NumberField label="Segments" value={brush.symmetry!.segments} min={2} max={12} width={32} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, segments: v })} />
@@ -568,6 +571,9 @@ function SymmetryTransformBar() {
       <NumberField label="V" value={t().skewY ?? 0} min={-80} max={80} suffix="°" width={36} title="Vertical skew" onChange={(v) => about({ transform: { skewY: v } })} />
       <Show when={s().size !== undefined}>
         <NumberField label="Size" value={s().size!} min={4} max={10000} suffix="px" width={44} onChange={(v) => store.setBrush('symmetry', { ...s(), size: v })} />
+      </Show>
+      <Show when={s().mode !== 'radial' && s().mode !== 'mandala'}>
+        <IconButton icon="directSelect" title="Edit Points: make the symmetry a path to reshape with the Direct Selection tool" onClick={editSymmetryPoints} />
       </Show>
       <Separator />
       <IconButton icon="close" title="Cancel the transform (Esc)" onClick={() => endSymmetryEdit(false)} />

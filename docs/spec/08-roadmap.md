@@ -586,7 +586,7 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests (886 after the follow-ups). Nothing from M8 remains deferred.
+Parity 133/133; 873 tests (890 after the follow-ups). Nothing from M8 remains deferred.
 
 Follow-up (2026-09-24), each of these was deferred above and is now built:
 - **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
@@ -643,6 +643,17 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
   - With the reference point at the top-left corner, (125, 75), dragging the right edge
     75 px scaled to 150 % and moved the centre to x = 237.5, with the point still at
     (125, 75). Ctrl-dragging the side handle 30 px gave a vertical skew of atan(30/150) = 11°.
+- **Edit Points on the symmetry path** (`engine/src/symmetry-path.ts`).
+  - The figure (`symmetryFigure`: placed, cut to the canvas) becomes a saved "Symmetry" path.
+    Lines are two-point paths; curves are fitted with Béziers.
+  - The symmetry becomes Path symmetry bound to that path by id, which the engine flattens
+    when a stroke begins.
+  - Path symmetry now mirrors across each sub-path on its own, and runs open ends on
+    straight.
+  - Its nearest point is refined past the polyline's chords: normals are blended from the
+    vertices, so a converted Circle mirrors within 0.75 px of the original.
+  - In the browser, a vertical axis turned into a path, with its bottom anchor dragged
+    100 px, mirrored a dab at (100, 150) to (371, 58); the tilted line predicts (370, 60).
 - **Saving `.tpl`** (`writeTplFile`). It is the reader's exact inverse, and a painting
   preset's brush is written with the same items an `.abr` preset has.
   - Every option family survives a write and read.

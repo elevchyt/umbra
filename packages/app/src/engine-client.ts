@@ -34,6 +34,7 @@ export interface EngineClientEvents {
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
+  onSymmetryPath?: (id: number | null) => void;
   onCafState?: (msg: import('@umbra/engine').CafState) => void;
   onToolPresets?: (msg: { presets: import('@umbra/engine').ToolPresetImport[]; note?: string }) => void;
   onBrushes?: (msg: { groups: import('@umbra/engine').BrushGroup[]; tips: Record<string, import('@umbra/engine').TipBitmap>; defined?: import('@umbra/engine').BrushPreset; note?: string }) => void;
@@ -150,6 +151,9 @@ export class EngineClient {
         break;
       case 'brushes':
         this.events.onBrushes?.(msg);
+        break;
+      case 'symmetryPath':
+        this.events.onSymmetryPath?.(msg.id);
         break;
       case 'cafState':
         this.events.onCafState?.(msg);

@@ -7,7 +7,7 @@
  * it is what the tools and buttons use while no saved path is selected.
  */
 import { PAINT_TOOLS } from '../tools/registry';
-import { beginSymmetryEdit } from '../workspace/SymmetryGuide';
+import { PATH_TOOLS, beginSymmetryEdit, editSymmetryPoints } from '../workspace/SymmetryGuide';
 import { For, Show, createEffect, createSignal } from 'solid-js';
 import { Icon } from '@umbra/ui/icons/Icon';
 import { rasterizePath, transformPath, pathBounds, type Path } from '@umbra/engine';
@@ -72,9 +72,11 @@ export function PathsPanel() {
           <div
             class="path-row symmetry-path"
             classList={{ selected: !!store.symmetryEdit() }}
-            title="The paint symmetry: click to transform it"
+            title="The paint symmetry: click to transform it — with a path tool active, to edit its points"
             onClick={(e) => {
               e.stopPropagation();
+              // With a path tool, Photoshop edits the symmetry path's points; otherwise its box.
+              if (PATH_TOOLS.has(store.activeTool())) return editSymmetryPoints();
               // Its box is a painting tool's: switch to the Brush if another tool is active.
               if (!PAINT_TOOLS.has(store.activeTool())) store.setActiveTool('brush');
               beginSymmetryEdit();

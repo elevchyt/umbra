@@ -198,8 +198,13 @@ export interface Symmetry {
    * length, the circle's radius, the spiral's gap between turns, the lines' distance apart.
    */
   size?: number;
-  /** Path symmetry: the axis, flattened (document px). */
+  /** Path symmetry: the axis, flattened (document px); each sub-path mirrors on its own. */
   path?: { points: { x: number; y: number }[]; closed: boolean }[];
+  /**
+   * Path symmetry made from a document path (the symmetry path, after Edit Points): its id.
+   * The engine flattens it into `path` when a stroke begins.
+   */
+  pathId?: number;
   /**
    * The symmetry path's transform beyond its centre and angle (its transform box): width and
    * height scale, and horizontal skew in degrees. The figure is laid out about the origin,

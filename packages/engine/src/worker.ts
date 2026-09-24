@@ -381,6 +381,12 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
           post({ t: 'doc', doc: engine.summary() });
         }
         break;
+      case 'symmetryToPath':
+        if (engine) {
+          post({ t: 'symmetryPath', id: engine.symmetryToPath(msg.symmetry) });
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
       case 'sharpenTip':
         engine?.sharpenTip();
         break;
