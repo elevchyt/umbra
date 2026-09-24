@@ -34,6 +34,7 @@ export interface EngineClientEvents {
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
+  onToolPresets?: (msg: { presets: import('@umbra/engine').ToolPresetImport[]; note?: string }) => void;
   onBrushes?: (msg: { groups: import('@umbra/engine').BrushGroup[]; tips: Record<string, import('@umbra/engine').TipBitmap>; defined?: import('@umbra/engine').BrushPreset; note?: string }) => void;
   onFonts?: (list: { family: string; styles: { style: string; postscript: string }[] }[], added?: number) => void;
   onTypeSelection?: (text: string) => void;
@@ -148,6 +149,9 @@ export class EngineClient {
         break;
       case 'brushes':
         this.events.onBrushes?.(msg);
+        break;
+      case 'toolPresets':
+        this.events.onToolPresets?.(msg);
         break;
       case 'fonts':
         this.events.onFonts?.(msg.list, msg.added);

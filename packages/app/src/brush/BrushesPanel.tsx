@@ -208,8 +208,10 @@ export function BrushesPanel() {
           multiple
           style={{ display: 'none' }}
           onChange={async (e) => {
-            for (const f of [...(e.currentTarget.files ?? [])]) send({ t: 'importAbr', bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
-            e.currentTarget.value = '';
+            // currentTarget is gone once the handler awaits.
+            const input = e.currentTarget;
+            for (const f of [...(input.files ?? [])]) send({ t: 'importAbr', bytes: new Uint8Array(await f.arrayBuffer()), name: f.name });
+            input.value = '';
           }}
         />
       </div>

@@ -177,6 +177,8 @@ import {
   renderDabs,
   wetEdges,
   symmetryMaps,
+  symmetryCurve,
+  symmetryMirror,
 } from './brush.js';
 
 function line(p: BrushParams, n = 20, opts = {}): Dab[] {
@@ -254,6 +256,56 @@ describe('dynamics', () => {
       [0, 0],
       [0, 0],
     ]);
+  });
+
+  it('the curved and parallel symmetries mirror across their figure', () => {
+    const sym = (over: Partial<import('./brush.js').Symmetry> & { mode: import('./brush.js').SymmetryMode }) => ({ segments: 2, cx: 0, cy: 0, angle: 0, ...over });
+    const pairs = (d: Dab[], k = 2) => Array.from({ length: d.length / k }, (_, i) => d.slice(i * k, i * k + k));
+    // Parallel Lines 40 apart: y = 0 reflects across y = ±20, to ±40.
+    for (const [o, a, b] of pairs(line({ ...base, symmetry: sym({ mode: 'parallelLines', size: 40 }) }), 3) as Dab[][]) {
+      expect(a!.x).toBeCloseTo(o!.x, 6);
+      expect(a!.y).toBeCloseTo(40, 6);
+      expect(b!.y).toBeCloseTo(-40, 6);
+    }
+    // Circle, Wavy, Spiral and Path: every mirrored dab (the gap fillers too) mirrors back onto
+    // the stroke, which runs along y = 0 — and each figure is where it should be.
+    const path = [{ points: [{ x: 100, y: -500 }, { x: 100, y: 500 }], closed: false }];
+    const cases = [
+      // Big enough that the whole stroke is within 2R (past that a mirror crosses the centre).
+      sym({ mode: 'circle', size: 120, cx: 100, cy: 100 }),
+      sym({ mode: 'wavy', size: 200 }),
+      sym({ mode: 'spiral', size: 50, cx: 100, cy: 20 }),
+      sym({ mode: 'path', path }),
+    ];
+    for (const sy of cases) {
+      const out = line({ ...base, symmetry: sy });
+      // The source dabs are the same stroke's without symmetry, in order; the rest are mirrors.
+      const src = line(base);
+      let j = 0;
+      const mirrors = out.filter((d) => {
+        if (j < src.length && d.x === src[j]!.x && d.y === src[j]!.y) return (j++, false);
+        return true;
+      });
+      expect(j, sy.mode).toBe(src.length);
+      expect(mirrors.length, sy.mode).toBeGreaterThan(0);
+      for (const m of mirrors) {
+        const back = symmetryMirror(sy, m.x, m.y)!;
+        expect(Math.abs(back.y), `${sy.mode} ${m.x},${m.y}`).toBeLessThan(0.01);
+      }
+    }
+    // Circle: a point r from the centre lands |2R − r| from it, on the same ray.
+    const cm = symmetryMirror(cases[0]!, 100, 0)!;
+    expect(cm.x).toBeCloseTo(100, 6);
+    expect(cm.y).toBeCloseTo(100 - 140, 6);
+    // Wavy, 200 px waves 40 high: the crest over x = 50 sends y = 0 up to y = 80.
+    expect(symmetryMirror(cases[1]!, 50, 0)!.y).toBeCloseTo(80, 6);
+    // A path that is a vertical line through x = 100 is Vertical symmetry.
+    expect(symmetryMirror(cases[3]!, 30, 7)).toEqual({ x: 170, y: 7 });
+    // Spiral: on the dab's own ray, and the midpoint on the spiral (r = b·θ).
+    const sm = symmetryMirror(cases[2]!, 180, 20)!;
+    expect(sm.y).toBeCloseTo(20, 6);
+    const mid = ((180 - 100) + (sm.x - 100)) / 2;
+    expect((mid / (50 / (2 * Math.PI))) % (2 * Math.PI)).toBeCloseTo(0, 6);
   });
 
   it('pulled string waits inside its leash; catch-up on end finishes the line', () => {

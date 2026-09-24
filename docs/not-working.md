@@ -179,8 +179,8 @@ implementation.
 - [x] **The brush engine and retouching (M8).** Brush Settings with every section — Brush Tip
       Shape (computed and sampled tips, flips), Shape Dynamics, Scattering, Texture, Dual
       Brush, Color Dynamics, Transfer, Brush Pose, Noise, Wet Edges, Build-up, Smoothing (with
-      Pulled String and Catch-Up), Protect Texture — and symmetry painting (vertical,
-      horizontal, dual axis, diagonal, radial, mandala) about the canvas centre; the Brushes panel with groups and live stroke previews; `.abr` import and
+      Pulled String and Catch-Up), Protect Texture — and symmetry painting (all ten of
+      Photoshop's types, and a path's); the Brushes panel with groups and live stroke previews; `.abr` import and
       export (v1/v2 and v6+); Edit ▸ Define Brush Preset; tool presets. Retouching: Clone
       Stamp with the Clone Source panel (5 sources, offset, scale, rotation, flips), Pattern
       Stamp, Healing Brush, Spot Healing (Content-Aware, Create Texture, Proximity Match),
@@ -199,10 +199,31 @@ implementation.
 - [x] **Clone Source ▸ Show Overlay** (2026-09-24): opacity, Clipped, Auto Hide, Invert and
       blend mode, following the source's offset, scale, rotation and flips. A clipped overlay for a
       brush wider than 800 px is shown unclipped.
-- [ ] **Symmetry has 6 of Photoshop's 11 types** (no wavy, circle, spiral, parallel lines or
-      path-based symmetry) and its axis is always the canvas centre, with no on-canvas path.
-- [ ] **Tool presets (`.tpl`) are not read**; tool presets are kept with the app, not in a
-      file.
+- [x] **Symmetry: all of Photoshop's types** (2026-09-24): Vertical, Horizontal, Dual Axis,
+      Diagonal, Wavy, Circle, Spiral, Parallel Lines, Radial, Mandala, and Selected Path (across
+      the path chosen in the Paths panel). The options bar sets Segments, Size and Angle. The
+      proportions of Wavy, Circle and Spiral are `[fit]`.
+- [ ] **Symmetry is placed at the canvas centre** and has no on-canvas guide you can drag
+      (Path symmetry follows its path). Past twice a Circle's radius, a mirror crosses the
+      centre.
+- [x] **Load Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel. It maps onto
+      Umbra's tools and options:
+      - brushes with all their dynamics and sampled tips
+      - retouching options
+      - selection options
+      - gradients, including custom ones
+      - type (font, size, alignment)
+      - shape fill and stroke
+      - patterns
+
+      Every preset in Photoshop 2020's three `.tpl` files loads. Not carried over, and reported on load:
+      - crop sizes
+      - fixed-ratio marquees
+      - Magnetic Lasso settings
+      - a bucket's pattern fill
+      - layer styles on shape presets
+- [ ] **Tool presets live with the app, not in a file**: they cannot be saved as `.tpl`, and a
+      loaded preset's sampled brush tip lasts only until the app is reloaded.
 - [ ] **Content-Aware Fill is a dialog, not Photoshop's workspace**: sampling is Auto,
       Rectangular or the whole image, with no painted sampling area or live preview panel.
 - [ ] **Magic Eraser renders the document per click** to sample all layers; fine for a click,

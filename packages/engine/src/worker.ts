@@ -333,6 +333,26 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setCloneOverlay':
         engine?.setCloneOverlay(msg.overlay);
         break;
+      case 'importTpl':
+        if (engine) {
+          try {
+            const presets = engine.importTpl(msg.bytes, msg.name);
+            const partly = presets.filter((p) => p.tool && p.lost.length);
+            const skipped = presets.filter((p) => !p.tool);
+            post({
+              t: 'toolPresets',
+              presets,
+              note:
+                `Loaded ${presets.length - skipped.length} tool preset${presets.length - skipped.length === 1 ? '' : 's'}` +
+                (skipped.length ? `, ${skipped.length} for tools Umbra lacks` : '') +
+                (partly.length ? ` — ${partly.length} partly: ${partly.slice(0, 3).map((p) => `${p.name}: ${p.lost.join(', ')}`).join('; ')}` : ''),
+            });
+            post({ t: 'patterns', list: engine.patternSummaries() });
+          } catch (e) {
+            post({ t: 'toolPresets', presets: [], note: `Could not read ${msg.name}: ${e instanceof Error ? e.message : String(e)}` });
+          }
+        }
+        break;
       case 'sharpenTip':
         engine?.sharpenTip();
         break;

@@ -10,6 +10,7 @@ import { Icon } from '@umbra/ui/icons/Icon';
 import { Checkbox } from '@umbra/ui/widgets/controls';
 import { store } from '../state/store';
 import { TOOL_BY_ID } from '../tools/registry';
+import type { ToolPresetImport } from '@umbra/engine';
 
 interface ToolPreset {
   id: string;
@@ -18,6 +19,10 @@ interface ToolPreset {
   brush?: unknown;
   shape?: unknown;
   type?: unknown;
+  /** From a .tpl: the retouching, selection and gradient options it sets. */
+  retouch?: unknown;
+  select?: unknown;
+  gradient?: unknown;
 }
 
 const KEY = 'umbra.toolPresets';
@@ -51,6 +56,44 @@ function applyPreset(p: ToolPreset): void {
   if (p.brush) store.setBrush(reconcile({ ...JSON.parse(JSON.stringify(store.brush)), ...(p.brush as object) }));
   if (p.shape) store.setShapeOptions({ ...store.shapeOptions(), ...(p.shape as object) });
   if (p.type) store.setTypeOptions({ ...store.typeOptions(), ...(p.type as object) });
+  if (p.retouch) store.setRetouchOptions({ ...store.retouchOptions(), ...(p.retouch as object) });
+  if (p.select) store.setSelectOptions(p.select as never);
+  if (p.gradient) {
+    const g = p.gradient as ToolPresetImport['gradient'] & object;
+    const { gradient, ...rest } = g;
+    store.setGradientOptions({ ...rest, ...(gradient ? { preset: 'custom', custom: gradient, customName: p.name } : {}) } as never);
+  }
+}
+
+/**
+ * Load Tool Presets…: Photoshop's presets, as the engine mapped them. A preset for a tool Umbra
+ * does not have is left out; a custom shape is found by its name in the shape library.
+ */
+export function addImportedPresets(list: readonly ToolPresetImport[]): number {
+  const stamp = Date.now().toString(36);
+  const added: ToolPreset[] = [];
+  list.forEach((p, i) => {
+    if (!p.tool) return;
+    let shape = p.shape as (ToolPresetImport['shape'] & object) | undefined;
+    if (shape?.customShapeName) {
+      const { customShapeName, ...rest } = shape;
+      const found = store.customShapes().find((c) => c.name === customShapeName);
+      shape = found ? { ...rest, customShape: found.id } : rest;
+    }
+    added.push({
+      id: `tpl-${stamp}-${i}`,
+      name: p.name,
+      tool: p.tool,
+      ...(p.brush ? { brush: p.brush } : {}),
+      ...(shape ? { shape } : {}),
+      ...(p.type ? { type: p.type } : {}),
+      ...(p.retouch ? { retouch: p.retouch } : {}),
+      ...(p.select ? { select: p.select } : {}),
+      ...(p.gradient ? { gradient: p.gradient } : {}),
+    });
+  });
+  save([...presets(), ...added]);
+  return added.length;
 }
 
 function snapshot(): ToolPreset {
@@ -99,6 +142,21 @@ export function ToolPresetList(props: { onPick?: () => void }) {
       </div>
       <div class="panel-footer">
         <Checkbox checked={currentOnly()} label="Current Tool Only" onChange={setCurrentOnly} />
+        <label class="mini-icon" title="Load Tool Presets… (.tpl)">
+          <Icon name="folder" size={15} />
+          <input
+            type="file"
+            accept=".tpl"
+            multiple
+            hidden
+            onChange={async (e) => {
+              // currentTarget is gone once the handler awaits.
+              const input = e.currentTarget;
+              for (const f of [...(input.files ?? [])]) store.engine?.({ t: 'importTpl', bytes: new Uint8Array(await f.arrayBuffer()), name: f.name } as never);
+              input.value = '';
+            }}
+          />
+        </label>
         <button type="button" class="mini-icon" title="Create a new tool preset from the current tool" onClick={() => save([...presets(), snapshot()])}>
           <Icon name="plus" size={15} />
         </button>

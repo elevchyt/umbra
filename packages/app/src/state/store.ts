@@ -7,6 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
+import type { Gradient } from '@umbra/engine';
 import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, DEFAULT_RETOUCH, type RetouchOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
@@ -99,7 +100,10 @@ const [cropDeletes, setCropDeletes] = createSignal(false);
 /** Gradient tool options; the ramp itself is derived from the foreground/background. */
 const [gradientOptions, setGradientOptions] = createStore({
   style: 'linear' as 'linear' | 'radial' | 'angle' | 'reflected' | 'diamond',
-  preset: 'fgToBg' as 'fgToBg' | 'fgToTransparent' | 'blackToWhite',
+  preset: 'fgToBg' as 'fgToBg' | 'fgToTransparent' | 'blackToWhite' | 'custom',
+  /** A gradient of its own (from a tool preset), used when `preset` is 'custom'. */
+  custom: null as Gradient | null,
+  customName: '',
   mode: 'normal' as string,
   opacity: 1,
   reverse: false,

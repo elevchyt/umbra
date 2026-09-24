@@ -7,7 +7,7 @@ export type DV =
   | { t: 'obj'; cls: string; items: [string, DV][] }
   | { t: 'list'; items: DV[] }
   | { t: 'doub'; v: number }
-  | { t: 'untf'; unit: '#Pxl' | '#Prc' | '#Ang'; v: number }
+  | { t: 'untf'; unit: string; v: number }
   | { t: 'text'; v: string }
   | { t: 'enum'; type: string; v: string }
   | { t: 'long'; v: number }
@@ -159,4 +159,43 @@ function body(w: ByteWriter, cls: string, items: [string, DV][]): void {
 export function writeDescriptor(w: ByteWriter, cls: string, items: [string, DV][]): void {
   w.u32(16);
   body(w, cls, items);
+}
+
+/** ag-psd's unit names → descriptor unit codes. */
+const UNIT_CODE: Record<string, string> = {
+  Pixels: '#Pxl',
+  Percent: '#Prc',
+  Angle: '#Ang',
+  Points: '#Pnt',
+  Density: '#Rsl',
+  Millimeters: '#Mlm',
+  Distance: '#Rlt',
+  None: '#Nne',
+};
+
+/** Keys whose strings are text, even when they contain a dot. */
+const TEXT_KEYS = new Set(['Nm  ', 'Idnt', 'sampledData', 'FntN', 'FntS', 'fontPostScriptName', 'Txt ']);
+
+/**
+ * A descriptor as ag-psd parses it (read with its class ids) → typed values for our writer:
+ * `{ units, value }` is a unit float, `"Type.Value"` an enum, a whole number a long. Round
+ * trips what ag-psd's own readers consume; it cannot tell a whole-number double from a long.
+ */
+export function dvFromParsed(v: unknown, key = ''): DV {
+  if (typeof v === 'boolean') return bool(v);
+  if (typeof v === 'number') return Number.isInteger(v) && Math.abs(v) < 2 ** 31 ? long(v) : doub(v);
+  if (typeof v === 'string') {
+    const m = /^([A-Za-z][\w ]*?)\.(.+)$/.exec(v);
+    return m && !TEXT_KEYS.has(key) ? en(m[1]!, m[2]!) : text(v);
+  }
+  if (Array.isArray(v)) return list(v.map((x) => dvFromParsed(x)));
+  if (v && typeof v === 'object') {
+    const o = v as Record<string, unknown>;
+    if ('units' in o && 'value' in o && Object.keys(o).length === 2) return { t: 'untf', unit: UNIT_CODE[String(o.units)] ?? '#Nne', v: Number(o.value) };
+    const items = Object.entries(o)
+      .filter(([k]) => k !== '_name' && k !== '_classID')
+      .map(([k, x]) => [k, dvFromParsed(x, k)] as [string, DV]);
+    return obj(String(o._classID ?? 'null'), items);
+  }
+  return text(String(v));
 }

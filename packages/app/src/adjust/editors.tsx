@@ -1279,7 +1279,8 @@ function ColorLookup(props: { value: Of<'colorLookup'>; onChange: Change }) {
           if (!file) return;
           const bytes = new Uint8Array(await file.arrayBuffer());
           store.engine?.({ t: 'loadLut', fileName: file.name, bytes });
-          e.currentTarget.value = '';
+          // Not e.currentTarget: it is gone once the handler has awaited.
+          input.value = '';
         }}
       />
       <Button width={130} onClick={() => input.click()}>

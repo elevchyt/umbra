@@ -176,6 +176,8 @@ export interface StrokeState {
   dualRecent: DualStamp[];
   /** An erodible tip's wear, 0 (sharp) … 1; read it back after the stroke to carry it on. */
   wear: number;
+  /** A curved symmetry's last dab and its mirror, to fill gaps the mapping stretches open. */
+  symPrev: { src: Dab; mir: Dab } | null;
 }
 
 export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): StrokeState {
@@ -197,6 +199,7 @@ export function beginStroke(params: BrushParams, opts: StrokeOptions = {}): Stro
     dualCarry: 0,
     dualRecent: [],
     wear: opts.wear ?? 0,
+    symPrev: null,
   };
   const cd = params.colorDynamics;
   if (cd?.enabled && !cd.eachTip) s.strokeColor = dynamicColor(s, 1);
@@ -427,7 +430,8 @@ function attachDual(state: StrokeState, dab: Dab): void {
 
 // ---- symmetry ----------------------------------------------------------------------------
 
-type Mirror = { a: number; b: number; c: number; d: number; flip: boolean };
+/** A linear map about the centre, then an offset (Parallel Lines), both centre-relative. */
+type Mirror = { a: number; b: number; c: number; d: number; flip: boolean; e?: number; f?: number };
 
 /** The maps of a symmetry: rotations and reflections about its centre. */
 export function symmetryMaps(s: Symmetry | undefined): Mirror[] {
@@ -439,6 +443,20 @@ export function symmetryMaps(s: Symmetry | undefined): Mirror[] {
   const th = (s.angle * Math.PI) / 180;
   const n = Math.max(2, Math.min(12, Math.round(s.segments)));
   switch (s.mode) {
+    case 'parallelLines': {
+      // Two lines along the angle, `size` apart: each reflects the stroke across itself.
+      const d = s.size ?? 100;
+      const nx = -Math.sin(th) * d;
+      const ny = Math.cos(th) * d;
+      const r = ref(th);
+      return [id, { ...r, e: nx, f: ny }, { ...r, e: -nx, f: -ny }];
+    }
+    case 'wavy':
+    case 'circle':
+    case 'spiral':
+    case 'path':
+      // Curves: the stroke mirrors across the nearest point of the curve (withSymmetry).
+      return [id];
     case 'vertical':
       return [id, ref(th + Math.PI / 2)];
     case 'horizontal':
@@ -461,15 +479,202 @@ function mirrored(dab: Dab, m: Mirror, cx: number, cy: number): Dab {
   const ux = Math.cos(dab.angle);
   const uy = Math.sin(dab.angle);
   const angle = Math.atan2(m.b * ux + m.d * uy, m.a * ux + m.c * uy);
-  const out: Dab = { ...dab, x: cx + m.a * X + m.c * Y, y: cy + m.b * X + m.d * Y, angle };
+  const e = m.e ?? 0;
+  const f = m.f ?? 0;
+  const out: Dab = { ...dab, x: cx + m.a * X + m.c * Y + e, y: cy + m.b * X + m.d * Y + f, angle };
   if (m.flip) out.flipY = !dab.flipY;
-  if (dab.dual) out.dual = dab.dual.map((s) => ({ ...s, x: cx + m.a * (s.x - cx) + m.c * (s.y - cy), y: cy + m.b * (s.x - cx) + m.d * (s.y - cy) }));
+  if (dab.dual) out.dual = dab.dual.map((s) => ({ ...s, x: cx + m.a * (s.x - cx) + m.c * (s.y - cy) + e, y: cy + m.b * (s.x - cx) + m.d * (s.y - cy) + f }));
   return out;
+}
+
+type Pt = { x: number; y: number };
+const curveCache = new WeakMap<Symmetry, Pt[][]>();
+
+/**
+ * The curve a curved symmetry mirrors across, as polylines (document px) [fit]: Photoshop
+ * draws these as an editable path and does not publish their proportions. Path symmetry
+ * mirrors through the nearest point of its curve; Wavy, Circle and Spiral are mirrored exactly
+ * in their own coordinates (these polylines are for drawing and tests).
+ * - Wavy: a sine along the angle through the centre, `size` long per wave, a fifth as high.
+ * - Circle: `size` in radius.
+ * - Spiral: Archimedean, `size` between turns, five turns.
+ * - Path: the path it was made from.
+ */
+export function symmetryCurve(s: Symmetry): Pt[][] {
+  const hit = curveCache.get(s);
+  if (hit) return hit;
+  const size = Math.max(4, s.size ?? 100);
+  const th = (s.angle * Math.PI) / 180;
+  const place = (u: number, v: number): Pt => ({ x: s.cx + u * Math.cos(th) - v * Math.sin(th), y: s.cy + u * Math.sin(th) + v * Math.cos(th) });
+  let curves: Pt[][] = [];
+  if (s.mode === 'wavy') {
+    const pts: Pt[] = [];
+    // Up to 40 000 px each way, at most 16 000 points (64 a wave).
+    const half = Math.min(Math.ceil(40000 / size) * 64, 8000);
+    for (let k = -half; k <= half; k++) {
+      const u = (k / 64) * size;
+      pts.push(place(u, Math.sin((2 * Math.PI * u) / size) * size * 0.2));
+    }
+    curves = [pts];
+  } else if (s.mode === 'circle') {
+    const n = Math.max(64, Math.min(1024, Math.round(size / 2)));
+    curves = [Array.from({ length: n + 1 }, (_, k) => place(Math.cos((2 * Math.PI * k) / n) * size, Math.sin((2 * Math.PI * k) / n) * size))];
+  } else if (s.mode === 'spiral') {
+    const pts: Pt[] = [];
+    for (let k = 0; k <= 5 * 360; k++) {
+      const t = (2 * Math.PI * k) / 360;
+      const r = (size * t) / (2 * Math.PI);
+      pts.push(place(Math.cos(t) * r, Math.sin(t) * r));
+    }
+    curves = [pts];
+  } else if (s.mode === 'path') {
+    curves = (s.path ?? []).filter((c) => c.points.length > 1).map((c) => (c.closed ? [...c.points, c.points[0]!] : c.points));
+  }
+  curveCache.set(s, curves);
+  return curves;
+}
+
+/** Curves cut into runs of segments, each with its bounding box, so a search can skip runs. */
+type Chunk = { pts: Pt[]; x0: number; y0: number; x1: number; y1: number };
+const chunkCache = new WeakMap<Pt[][], Chunk[]>();
+function chunksOf(curves: Pt[][]): Chunk[] {
+  const hit = chunkCache.get(curves);
+  if (hit) return hit;
+  const out: Chunk[] = [];
+  for (const c of curves) {
+    for (let i = 0; i + 1 < c.length; i += 64) {
+      const pts = c.slice(i, Math.min(c.length, i + 65));
+      out.push({ pts, x0: Math.min(...pts.map((p) => p.x)), y0: Math.min(...pts.map((p) => p.y)), x1: Math.max(...pts.map((p) => p.x)), y1: Math.max(...pts.map((p) => p.y)) });
+    }
+  }
+  chunkCache.set(curves, out);
+  return out;
+}
+
+/** The nearest point on the curves, and the curve's direction there. */
+function nearestOnCurves(curves: Pt[][], x: number, y: number): { x: number; y: number; tx: number; ty: number } | null {
+  let best: { x: number; y: number; tx: number; ty: number } | null = null;
+  let bestD = Infinity;
+  for (const ch of chunksOf(curves)) {
+    const bx = Math.max(ch.x0 - x, 0, x - ch.x1);
+    const by = Math.max(ch.y0 - y, 0, y - ch.y1);
+    if (bx * bx + by * by >= bestD) continue;
+    const c = ch.pts;
+    for (let i = 0; i + 1 < c.length; i++) {
+      const a = c[i]!;
+      const b = c[i + 1]!;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const len2 = dx * dx + dy * dy;
+      if (len2 === 0) continue;
+      const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
+      const px = a.x + dx * t;
+      const py = a.y + dy * t;
+      const d = (x - px) ** 2 + (y - py) ** 2;
+      if (d < bestD) {
+        bestD = d;
+        const l = Math.sqrt(len2);
+        best = { x: px, y: py, tx: dx / l, ty: dy / l };
+      }
+    }
+  }
+  return best;
+}
+
+/** A dab mirrored across a curve: through the nearest point, the tip reflected across its tangent. */
+function mirroredAcross(dab: Dab, curves: Pt[][], s: Symmetry): Dab | null {
+  let n: { x: number; y: number; tx: number; ty: number } | null;
+  const size = Math.max(4, s.size ?? 100);
+  const th = (s.angle * Math.PI) / 180;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  if (s.mode === 'wavy') {
+    // Across the wave, in its own frame: v' = 2·f(u) − v. (The nearest point of a wave is not
+    // a mirror: past the curvature of a crest it folds over.) The midpoint is on the wave.
+    const u = (dab.x - s.cx) * cos + (dab.y - s.cy) * sin;
+    const k = (2 * Math.PI) / size;
+    const f = Math.sin(k * u) * size * 0.2;
+    const slope = Math.cos(k * u) * size * 0.2 * k;
+    const l = Math.hypot(1, slope);
+    n = { x: s.cx + u * cos - f * sin, y: s.cy + u * sin + f * cos, tx: (cos - slope * sin) / l, ty: (sin + slope * cos) / l };
+    const v = -(dab.x - s.cx) * sin + (dab.y - s.cy) * cos;
+    const m = mirroredTip(dab, n);
+    return { ...m, x: s.cx + u * cos - (2 * f - v) * sin, y: s.cy + u * sin + (2 * f - v) * cos };
+  }
+  if (s.mode === 'spiral') {
+    // Along the ray from the centre, about the nearest turn of r = b·θ.
+    const b = size / (2 * Math.PI);
+    const dx = dab.x - s.cx;
+    const dy = dab.y - s.cy;
+    const r = Math.hypot(dx, dy);
+    let phi = Math.atan2(dy, dx) - th;
+    phi = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    const turn = Math.max(0, Math.min(4, Math.round((r / b - phi) / (2 * Math.PI))));
+    const t = phi + 2 * Math.PI * turn;
+    const rs = b * t;
+    const a = t + th;
+    const tx = b * Math.cos(a) - rs * Math.sin(a);
+    const ty = b * Math.sin(a) + rs * Math.cos(a);
+    const l = Math.hypot(tx, ty) || 1;
+    n = { x: s.cx + Math.cos(a) * rs, y: s.cy + Math.sin(a) * rs, tx: tx / l, ty: ty / l };
+    const m = mirroredTip(dab, n);
+    const r2 = 2 * rs - r;
+    return { ...m, x: s.cx + Math.cos(a) * r2, y: s.cy + Math.sin(a) * r2 };
+  }
+  if (s.mode === 'circle') {
+    // Exactly: the nearest point of a circle is along the ray from its centre.
+    const r = Math.max(4, s.size ?? 100);
+    const dx = dab.x - s.cx;
+    const dy = dab.y - s.cy;
+    const l = Math.hypot(dx, dy) || 1;
+    n = { x: s.cx + (dx / l) * r, y: s.cy + (dy / l) * r, tx: -dy / l, ty: dx / l };
+  } else n = nearestOnCurves(curves, dab.x, dab.y);
+  if (!n) return null;
+  // The position through the nearest point exactly; the tangent turns the tip.
+  return { ...mirroredTip(dab, n), x: 2 * n.x - dab.x, y: 2 * n.y - dab.y };
+}
+
+/** Where a curved symmetry mirrors a point (null where it cannot). */
+export function symmetryMirror(s: Symmetry, x: number, y: number): { x: number; y: number } | null {
+  const m = mirroredAcross({ x, y, radius: 1, hardness: 1, angle: 0, roundness: 1, flow: 1 }, symmetryCurve(s), s);
+  return m ? { x: m.x, y: m.y } : null;
+}
+
+/** A dab's tip (and its dual stamps, about the point) reflected across a tangent at a point. */
+function mirroredTip(dab: Dab, n: { x: number; y: number; tx: number; ty: number }): Dab {
+  const t = Math.atan2(n.ty, n.tx);
+  const m: Mirror = { a: Math.cos(2 * t), b: Math.sin(2 * t), c: Math.sin(2 * t), d: -Math.cos(2 * t), flip: true };
+  return mirrored(dab, m, n.x, n.y);
 }
 
 function withSymmetry(state: StrokeState, dabs: Dab[]): Dab[] {
   const s = state.params.symmetry;
   if (!s || s.mode === 'off') return dabs;
+  if (s.mode === 'wavy' || s.mode === 'circle' || s.mode === 'spiral' || s.mode === 'path') {
+    const curves = symmetryCurve(s);
+    // The mapping stretches the stroke where the figure bends (a steep wave, far out on a
+    // spiral), so the mirror is filled in: dabs mirrored from between the source's dabs.
+    const step = Math.max(0.5, state.params.size * Math.max(0.01, state.params.spacing));
+    return dabs.flatMap((d) => {
+      const m = mirroredAcross(d, curves, s);
+      if (!m) return [d];
+      const out: Dab[] = [d];
+      const prev = state.symPrev;
+      const gap = prev ? Math.hypot(m.x - prev.mir.x, m.y - prev.mir.y) : 0;
+      if (prev && gap > step * 1.5 && Math.hypot(d.x - prev.src.x, d.y - prev.src.y) < step * 3) {
+        const n = Math.min(64, Math.ceil(gap / step) - 1);
+        for (let k = 1; k <= n; k++) {
+          const t = k / (n + 1);
+          const mid: Dab = { ...d, x: prev.src.x + (d.x - prev.src.x) * t, y: prev.src.y + (d.y - prev.src.y) * t, radius: prev.src.radius + (d.radius - prev.src.radius) * t, flow: prev.src.flow + (d.flow - prev.src.flow) * t };
+          const mm = mirroredAcross(mid, curves, s);
+          if (mm) out.push(mm);
+        }
+      }
+      out.push(m);
+      state.symPrev = { src: d, mir: m };
+      return out;
+    });
+  }
   const maps = symmetryMaps(s);
   return dabs.flatMap((d) => maps.map((m, i) => (i === 0 ? d : mirrored(d, m, s.cx, s.cy))));
 }

@@ -182,7 +182,8 @@ export interface SmoothingOptions {
   adjustForZoom: boolean;
 }
 
-export type SymmetryMode = 'off' | 'vertical' | 'horizontal' | 'dualAxis' | 'diagonal' | 'radial' | 'mandala';
+/** Photoshop's Paint Symmetry types, in its menu's order; `path` is a path made into one. */
+export type SymmetryMode = 'off' | 'vertical' | 'horizontal' | 'dualAxis' | 'diagonal' | 'wavy' | 'circle' | 'spiral' | 'parallelLines' | 'radial' | 'mandala' | 'path';
 
 export interface Symmetry {
   mode: SymmetryMode;
@@ -192,6 +193,13 @@ export interface Symmetry {
   cx: number;
   cy: number;
   angle: number;
+  /**
+   * Wavy, Circle, Spiral and Parallel Lines: the figure's size, document px — the waves'
+   * length, the circle's radius, the spiral's gap between turns, the lines' distance apart.
+   */
+  size?: number;
+  /** Path symmetry: the axis, flattened (document px). */
+  path?: { points: { x: number; y: number }[]; closed: boolean }[];
 }
 
 export const DEFAULT_SHAPE_DYNAMICS: ShapeDynamics = {

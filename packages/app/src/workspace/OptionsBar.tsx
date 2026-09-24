@@ -78,7 +78,9 @@ function GradientPreview() {
     const fg = store.foreground();
     const bg = store.background();
     const g =
-      store.gradientOptions.preset === 'fgToTransparent'
+      store.gradientOptions.preset === 'custom' && store.gradientOptions.custom
+        ? store.gradientOptions.custom
+        : store.gradientOptions.preset === 'fgToTransparent'
         ? FOREGROUND_TO_TRANSPARENT([fg.r, fg.g, fg.b])
         : store.gradientOptions.preset === 'blackToWhite'
           ? FOREGROUND_TO_BACKGROUND([0, 0, 0], [1, 1, 1])
@@ -101,7 +103,7 @@ function GradientPreview() {
       <span class="gradient-preview" style={{ background: css() }} title="Gradient preset" />
       <Select
         value={store.gradientOptions.preset}
-        options={PRESETS}
+        options={store.gradientOptions.custom ? [...PRESETS, { value: 'custom', label: store.gradientOptions.customName || 'Custom' }] : PRESETS}
         onChange={(v) => store.setGradientOptions('preset', v as never)}
         width={172}
       />
@@ -196,24 +198,39 @@ export function OptionsBar(props: OptionsBarProps) {
           <Select
             label="Symmetry"
             value={brush.symmetry?.mode ?? 'off'}
-            width={100}
-            title="Paint symmetry about the canvas centre"
+            width={110}
+            title="Paint symmetry about the canvas centre (Path: across the path selected in the Paths panel)"
             options={[
               { value: 'off', label: 'Off' },
               { value: 'vertical', label: 'Vertical' },
               { value: 'horizontal', label: 'Horizontal' },
               { value: 'dualAxis', label: 'Dual Axis' },
               { value: 'diagonal', label: 'Diagonal' },
+              { value: 'wavy', label: 'Wavy' },
+              { value: 'circle', label: 'Circle' },
+              { value: 'spiral', label: 'Spiral' },
+              { value: 'parallelLines', label: 'Parallel Lines' },
               { value: 'radial', label: 'Radial' },
               { value: 'mandala', label: 'Mandala' },
+              { value: 'path', label: 'Selected Path' },
             ]}
             onChange={(mode) => {
               const d = store.doc();
-              store.setBrush('symmetry', { ...DEFAULT_SYMMETRY, ...(brush.symmetry ?? {}), mode: mode as SymmetryMode, cx: (d?.width ?? 0) / 2, cy: (d?.height ?? 0) / 2 });
+              const cur = brush.symmetry ?? DEFAULT_SYMMETRY;
+              // A figure a quarter of the canvas's shorter side, unless one was already set.
+              const size = cur.size ?? Math.max(16, Math.round(Math.min(d?.width ?? 400, d?.height ?? 400) / 4));
+              const { path: _path, ...rest } = cur;
+              store.setBrush('symmetry', { ...DEFAULT_SYMMETRY, ...rest, size, mode: mode as SymmetryMode, cx: (d?.width ?? 0) / 2, cy: (d?.height ?? 0) / 2 });
             }}
           />
           <Show when={brush.symmetry?.mode === 'radial' || brush.symmetry?.mode === 'mandala'}>
             <NumberField label="Segments" value={brush.symmetry!.segments} min={2} max={12} width={32} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, segments: v })} />
+          </Show>
+          <Show when={['wavy', 'circle', 'spiral', 'parallelLines'].includes(brush.symmetry?.mode ?? '')}>
+            <NumberField label="Size" value={brush.symmetry!.size ?? 100} min={4} max={10000} suffix="px" width={44} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, size: v })} />
+          </Show>
+          <Show when={brush.symmetry && !['off', 'path', 'circle'].includes(brush.symmetry.mode)}>
+            <NumberField label="Angle" value={brush.symmetry!.angle} min={-180} max={180} suffix="°" width={36} onChange={(v) => store.setBrush('symmetry', { ...brush.symmetry!, angle: v })} />
           </Show>
           <IconButton icon="gear" title="Brush Settings (F5)" onClick={() => store.openPanel('brushSettings')} />
         </Match>

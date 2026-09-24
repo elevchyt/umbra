@@ -158,6 +158,7 @@ import {
 import { readAbrFile, writeAbrFile } from './abr.js';
 import { DEFAULT_RETOUCH, RetouchStroke, readPixel, type RetouchOptions, type RetouchToolId, type Rgba } from './retouch.js';
 import * as HealCmd from './heal-tools.js';
+import { readTplFile, type ToolPresetImport } from './tpl.js';
 import { heal } from '@umbra/kernels/heal';
 import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
@@ -3181,6 +3182,18 @@ export class Engine {
     return { added: abr.presets.length, lost: abr.lost };
   }
 
+  /**
+   * Load Tool Presets… (.tpl): the presets, mapped to Umbra's tools and options. Their brushes'
+   * sampled tips join the tip library and their patterns the pattern library, so the presets
+   * can refer to them by id.
+   */
+  importTpl(bytes: Uint8Array, fileName: string): ToolPresetImport[] {
+    const t = readTplFile(bytes, fileName);
+    for (const [id, tip] of t.tips) this.brushTips.set(id, tip);
+    for (const p of t.patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
+    return t.presets;
+  }
+
   /** Export Selected Brushes…: presets (by id, or a whole group) with their tips and textures. */
   exportAbr(opts: { group?: string; ids?: readonly string[] }): Uint8Array {
     const all = this.brushGroups.flatMap((g) => g.presets.map((p) => ({ p, g: g.name })));
@@ -3991,6 +4004,15 @@ export class Engine {
     const seed = params.seed ?? 1 + Math.floor(Math.random() * 0x7ffffffe);
     // Tools that carry or blend the pixels they pass over step closely, or each dab's rim shows.
     const close = retouch && ['smudgeTool', 'blurTool', 'sharpenTool', 'mixerBrush'].includes(retouch.tool);
+    // Path symmetry mirrors across the Paths panel's selected path (or the layer's own).
+    if (params.symmetry?.mode === 'path' && !params.symmetry.path?.length) {
+      const path = this.editPath();
+      if (path?.subpaths.length) params = { ...params, symmetry: { ...params.symmetry, path: path.subpaths.map((sp) => ({ points: flattenSubpath(sp, 0.25), closed: sp.closed })) } };
+      else {
+        this.statusNote = 'Path symmetry: select a path in the Paths panel to mirror across.';
+        params = { ...params, symmetry: undefined };
+      }
+    }
     this.brush = { ...params, seed, ...(close ? { spacing: Math.min(params.spacing, 0.1) } : {}) };
     params = this.brush;
     this.paintMode = mode;

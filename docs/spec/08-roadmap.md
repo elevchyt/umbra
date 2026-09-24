@@ -578,7 +578,7 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   scattering, texture, dual brush, colour dynamics, transfer, pose, noise, wet edges,
   build-up, smoothing modes, protect texture) is drawn on the GPU. Sampled tips live in a
   texture array, and each stroke is seeded, so it is repeatable. Symmetry painting has
-  6 types.
+  all ten of Photoshop's types (six at first; see the follow-up).
 - **Brushes panel:** groups and live previews.
 - **`.abr`:** read in v1/v2 and v6+, written as v6.2.
 - **Presets:** Define Brush Preset and tool presets.
@@ -586,12 +586,10 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests (877 after the follow-up).
+Parity 133/133; 873 tests (882 after the follow-ups).
 
 Deferred:
-- reading `.tpl` tool presets
 - the Content-Aware Fill workspace (a dialog here) and its live preview
-- five symmetry types
 
 Follow-up (2026-09-24), each of these was deferred above and is now built:
 - **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
@@ -604,6 +602,19 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
   it is the whole source drawn through the clone mapping on the GPU, clipped to the canvas.
 
   The overlay's matrix is checked to be the exact inverse of the stamp's mapping.
+- **`.tpl` tool presets** (`engine/src/tpl.ts`). A painting preset's brush descriptor is
+  rewritten into a one-brush `.abr` in memory and read by the brush-library path, so each
+  dynamic is read exactly as in a brush library. Gradients and shape styles go through the
+  PSD fill-layer and vector-stroke converters. Every preset in Photoshop 2020's three `.tpl`
+  files loads.
+- **Five more symmetry types.**
+  - Parallel Lines is two linear reflections with an offset.
+  - Wavy, Circle and Spiral mirror in their own coordinates: across the wave (v′ = 2f(u) − v),
+    across the circle, and along the ray about the nearest turn.
+  - A path mirrors through the nearest point of its curve.
+
+  Where a curve's mapping stretches the stroke, the mirror is filled in from between the
+  source's dabs.
 
 **Findings.**
 1. **Healing needs a boundary where both images are known.** The membrane took its
@@ -640,6 +651,14 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
    the lead's shape (point, flat, round, square or triangle) is carried in the bristle-shape
    index. Every airbrush preset in the corpus confirmed this reading. The importer corrects
    for all of it, and the writer produces what Photoshop does.
+8. **Reflecting across a curve's nearest point is not a mirror.** For Wavy, the nearest
+   point of a wave to a point past the crest's curvature is on the slope, so the mapping
+   folds over. Wavy and Spiral are mirrored in their own coordinates instead, and a test
+   checks that each curved symmetry is its own inverse. The exception is a circle past twice
+   its radius, where the mirror crosses the centre.
+9. **`e.currentTarget` is null after an `await`.** Three file inputs (Load Tool Presets,
+   Load Brushes, Load LUT) cleared themselves after awaiting the file and threw. They now keep
+   the element in a variable first.
 
 ### M9 — Advanced selection + advanced transform (XL)
 Quick Selection, Magnetic Lasso, Color Range, Focus Area, **Select and Mask** workspace (all

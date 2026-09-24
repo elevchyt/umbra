@@ -5,6 +5,7 @@ import { ToolsPanel } from '@umbra/ui/workspace/ToolsPanel';
 import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
+import { addImportedPresets } from '../brush/ToolPresets';
 import { ContentAwareFillDialog } from '../brush/ContentAwareFill';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
@@ -165,6 +166,10 @@ export function Workspace() {
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
+        onToolPresets: (m) => {
+          addImportedPresets(m.presets);
+          if (m.note) store.setStatusMessage(m.note);
+        },
         onBrushes: (m) => {
           store.setBrushLibrary({ groups: m.groups, tips: m.tips });
           if (m.note) store.setStatusMessage(m.note);
@@ -397,6 +402,7 @@ export function Workspace() {
     const gradientArgs = {
       style: g.style,
       preset: g.preset,
+      custom: g.custom ? (JSON.parse(JSON.stringify(g.custom)) as typeof g.custom) : null,
       mode: g.mode,
       opacity: g.opacity,
       reverse: g.reverse,
@@ -414,7 +420,9 @@ export function Workspace() {
       }
       return {
         gradient:
-          gradientArgs.preset === 'fgToTransparent'
+          gradientArgs.preset === 'custom' && gradientArgs.custom
+            ? gradientArgs.custom
+            : gradientArgs.preset === 'fgToTransparent'
             ? FOREGROUND_TO_TRANSPARENT(fg)
             : gradientArgs.preset === 'blackToWhite'
               ? FOREGROUND_TO_BACKGROUND([0, 0, 0], [1, 1, 1])

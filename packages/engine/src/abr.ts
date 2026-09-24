@@ -25,7 +25,7 @@ import {
   type BristleTip,
   type ErodibleTip,
 } from '@umbra/kernels/brush';
-import { ByteWriter, ang, bool, doub, en, list, long, obj, pct, px, text, writeDescriptor, type DV } from './descriptor-writer.js';
+import { ByteWriter, ang, bool, doub, dvFromParsed, en, list, long, obj, pct, px, text, writeDescriptor, type DV } from './descriptor-writer.js';
 
 export interface AbrContents {
   presets: BrushPreset[];
@@ -564,4 +564,18 @@ export function writeAbrFile(presets: readonly BrushPreset[], tips: ReadonlyMap<
   const tipName = (id: string) => id.replace(/^.*:/, '');
   section(w, 'desc', (s) => writeDescriptor(s, 'null', [['Brsh', list(presets.map((p) => presetDV(p, tipName)))]]));
   return w.result();
+}
+
+/**
+ * Brush presets given as parsed descriptors (a tool preset's brush, from a .tpl) read through
+ * the same path as an .abr: written into a small v6.2 file with the source's sampled tips,
+ * then read by ag-psd, so every dynamic is understood exactly as in a brush library.
+ */
+export function readAbrBrushDescriptors(brushes: readonly Record<string, unknown>[], samp: Uint8Array | null, name: string): AbrContents {
+  const w = new ByteWriter();
+  w.i16(6);
+  w.i16(2);
+  if (samp) section(w, 'samp', (s) => s.bytes(samp));
+  section(w, 'desc', (s) => writeDescriptor(s, 'null', [['Brsh', list(brushes.map((b) => dvFromParsed(b)))]]));
+  return readAbrFile(w.result(), name);
 }
