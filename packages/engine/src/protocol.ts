@@ -11,7 +11,7 @@ import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
 import type { ToolPresetImport } from './tpl.js';
-import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp, PatchOptions, CloneOverlay } from './engine.js';
+import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp, PatchOptions, CloneOverlay, CafOptions, CafState } from './engine.js';
 import type { BrushGroup, BrushPreset, TipBitmap } from '@umbra/kernels/brush';
 import type { RetouchOptions, RetouchToolId } from './retouch.js';
 import type { PathArrange, VectorOptions, VectorToolId } from './vector-tool.js';
@@ -302,6 +302,10 @@ export type ToEngine =
   | { t: 'contentAwareFill'; sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }
   | { t: 'redEye'; x: number; y: number; pupilSize: number; darken: number }
   | { t: 'sharpenTip' }
+  | { t: 'cafBegin'; options: CafOptions }
+  | { t: 'cafOptions'; options: CafOptions }
+  | { t: 'cafPaint'; phase: 'down' | 'move' | 'up'; x: number; y: number; size: number; subtract: boolean }
+  | { t: 'cafEnd'; commit: boolean }
   | { t: 'importTpl'; bytes: Uint8Array; name: string }
   | { t: 'setCloneOverlay'; overlay: CloneOverlay | null }
   | { t: 'setCloneSource'; x: number; y: number; /** Document coordinates (a Clone Source slot), not screen. */ doc?: boolean }
@@ -444,6 +448,7 @@ export type FromEngine =
   | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }
   | { t: 'fonts'; list: { family: string; styles: { style: string; postscript: string }[] }[]; added?: number }
   | { t: 'typeSelection'; text: string }
+  | ({ t: 'cafState' } & CafState)
   | { t: 'toolPresets'; presets: ToolPresetImport[]; note?: string }
   | { t: 'brushes'; groups: BrushGroup[]; tips: Record<string, TipBitmap>; defined?: BrushPreset; note?: string }
   | { t: 'glyphs'; font: string; from: number; upem: number; total: number; glyphs: { cp: number; d: string; adv: number }[] }

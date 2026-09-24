@@ -3,7 +3,7 @@ import { TILE_SIZE } from '@umbra/core/pixels';
 import { Plane } from './tiles/plane.js';
 import { RGBA8 } from './tiles/import.js';
 import { readPixel } from './retouch.js';
-import { healLive, patchArea, redEye, spotHeal, writeRect } from './heal-tools.js';
+import { fillFromSampling, healLive, patchArea, redEye, spotHeal, writeRect } from './heal-tools.js';
 
 const W = 96;
 const H = 64;
@@ -92,6 +92,27 @@ describe('heal tools', () => {
     expect(Math.abs(at(47) - at(48) - (src(47) - src(48)))).toBeLessThan(5);
     // …and the texture itself survives the heal.
     expect(Math.abs(at(30) - at(31) - (src(30) - src(31)))).toBeLessThan(5);
+  });
+
+  it('Content-Aware Fill samples only the sampling area, and previews at a reduced size', () => {
+    // Blue everywhere near the hole, red only far to the left: sampling only the red area
+    // fills red; sampling everywhere fills blue.
+    const orig = plane((x) => (x < 40 ? [0.9, 0.1, 0.1, 1] : [0.1, 0.1, 0.9, 1]));
+    const cover = new Float32Array(W * H);
+    for (let y = 24; y < 40; y++) for (let x = 60; x < 76; x++) cover[y * W + x] = 1;
+    const onlyRed = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < 36; x++) onlyRed[y * W + x] = 1;
+    const opts = { rotation: 0, scale: false, mirror: false, adaptation: 0 };
+    const red = fillFromSampling(orig, all, cover, onlyRed, opts);
+    const at = (f: typeof red, x: number, y: number) => f.rgb.slice((y * f.w + x) * 3, (y * f.w + x) * 3 + 3);
+    expect(at(red, 68, 32)[0]!).toBeGreaterThan(0.7);
+    const blue = fillFromSampling(orig, all, cover, null, opts);
+    expect(at(blue, 68, 32)[2]!).toBeGreaterThan(0.7);
+    // The workspace's preview: the larger side at most 32 samples.
+    const small = fillFromSampling(orig, all, cover, onlyRed, { ...opts, maxDim: 32 });
+    expect(small.step).toBe(3);
+    expect(Math.max(small.w, small.h)).toBeLessThanOrEqual(32);
+    expect(at(small, Math.floor(68 / 3), Math.floor(32 / 3))[0]!).toBeGreaterThan(0.7);
   });
 
   it('Red Eye darkens and desaturates only the pupil', () => {

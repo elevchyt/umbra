@@ -131,6 +131,75 @@ export function healLive(layer: Plane, stroke: Plane, healed: Plane, r: IRect, f
   return { rgb: heal(st.rgb, dest, region, w, h, diffusion), alpha: st.alpha, region };
 }
 
+export interface FillOptions {
+  /** Largest rotation a source patch may have, radians. */
+  rotation: number;
+  scale: boolean;
+  mirror: boolean;
+  /** Colour Adaptation, 0 (none) … 1: how far the fill's tone is healed to its surroundings. */
+  adaptation: number;
+  seed?: number;
+  /** Work at a reduced size so the larger side is at most this (the workspace's preview). */
+  maxDim?: number;
+}
+
+/**
+ * Content-Aware Fill over `r`: the area `cover` (the selection, 0…1) filled by PatchMatch from
+ * `allowed` (the sampling area; everywhere if null), then healed toward its surroundings by
+ * the colour adaptation. Returns colours and blend weights over `r` — at a reduced size
+ * (`step` px per sample) when `maxDim` asks for one.
+ */
+export function fillFromSampling(
+  source: Plane,
+  r: IRect,
+  cover: Float32Array,
+  allowed: Uint8Array | null,
+  opts: FillOptions,
+): { rgb: Float32Array; weight: Float32Array; w: number; h: number; step: number } {
+  const full = readRect(source, r);
+  const W = full.w;
+  const H = full.h;
+  const step = opts.maxDim ? Math.max(1, Math.ceil(Math.max(W, H) / opts.maxDim)) : 1;
+  const w = Math.ceil(W / step);
+  const h = Math.ceil(H / step);
+  let rgb = full.rgb;
+  const hole = new Uint8Array(w * h);
+  const ok = new Uint8Array(w * h).fill(1);
+  const weight = new Float32Array(w * h);
+  if (step === 1) {
+    for (let i = 0; i < W * H; i++) {
+      hole[i] = cover[i]! > 0.02 ? 1 : 0;
+      weight[i] = cover[i]!;
+      if (allowed && !allowed[i]) ok[i] = 0;
+    }
+  } else {
+    // Box-average colours; a cell is hole if any of it is, sampled only if all of it is.
+    rgb = new Float32Array(w * h * 3);
+    const n = new Float32Array(w * h);
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++) {
+        const i = y * W + x;
+        const j = Math.floor(y / step) * w + Math.floor(x / step);
+        for (let c = 0; c < 3; c++) rgb[j * 3 + c] = rgb[j * 3 + c]! + full.rgb[i * 3 + c]!;
+        n[j] = n[j]! + 1;
+        if (cover[i]! > 0.02) hole[j] = 1;
+        weight[j] = Math.max(weight[j]!, cover[i]!);
+        if (allowed && !allowed[i]) ok[j] = 0;
+      }
+    for (let j = 0; j < w * h; j++) for (let c = 0; c < 3; c++) rgb[j * 3 + c] = rgb[j * 3 + c]! / Math.max(1, n[j]!);
+  }
+  for (let i = 0; i < w * h; i++) if (hole[i]) ok[i] = 0;
+  const filled = inpaint(rgb, w, h, hole, { seed: opts.seed ?? 1, allowed: ok, rotation: opts.rotation, scale: opts.scale, mirror: opts.mirror });
+  let out = filled;
+  if (opts.adaptation > 0) {
+    const healed = heal(filled, rgb, hole, w, h, 5);
+    const a = Math.min(1, opts.adaptation);
+    out = new Float32Array(filled.length);
+    for (let i = 0; i < out.length; i++) out[i] = filled[i]! * (1 - a) + healed[i]! * a;
+  }
+  return { rgb: out, weight, w, h, step };
+}
+
 export type SpotType = 'contentAware' | 'createTexture' | 'proximityMatch';
 
 /**

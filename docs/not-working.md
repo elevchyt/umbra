@@ -224,8 +224,23 @@ implementation.
       - layer styles on shape presets
 - [ ] **Tool presets live with the app, not in a file**: they cannot be saved as `.tpl`, and a
       loaded preset's sampled brush tip lasts only until the app is reloaded.
-- [ ] **Content-Aware Fill is a dialog, not Photoshop's workspace**: sampling is Auto,
-      Rectangular or the whole image, with no painted sampling area or live preview panel.
+- [x] **Edit ▸ Content-Aware Fill is Photoshop's workspace** (2026-09-24). The canvas shows the
+      sampling area as a tinted overlay, which the Sampling Brush paints in or out (Alt swaps
+      the two).
+      - The panel holds Lasso and Polygonal Lasso for the fill area, Hand and Zoom, and a live
+        Preview.
+      - Overlay: show, opacity, colour, and whether it indicates the sampling or the excluded
+        area.
+      - Sampling area: Auto, Rectangular or Custom, and Sample All Layers.
+      - Fill: Color Adaptation (None to Very High), Rotation Adaptation (None to Full), Scale
+        and Mirror.
+      - Output: current, new or duplicate layer.
+      - Reset, Cancel (Esc) and OK (Enter).
+- [ ] **Content-Aware Fill's Auto sampling is a band around the selection**; Photoshop picks
+      areas that resemble the surroundings. The levels of colour and rotation adaptation are
+      `[fit]`. The preview is computed at up to 360 px and OK at full size, so a fine texture
+      can differ slightly between the two. The workspace is a panel beside the canvas rather
+      than a window of its own.
 - [ ] **Magic Eraser renders the document per click** to sample all layers; fine for a click,
       but it is the slowest tool on a big document.
 

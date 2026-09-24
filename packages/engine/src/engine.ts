@@ -236,6 +236,42 @@ export interface CloneOverlay {
   transform: { scaleX: number; scaleY: number; angle: number; flipX: boolean; flipY: boolean };
 }
 
+/** Edit ▸ Content-Aware Fill's workspace settings (Photoshop's Content-Aware Fill panel). */
+export interface CafOptions {
+  sampling: 'auto' | 'rectangular' | 'custom';
+  sampleAll: boolean;
+  colorAdaptation: 'none' | 'default' | 'high' | 'veryHigh';
+  rotation: 'none' | 'low' | 'medium' | 'high' | 'full';
+  scale: boolean;
+  mirror: boolean;
+  output: 'current' | 'new' | 'duplicate';
+  overlay: { show: boolean; opacity: number; color: [number, number, number]; indicates: 'sampling' | 'excluded' };
+}
+
+export const DEFAULT_CAF: CafOptions = {
+  sampling: 'auto',
+  sampleAll: false,
+  colorAdaptation: 'default',
+  rotation: 'none',
+  scale: false,
+  mirror: false,
+  output: 'new',
+  overlay: { show: true, opacity: 0.5, color: [0, 1, 0], indicates: 'sampling' },
+};
+
+/** What the workspace shows: its sampling mode (painting makes it Custom) and the preview. */
+export interface CafState {
+  active: boolean;
+  sampling?: CafOptions['sampling'];
+  preview?: { pixels: Uint8Array; width: number; height: number };
+  busy?: boolean;
+  note?: string;
+}
+
+/** Colour Adaptation and Rotation Adaptation levels [fit]: Photoshop does not publish them. */
+const CAF_ADAPTATION = { none: 0, default: 0.4, high: 0.75, veryHigh: 1 } as const;
+const CAF_ROTATION = { none: 0, low: Math.PI / 12, medium: Math.PI / 4, high: Math.PI / 2, full: Math.PI } as const;
+
 /** The overlay's synthetic layer id: never a document layer's. */
 const OVERLAY_ID = -1001;
 
@@ -4438,39 +4474,283 @@ export class Engine {
     return true;
   }
 
-  /** Edit ▸ Content-Aware Fill: the selection filled from the sampling area. */
-  contentAwareFill(opts: { sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }): boolean {
-    const layer = this.activePixelLayer();
-    const b = selectionBoundsOf(this.doc.selection);
-    if (!layer || !b) {
+  // ---- Content-Aware Fill workspace ------------------------------------------------------
+
+  private caf: {
+    opts: CafOptions;
+    /** The sampling area, 255 = sampled, over the whole canvas. */
+    mask: Uint8Array;
+    /** The selection the automatic sampling area was made for. */
+    maskFor: Selection | null;
+    tex: WebGLTexture | null;
+    texDirty: Rect;
+    /** When the preview went stale (ms), or null when it is current. */
+    previewAt: number | null;
+    painting: { x: number; y: number } | null;
+    composite: { doc: Doc; plane: Plane } | null;
+  } | null = null;
+  /** Set by the worker: the workspace's state, whenever it changes. */
+  onCafState?: (s: CafState) => void;
+
+  /** Edit ▸ Content-Aware Fill: open the workspace on the selection. */
+  cafBegin(opts: CafOptions): boolean {
+    if (!this.activePixelLayer() || !selectionBoundsOf(this.doc.selection)) {
       this.statusNote = 'Content-Aware Fill needs a selection on a pixel layer.';
       return false;
     }
-    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0);
-    const r = opts.sampling === 'all' ? { x0: 0, y0: 0, x1: this.doc.width, y1: this.doc.height } : HealCmd.grow(b, opts.sampling === 'rectangular' ? Math.round(size / 2) : size, this.doc.width, this.doc.height);
-    const cover = this.selectionOver(r);
-    const { rgb, weight } = HealCmd.spotHeal(layer.plane.base, r, cover, 'contentAware');
-    let out = rgb;
-    if (opts.colorAdaptation) {
-      // Colour adaptation: the fill's tone meets the surroundings (a Poisson pass over it).
-      const w = r.x1 - r.x0;
-      const h = r.y1 - r.y0;
-      const hole = new Uint8Array(w * h);
-      for (let i = 0; i < hole.length; i++) hole[i] = weight[i]! > 0 ? 1 : 0;
-      out = heal(rgb, HealCmd.readRect(layer.plane.base, r).rgb, hole, w, h, 5);
-    }
-    let doc = this.doc;
-    if (opts.output === 'current') {
-      const plane = HealCmd.writeRect(layer.plane.base, r, out, weight);
-      doc = { ...doc, layers: updateLayer(doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) };
-    } else {
-      const base = opts.output === 'duplicate' ? layer.plane.base : Plane.empty(RGBA8);
-      const plane = HealCmd.writeRect(base, r, out, weight, opts.output === 'new');
-      const added = makePixelLayer(opts.output === 'new' ? 'Content-Aware Fill' : `${layer.name} copy`, plane);
-      doc = { ...doc, layers: insertLayer(doc.layers, added, layer.id), activeLayerIds: [added.id] };
-    }
-    this.commit(doc, 'Content-Aware Fill');
+    const W = this.doc.width;
+    const H = this.doc.height;
+    this.caf = { opts, mask: new Uint8Array(W * H), maskFor: null, tex: null, texDirty: EMPTY_RECT, previewAt: 0, painting: null, composite: null };
+    this.cafAutoSampling();
+    this.onCafState?.({ active: true, sampling: opts.sampling, busy: true });
     return true;
+  }
+
+  cafSetOptions(opts: CafOptions): void {
+    const c = this.caf;
+    if (!c) return;
+    const prev = c.opts;
+    c.opts = opts;
+    if (opts.sampling !== prev.sampling && opts.sampling !== 'custom') this.cafAutoSampling();
+    // Only the overlay's look changed: the fill is still current.
+    const fillChanged = JSON.stringify({ ...prev, overlay: 0 }) !== JSON.stringify({ ...opts, overlay: 0 });
+    if (fillChanged) {
+      c.previewAt = performance.now();
+      this.onCafState?.({ active: true, sampling: opts.sampling, busy: true });
+    }
+  }
+
+  /** Auto: a band around the fill area about its own size; Rectangular: its box, grown. [fit] */
+  private cafAutoSampling(): void {
+    const c = this.caf!;
+    const sel = this.doc.selection;
+    const b = selectionBoundsOf(sel);
+    const W = this.doc.width;
+    const H = this.doc.height;
+    c.mask.fill(0);
+    c.maskFor = sel;
+    if (!sel || !b) return;
+    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0);
+    if (c.opts.sampling === 'rectangular') {
+      const r = HealCmd.grow(b, Math.max(16, Math.round(size / 2)), W, H);
+      for (let y = r.y0; y < r.y1; y++) c.mask.fill(255, y * W + r.x0, y * W + r.x1);
+    } else {
+      // Within `d` of the fill area (a square window, through a summed-area table).
+      const d = Math.max(24, size);
+      const r = HealCmd.grow(b, d, W, H);
+      const rw = r.x1 - r.x0;
+      const rh = r.y1 - r.y0;
+      const sum = new Int32Array((rw + 1) * (rh + 1));
+      for (let y = 0; y < rh; y++)
+        for (let x = 0; x < rw; x++) {
+          const k = (y + 1) * (rw + 1) + x + 1;
+          sum[k] = sum[k - 1]! + sum[k - rw - 1]! - sum[k - rw - 2]! + (sel.mask[(r.y0 + y) * W + r.x0 + x]! > 127 ? 1 : 0);
+        }
+      const box = (x0: number, y0: number, x1: number, y1: number) => sum[y1 * (rw + 1) + x1]! - sum[y0 * (rw + 1) + x1]! - sum[y1 * (rw + 1) + x0]! + sum[y0 * (rw + 1) + x0]!;
+      for (let y = 0; y < rh; y++)
+        for (let x = 0; x < rw; x++)
+          if (box(Math.max(0, x - d), Math.max(0, y - d), Math.min(rw, x + d + 1), Math.min(rh, y + d + 1)) > 0) c.mask[(r.y0 + y) * W + r.x0 + x] = 255;
+    }
+    // Never sample what is being filled.
+    for (let i = 0; i < c.mask.length; i++) if (sel.mask[i]! > 127) c.mask[i] = 0;
+    c.texDirty = { x0: 0, y0: 0, x1: W, y1: H };
+    c.previewAt = performance.now();
+  }
+
+  /** The Sampling Brush: paint the sampling area in (or out, with `subtract`). */
+  cafPaint(phase: 'down' | 'move' | 'up', sx: number, sy: number, size: number, subtract: boolean): void {
+    const c = this.caf;
+    if (!c) return;
+    if (phase === 'up') {
+      c.painting = null;
+      c.previewAt = performance.now();
+      this.onCafState?.({ active: true, sampling: c.opts.sampling, busy: true });
+      return;
+    }
+    const p = docPointAtScreen(this.view, sx, sy);
+    const from = phase === 'down' || !c.painting ? p : c.painting;
+    c.painting = p;
+    if (c.opts.sampling !== 'custom') {
+      c.opts = { ...c.opts, sampling: 'custom' };
+      this.onCafState?.({ active: true, sampling: 'custom', busy: true });
+    }
+    const W = this.doc.width;
+    const H = this.doc.height;
+    const r = Math.max(0.5, size / 2);
+    const len = Math.hypot(p.x - from.x, p.y - from.y);
+    const steps = Math.max(1, Math.ceil(len / Math.max(1, r / 2)));
+    const v = subtract ? 0 : 255;
+    const sel = this.doc.selection;
+    for (let k = 0; k <= steps; k++) {
+      const cx = from.x + ((p.x - from.x) * k) / steps;
+      const cy = from.y + ((p.y - from.y) * k) / steps;
+      for (let y = Math.max(0, Math.floor(cy - r)); y < Math.min(H, Math.ceil(cy + r)); y++)
+        for (let x = Math.max(0, Math.floor(cx - r)); x < Math.min(W, Math.ceil(cx + r)); x++)
+          if ((x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r && !(sel && sel.mask[y * W + x]! > 127)) c.mask[y * W + x] = v;
+    }
+    c.texDirty = rectUnion(c.texDirty, { x0: Math.max(0, Math.floor(Math.min(p.x, from.x) - r)), y0: Math.max(0, Math.floor(Math.min(p.y, from.y) - r)), x1: Math.min(W, Math.ceil(Math.max(p.x, from.x) + r)), y1: Math.min(H, Math.ceil(Math.max(p.y, from.y) + r)) });
+  }
+
+  /** The fill over its working rectangle: the fill area and every sampled pixel. */
+  private cafFill(maxDim?: number): { r: HealCmd.IRect; fill: ReturnType<typeof HealCmd.fillFromSampling>; layer: PixelLayer } | null {
+    const c = this.caf;
+    const layer = this.activePixelLayer();
+    const b = selectionBoundsOf(this.doc.selection);
+    if (!c || !layer || !b) return null;
+    const W = this.doc.width;
+    let x0 = b.x0;
+    let y0 = b.y0;
+    let x1 = b.x1;
+    let y1 = b.y1;
+    for (let i = 0; i < c.mask.length; i++) {
+      if (!c.mask[i]) continue;
+      const x = i % W;
+      const y = (i - x) / W;
+      if (x < x0) x0 = x;
+      if (x >= x1) x1 = x + 1;
+      if (y < y0) y0 = y;
+      if (y >= y1) y1 = y + 1;
+    }
+    const r = { x0, y0, x1, y1 };
+    const rw = x1 - x0;
+    const allowed = new Uint8Array(rw * (y1 - y0));
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) allowed[(y - y0) * rw + (x - x0)] = c.mask[y * W + x]! ? 1 : 0;
+    let source = layer.plane.base;
+    if (c.opts.sampleAll) {
+      if (c.composite?.doc !== this.doc) c.composite = { doc: this.doc, plane: this.compositePlane() };
+      source = c.composite.plane;
+    }
+    const fill = HealCmd.fillFromSampling(source, r, this.selectionOver(r), allowed, {
+      rotation: CAF_ROTATION[c.opts.rotation],
+      scale: c.opts.scale,
+      mirror: c.opts.mirror,
+      adaptation: CAF_ADAPTATION[c.opts.colorAdaptation],
+      seed: 7,
+      maxDim,
+    });
+    return { r, fill, layer };
+  }
+
+  /** The Preview panel's picture: the fill area and its surroundings, filled, at a small size. */
+  private cafPreview(): CafState['preview'] | undefined {
+    const res = this.cafFill(360);
+    const b = selectionBoundsOf(this.doc.selection);
+    if (!res || !b) return undefined;
+    const { r, fill } = res;
+    const size = Math.max(b.x1 - b.x0, b.y1 - b.y0);
+    const f = HealCmd.grow(b, Math.round(size / 2), this.doc.width, this.doc.height);
+    // The frame in the fill's (reduced) samples.
+    const fx0 = Math.max(0, Math.floor((f.x0 - r.x0) / fill.step));
+    const fy0 = Math.max(0, Math.floor((f.y0 - r.y0) / fill.step));
+    const fx1 = Math.min(fill.w, Math.ceil((f.x1 - r.x0) / fill.step));
+    const fy1 = Math.min(fill.h, Math.ceil((f.y1 - r.y0) / fill.step));
+    const width = Math.max(1, fx1 - fx0);
+    const height = Math.max(1, fy1 - fy0);
+    const pixels = new Uint8Array(width * height * 4);
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        const i = (fy0 + y) * fill.w + fx0 + x;
+        const o = (y * width + x) * 4;
+        for (let ch = 0; ch < 3; ch++) pixels[o + ch] = Math.round(Math.max(0, Math.min(1, fill.rgb[i * 3 + ch]!)) * 255);
+        pixels[o + 3] = 255;
+      }
+    return { pixels, width, height };
+  }
+
+  /** The workspace's per-frame work: follow the selection, upload the overlay, refresh the preview. */
+  private cafFrame(): void {
+    const c = this.caf;
+    if (!c) {
+      this.renderer.cafOverlay = null;
+      return;
+    }
+    // The Lasso changed the fill area: the automatic sampling area follows it.
+    if (this.doc.selection !== c.maskFor) {
+      if (c.opts.sampling === 'custom') {
+        c.maskFor = this.doc.selection;
+        c.previewAt = performance.now();
+      } else this.cafAutoSampling();
+      this.onCafState?.({ active: true, sampling: c.opts.sampling, busy: true });
+    }
+    const gl = this.gl;
+    const W = this.doc.width;
+    const H = this.doc.height;
+    if (!c.tex) {
+      c.tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, c.tex);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, W, H);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      c.texDirty = { x0: 0, y0: 0, x1: W, y1: H };
+    }
+    if (!rectIsEmpty(c.texDirty)) {
+      const r = c.texDirty;
+      gl.bindTexture(gl.TEXTURE_2D, c.tex);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, W);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0, gl.RED, gl.UNSIGNED_BYTE, c.mask, r.y0 * W + r.x0);
+      gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+      c.texDirty = EMPTY_RECT;
+    }
+    const o = c.opts.overlay;
+    this.renderer.cafOverlay = o.show ? { tex: c.tex, style: { color: o.color, opacity: o.opacity, indicateSelected: o.indicates === 'sampling' } } : null;
+    // A quarter-second after the last change (and not mid-stroke), the preview is redone.
+    if (c.previewAt !== null && !c.painting && performance.now() - c.previewAt > 250) {
+      c.previewAt = null;
+      this.onCafState?.({ active: true, sampling: c.opts.sampling, preview: this.cafPreview(), busy: false });
+    }
+  }
+
+  /** OK (the fill, as the output says) or Cancel. */
+  cafEnd(commit: boolean): boolean {
+    const c = this.caf;
+    if (!c) return false;
+    let done = false;
+    if (commit) {
+      const res = this.cafFill();
+      if (res) {
+        const { r, fill, layer } = res;
+        let doc = this.doc;
+        if (c.opts.output === 'current') {
+          const plane = HealCmd.writeRect(layer.plane.base, r, fill.rgb, fill.weight);
+          doc = { ...doc, layers: updateLayer(doc.layers, layer.id, (l) => ({ ...l, plane: new MipPlane(plane) }) as typeof l) };
+        } else {
+          const base = c.opts.output === 'duplicate' ? layer.plane.base : Plane.empty(RGBA8);
+          const plane = HealCmd.writeRect(base, r, fill.rgb, fill.weight, c.opts.output === 'new');
+          const added = makePixelLayer(c.opts.output === 'new' ? 'Content-Aware Fill' : `${layer.name} copy`, plane);
+          doc = { ...doc, layers: insertLayer(doc.layers, added, layer.id), activeLayerIds: [added.id] };
+        }
+        this.commit(doc, 'Content-Aware Fill');
+        done = true;
+      }
+    }
+    if (c.tex) this.gl.deleteTexture(c.tex);
+    this.caf = null;
+    this.renderer.cafOverlay = null;
+    this.onCafState?.({ active: false });
+    return done;
+  }
+
+  /**
+   * Content-Aware Fill in one step (scripts and the old message): the workspace opened with
+   * these settings and OK'd at once. 'all' samples the whole canvas.
+   */
+  contentAwareFill(opts: { sampling: 'auto' | 'rectangular' | 'all'; colorAdaptation: boolean; output: 'current' | 'new' | 'duplicate' }): boolean {
+    const o: CafOptions = { ...DEFAULT_CAF, sampling: opts.sampling === 'all' ? 'custom' : opts.sampling, colorAdaptation: opts.colorAdaptation ? 'default' : 'none', output: opts.output };
+    const quiet = this.onCafState;
+    this.onCafState = undefined;
+    try {
+      if (!this.cafBegin(o)) return false;
+      if (opts.sampling === 'all') {
+        const sel = this.doc.selection!;
+        for (let i = 0; i < this.caf!.mask.length; i++) this.caf!.mask[i] = sel.mask[i]! > 127 ? 0 : 255;
+      }
+      return this.cafEnd(true);
+    } finally {
+      this.onCafState = quiet;
+    }
   }
 
   /** The Red Eye tool: a click on a red pupil. */
@@ -4942,6 +5222,7 @@ export class Engine {
       this.doc = { ...this.docBeforeRetouch, layers: updateLayer(this.docBeforeRetouch.layers, this.strokeLayerId, (l) => (l.kind === 'pixel' ? { ...l, plane } : l)) };
       this.retouchDirty = false;
     }
+    this.cafFrame();
     this.atlas.beginFrame();
     // The live stroke is drawn from the base level only: it is small, and a mip built from the
     // stroke buffer would be a frame behind the dabs the GPU is still laying down.

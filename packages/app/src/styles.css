@@ -144,7 +144,8 @@ input, select, button, textarea { font: inherit; color: inherit; }
 
 /* ---- shared controls ------------------------------------------------------------------ */
 
-.button {
+.button,
+.dialog-button {
   height: var(--control-h);
   min-width: 26px;
   padding: 0 10px;
@@ -153,11 +154,15 @@ input, select, button, textarea { font: inherit; color: inherit; }
   border-radius: var(--radius);
   cursor: default;
 }
-.button:hover:not(:disabled) { background: var(--row-hover); }
-.button:active:not(:disabled) { background: var(--well); }
-.button.primary { background: var(--accent); border-color: var(--accent-dim); color: #fff; }
+.button:hover:not(:disabled),
+.dialog-button:hover:not(:disabled) { background: var(--row-hover); }
+.button:active:not(:disabled),
+.dialog-button:active:not(:disabled) { background: var(--well); }
+.button.primary,
+.dialog-button.primary { background: var(--accent); border-color: var(--accent-dim); color: #fff; }
 .button.primary:hover { filter: brightness(1.1); }
-.button:disabled { color: var(--text-disabled); }
+.button:disabled,
+.dialog-button:disabled { color: var(--text-disabled); }
 
 .icon-button {
   display: inline-flex;
@@ -1233,3 +1238,24 @@ input[type='range'] { accent-color: var(--accent); height: 14px; }
 .history-source { width: 18px; height: 18px; padding: 0; background: none; border: 1px solid transparent; color: var(--text-disabled); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
 .history-source.on { color: var(--text); border-color: var(--border-dark); }
 .options-hint { font-size: 11px; }
+
+/* ---- Content-Aware Fill workspace ---------------------------------------------------------- */
+.caf-workspace {
+  position: fixed;
+  right: 0;
+  top: 64px;
+  bottom: 24px;
+  width: 300px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--border-dark);
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.4);
+}
+.caf-body { flex: 1; overflow-y: auto; padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
+.caf-preview { position: relative; align-self: center; border: 1px solid var(--border-dark); }
+.caf-preview canvas { display: block; }
+.caf-busy { position: absolute; right: 4px; bottom: 4px; font-size: 10px; padding: 1px 4px; background: rgba(0, 0, 0, 0.6); color: #ddd; }
+.caf-buttons { display: flex; gap: 6px; padding: 8px 10px; border-top: 1px solid var(--border-dark); }
+.caf-spacer { flex: 1; }

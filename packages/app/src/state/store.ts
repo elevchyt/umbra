@@ -7,7 +7,7 @@
  */
 import { createSignal, createMemo } from 'solid-js';
 import { createStore, produce } from 'solid-js/store';
-import type { Gradient } from '@umbra/engine';
+import type { Gradient, CafOptions } from '@umbra/engine';
 import { DEFAULT_BRUSH, type BrushParams, DEFAULT_AUTO_OPTIONS, DEFAULT_SHAPE_OPTIONS, type ShapeOptions, type BrushGroup, type TipBitmap, DEFAULT_RETOUCH, type RetouchOptions, type AntiAlias, type Path, type Adjustment, type AutoOptions, type DocSummary, type EngineStats, type PatternSummary, type StylePreset, type ProbeReply } from '@umbra/engine';
 import { BLACK, WHITE, type RGB } from '@umbra/core/color';
 import { TOOL_GROUPS, groupOf } from '../tools/registry';
@@ -166,6 +166,19 @@ export interface CloneSlot {
 }
 const [cloneSlots, setCloneSlots] = createSignal<CloneSlot[]>(Array.from({ length: 5 }, () => ({ point: null, scaleX: 100, scaleY: 100, angle: 0, flipX: false, flipY: false })));
 const [cloneSlot, setCloneSlot] = createSignal(0);
+/** Edit ▸ Content-Aware Fill's workspace while it is open. */
+export interface CafWorkspace {
+  options: CafOptions;
+  /** The sampling mode as the engine has it (painting the area makes it Custom). */
+  sampling: CafOptions['sampling'];
+  preview: { pixels: Uint8Array; width: number; height: number } | null;
+  busy: boolean;
+  /** The tool to return to. */
+  previousTool: string;
+  brushSize: number;
+  subtract: boolean;
+}
+const [caf, setCaf] = createSignal<CafWorkspace | null>(null);
 /** Clone Source ▸ Show Overlay and its options (Photoshop's defaults). */
 export interface CloneOverlaySettings {
   show: boolean;
@@ -323,8 +336,7 @@ export type DialogId =
   | 'defineShape'
   | 'warpText'
   | 'resolveFonts'
-  | 'defineBrush'
-  | 'contentAwareFill';
+  | 'defineBrush';
 
 const [dialog, setDialog] = createSignal<{ id: DialogId; payload?: unknown } | null>(null);
 function openDialog(id: DialogId, payload?: unknown) {
@@ -412,6 +424,8 @@ export const store = {
   setCloneSlots,
   cloneSlot,
   setCloneSlot,
+  caf,
+  setCaf,
   cloneOverlay,
   setCloneOverlay,
   brushPresetId,

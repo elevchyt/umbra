@@ -586,10 +586,7 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests (882 after the follow-ups).
-
-Deferred:
-- the Content-Aware Fill workspace (a dialog here) and its live preview
+Parity 133/133; 873 tests (884 after the follow-ups). Nothing from M8 remains deferred.
 
 Follow-up (2026-09-24), each of these was deferred above and is now built:
 - **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
@@ -615,6 +612,19 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
 
   Where a curve's mapping stretches the stroke, the mirror is filled in from between the
   source's dabs.
+- **The Content-Aware Fill workspace.**
+  - A session in the engine holds the sampling area as a canvas-size mask, drawn on the canvas
+    with the Quick Mask tint shader.
+  - Auto and Rectangular follow the selection as the Lasso changes it, and the Sampling Brush
+    makes the area Custom.
+  - A debounced preview runs at up to 360 px; OK runs at full size.
+  - Rotation Adaptation, Scale and Mirror are Generalized PatchMatch (Barnes et al. 2010):
+    each match also carries an angle, a scale and a reflection, and propagation and random
+    search explore them.
+  - Tests fill a hole whose only possible source is a mirrored or turned copy of its
+    surroundings. With the option on, the error is under half of the plain fill's.
+  - In the browser, a striped image with a disc removed matches untouched stripes pixel for
+    pixel.
 
 **Findings.**
 1. **Healing needs a boundary where both images are known.** The membrane took its
@@ -659,6 +669,9 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
 9. **`e.currentTarget` is null after an `await`.** Three file inputs (Load Tool Presets,
    Load Brushes, Load LUT) cleared themselves after awaiting the file and threw. They now keep
    the element in a variable first.
+10. **`.dialog-button` was never styled.** Several buttons (Clone Source's Reset Transform,
+    Load Shapes, Add Fonts, …) rendered as bare browser buttons. It was noticed only when the
+    Content-Aware Fill workspace's OK looked disabled. The class now shares `.button`'s rules.
 
 ### M9 — Advanced selection + advanced transform (XL)
 Quick Selection, Magnetic Lasso, Color Range, Focus Area, **Select and Mask** workspace (all

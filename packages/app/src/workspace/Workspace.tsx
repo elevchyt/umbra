@@ -6,7 +6,7 @@ import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
 import { addImportedPresets } from '../brush/ToolPresets';
-import { ContentAwareFillDialog } from '../brush/ContentAwareFill';
+import { ContentAwareFillWorkspace, openContentAwareFill } from '../brush/ContentAwareFill';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
 import { FillLayerDialog } from '../adjust/fill';
@@ -166,6 +166,17 @@ export function Workspace() {
         onHistogram: store.setHistogram,
         onPatterns: store.setPatterns,
         onStyles: store.setStyles,
+        onCafState: (m) => {
+          const c = store.caf();
+          if (!m.active) {
+            if (c) {
+              store.setActiveTool(c.previousTool);
+              store.setCaf(null);
+            }
+            return;
+          }
+          if (c) store.setCaf({ ...c, sampling: m.sampling ?? c.sampling, options: { ...c.options, sampling: m.sampling ?? c.options.sampling }, busy: !!m.busy, ...(m.preview ? { preview: m.preview } : {}) });
+        },
         onToolPresets: (m) => {
           addImportedPresets(m.presets);
           if (m.note) store.setStatusMessage(m.note);
@@ -449,10 +460,16 @@ export function Workspace() {
         : tool === 'redEye'
           ? (x, y) => ({ t: 'redEye', x, y, pupilSize: ro.pupilSize, darken: ro.darken })
           : null;
+    const cafWs = store.caf();
+    const cafSize = cafWs?.brushSize ?? 40;
+    const cafSubtract = cafWs?.subtract ?? false;
     client.dragAction =
       tool === 'patch' || tool === 'contentAwareMove'
         ? (phase, x, y) => ({ t: 'patchPointer', phase, x, y, options: { tool, patchMode: ro.patchMode, patchDirection: ro.patchDirection, moveMode: ro.moveMode } })
-        : null;
+        : tool === 'cafSampling' && cafWs
+          ? // Alt swaps adding and subtracting, as Photoshop's Sampling Brush does.
+            (phase, x, y, alt) => ({ t: 'cafPaint', phase, x, y, size: cafSize, subtract: cafSubtract !== alt })
+          : null;
     // The Eraser is the Clear paint mode with the brush's own settings.
     client.paintBlendMode = tool === 'eraser' ? 'clear' : mode;
   });
@@ -1079,8 +1096,7 @@ export function Workspace() {
         store.openDialog('defineShape');
         break;
       case 'edit.contentAwareFill':
-        if (!store.doc()?.hasSelection) store.setStatusMessage('Content-Aware Fill needs a selection.');
-        else store.openDialog('contentAwareFill');
+        openContentAwareFill();
         break;
       case 'edit.defineBrush':
         store.openDialog('defineBrush');
@@ -1858,8 +1874,8 @@ export function Workspace() {
       <Show when={store.dialog()?.id === 'warpText'}>
         <WarpDialog onClose={store.closeDialog} />
       </Show>
-      <Show when={store.dialog()?.id === 'contentAwareFill'}>
-        <ContentAwareFillDialog send={(m) => send(m as never)} onClose={store.closeDialog} />
+      <Show when={store.caf()}>
+        <ContentAwareFillWorkspace />
       </Show>
       <Show when={store.dialog()?.id === 'defineBrush'}>
         <NameDialog

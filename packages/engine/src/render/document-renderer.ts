@@ -168,6 +168,8 @@ export class DocumentRenderer {
    * rewritten, so dragging is free and the pixels are resampled exactly once, on commit.
    */
   private liveTransform: { ids: ReadonlySet<number>; matrix: Mat; bounded?: boolean } | null = null;
+  /** Content-Aware Fill's sampling-area overlay (a mask tinted like Quick Mask), under the ants. */
+  cafOverlay: { tex: WebGLTexture; style: QuickMaskStyle } | null = null;
   /** The vector tools' overlay (target path, anchors, handles), set by the engine. */
   pathOverlay: PathOverlay | null = null;
   private paths!: PathOverlayRenderer;
@@ -442,9 +444,10 @@ export class DocumentRenderer {
     // since it renders partial coverage the ants' 50% contour throws away.
     if (quickMask) {
       this.quickMask.draw(view, quickMask.tex, doc.width, doc.height, quickMask.style);
-    } else if (showAnts) {
+    } else {
+      if (this.cafOverlay) this.quickMask.draw(view, this.cafOverlay.tex, doc.width, doc.height, this.cafOverlay.style);
       // Selection outline sits on top of everything, in screen space.
-      this.ants.draw(view, performance.now());
+      if (showAnts) this.ants.draw(view, performance.now());
     }
     // Paths and their anchors go over the selection outline.
     if (this.pathOverlay) this.paths.render(view, this.pathOverlay);

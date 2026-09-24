@@ -52,7 +52,8 @@ export {
   type BrushGroup,
   type BrushPreset,
 } from '@umbra/kernels/brush';
-export type { BrushLibraryOp, PatchOptions, CloneOverlay } from './engine.js';
+export type { BrushLibraryOp, PatchOptions, CloneOverlay, CafOptions, CafState } from './engine.js';
+export { DEFAULT_CAF } from './engine.js';
 export type { ToolPresetImport } from './tpl.js';
 export {
   FOREGROUND_TO_BACKGROUND,

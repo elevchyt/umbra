@@ -126,6 +126,20 @@ export function OptionsBar(props: OptionsBarProps) {
       <Separator />
 
       <Switch fallback={<UnimplementedNote name={tool()?.name ?? 'Tool'} />}>
+        <Match when={store.activeTool() === 'cafSampling' && store.caf()}>
+          <span class="options-hint">Sampling Brush</span>
+          <Select
+            value={store.caf()!.subtract ? 'subtract' : 'add'}
+            width={150}
+            options={[
+              { value: 'add', label: 'Add to Sampling Area' },
+              { value: 'subtract', label: 'Subtract from Sampling Area' },
+            ]}
+            onChange={(v) => store.setCaf({ ...store.caf()!, subtract: v === 'subtract' })}
+          />
+          <NumberField label="Size" value={store.caf()!.brushSize} min={1} max={2000} suffix="px" width={44} onChange={(v) => store.setCaf({ ...store.caf()!, brushSize: v })} />
+          <span class="dim options-hint">Alt paints the other way. Enter: OK · Esc: Cancel</span>
+        </Match>
         {/* A live transform takes the whole row — except during a crop, which has its own
             row and its own commit, and shares only the box on screen. */}
         <Match when={store.activeTool() !== 'crop' && store.stats()?.transform}>

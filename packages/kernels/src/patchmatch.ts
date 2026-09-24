@@ -7,6 +7,12 @@
  *
  * Images are straight RGB 0…1, row-major. `hole` marks what to fill (1); `allowed` (optional)
  * marks where source patches may come from (1) — the sampling area. Randomness is seeded.
+ *
+ * With `rotation`, `scale` or `mirror` it is Generalized PatchMatch (Barnes et al. 2010): a
+ * match also carries an angle, a scale and a reflection, the source patch is sampled
+ * (bilinearly) through them, and propagation and random search explore them too — so a
+ * curve can continue along its own bend, or a pattern at another size. Content-Aware Fill's
+ * Rotation Adaptation, Scale and Mirror.
  */
 import { solveMembrane } from './heal.js';
 
@@ -19,7 +25,16 @@ export interface InpaintOptions {
   emSteps?: number;
   seed?: number;
   allowed?: Uint8Array;
+  /** Largest rotation a source patch may have, radians (0: none). */
+  rotation?: number;
+  /** Source patches may be scaled (0.7…1.4). */
+  scale?: boolean;
+  /** Source patches may be mirrored. */
+  mirror?: boolean;
 }
+
+const SCALE_MIN = 0.7;
+const SCALE_MAX = 1.4;
 
 interface Level {
   w: number;
@@ -95,7 +110,9 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
   const coarsest = levels[levels.length - 1]!;
   solveMembrane(coarsest.img, coarsest.hole, coarsest.w, coarsest.h, 3, 60);
 
-  let nnf: Int32Array | null = null;
+  // The field carried between levels: source x, y, angle, scale, flip per pixel.
+  const NNF = 5;
+  let nnf: Float64Array | null = null;
   let prevW = 0;
   for (let li = levels.length - 1; li >= 0; li--) {
     const L = levels[li]!;
@@ -138,11 +155,72 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
       ty[k] = (p - tx[k]!) / W;
       index[p] = k;
     });
-    const sx = new Int32Array(T);
-    const sy = new Int32Array(T);
+    const sx = new Float64Array(T);
+    const sy = new Float64Array(T);
+    const ta = new Float64Array(T);
+    const tsc = new Float64Array(T).fill(1);
+    const tfl = new Uint8Array(T);
     const dist = new Float32Array(T);
+    const maxRot = Math.max(0, opts.rotation ?? 0);
+    const generic = maxRot > 0 || !!opts.scale || !!opts.mirror;
+    // A transformed patch reaches further than R: it must fit inside, and clear of the hole.
+    const validT = (x: number, y: number, sc: number) => {
+      if (!generic) return valid(x, y);
+      const r = Math.ceil(R * sc * 1.42);
+      const xi = Math.round(x);
+      const yi = Math.round(y);
+      return xi >= r + 1 && yi >= r + 1 && xi < W - r - 1 && yi < H - r - 1 && boxSum(badSum, xi - r, yi - r, xi + r + 1, yi + r + 1) === 0;
+    };
+    /** Bilinear RGB of the level's image at (x, y), into `out`. */
+    const px3 = new Float32Array(3);
+    const sample = (x: number, y: number) => {
+      const x0 = Math.max(0, Math.min(W - 2, Math.floor(x)));
+      const y0 = Math.max(0, Math.min(H - 2, Math.floor(y)));
+      const fx = x - x0;
+      const fy = y - y0;
+      const a = (y0 * W + x0) * 3;
+      const b = a + 3;
+      const c = a + W * 3;
+      const d = c + 3;
+      for (let ch = 0; ch < 3; ch++) px3[ch] = (I[a + ch]! * (1 - fx) + I[b + ch]! * fx) * (1 - fy) + (I[c + ch]! * (1 - fx) + I[d + ch]! * fx) * fy;
+      return px3;
+    };
+    /** Where offset (dx, dy) of target k's patch lands in its source, under k's transform. */
+    const mapOffset = (angle: number, sc: number, flip: number, dx: number, dy: number): [number, number] => {
+      const fx = flip ? -dx : dx;
+      const c = Math.cos(angle) * sc;
+      const s = Math.sin(angle) * sc;
+      return [c * fx - s * dy, s * fx + c * dy];
+    };
+    // Generalized patch distance: the source sampled through the transform.
+    const DT = (k: number, x: number, y: number, angle: number, sc: number, flip: number, limit: number) => {
+      let sum = 0;
+      let n = 0;
+      const cx = tx[k]!;
+      const cy = ty[k]!;
+      const c = Math.cos(angle) * sc;
+      const s = Math.sin(angle) * sc;
+      for (let dy = -R; dy <= R; dy++) {
+        const py = cy + dy;
+        if (py < 0 || py >= H) continue;
+        for (let dx = -R; dx <= R; dx++) {
+          const px = cx + dx;
+          if (px < 0 || px >= W) continue;
+          const fdx = flip ? -dx : dx;
+          const v = sample(x + c * fdx - s * dy, y + s * fdx + c * dy);
+          const a = (py * W + px) * 3;
+          const d0 = I[a]! - v[0]!;
+          const d1 = I[a + 1]! - v[1]!;
+          const d2 = I[a + 2]! - v[2]!;
+          sum += d0 * d0 + d1 * d1 + d2 * d2;
+          n++;
+        }
+        if (sum > limit * n) return Infinity;
+      }
+      return n ? sum / n : Infinity;
+    };
     // Patch distance: sum of squared differences over the in-bounds part of the target patch.
-    const D = (k: number, x: number, y: number, limit: number) => {
+    const D0 = (k: number, x: number, y: number, limit: number) => {
       let sum = 0;
       let n = 0;
       const cx = tx[k]!;
@@ -165,28 +243,52 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
       }
       return n ? sum / n : Infinity;
     };
+    const D = (k: number, x: number, y: number, limit: number, angle = 0, sc = 1, flip = 0) =>
+      generic ? DT(k, x, y, angle, sc, flip, limit) : D0(k, x, y, limit);
     // Initial field: carried up from the coarser level where it still lands on a valid source,
     // random elsewhere.
     for (let k = 0; k < T; k++) {
       let x = -1;
       let y = -1;
+      let angle = 0;
+      let sc = 1;
+      let flip = 0;
       if (nnf && prevW) {
         const cx = tx[k]! >> 1;
         const cy = ty[k]! >> 1;
-        const j = nnf[(cy * prevW + cx) * 2]!;
-        if (j >= 0) {
-          x = Math.min(W - R - 1, nnf[(cy * prevW + cx) * 2]! * 2 + (tx[k]! & 1));
-          y = Math.min(H - R - 1, nnf[(cy * prevW + cx) * 2 + 1]! * 2 + (ty[k]! & 1));
+        const o = (cy * prevW + cx) * NNF;
+        if (nnf[o]! >= 0) {
+          angle = nnf[o + 2]!;
+          sc = nnf[o + 3]!;
+          flip = nnf[o + 4]!;
+          // The coarse match, doubled, plus this pixel's place within its coarse cell.
+          const [ox, oy] = mapOffset(angle, sc, flip, tx[k]! & 1, ty[k]! & 1);
+          x = nnf[o]! * 2 + ox;
+          y = nnf[o + 1]! * 2 + oy;
+          if (!generic) {
+            x = Math.min(W - R - 1, Math.round(x));
+            y = Math.min(H - R - 1, Math.round(y));
+          }
         }
       }
-      if (x < 0 || !valid(x, y)) {
-        const p = sources[Math.floor(rand() * sources.length)]!;
-        x = p % W;
-        y = (p - x) / W;
+      if (x < 0 || !validT(x, y, sc)) {
+        angle = 0;
+        sc = 1;
+        flip = 0;
+        // A random source; with transforms, one far enough in for a turned patch.
+        for (let tries = 0; tries < 32; tries++) {
+          const p = sources[Math.floor(rand() * sources.length)]!;
+          x = p % W;
+          y = (p - x) / W;
+          if (validT(x, y, 1)) break;
+        }
       }
       sx[k] = x;
       sy[k] = y;
-      dist[k] = D(k, x, y, Infinity);
+      ta[k] = angle;
+      tsc[k] = sc;
+      tfl[k] = flip;
+      dist[k] = D(k, x, y, Infinity, angle, sc, flip);
     }
     const iters = opts.iterations ?? 4;
     const em = (opts.emSteps ?? 2) + (li > 0 ? 1 : 0);
@@ -203,26 +305,40 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
             if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
             const n = index[ny * W + nx]!;
             if (n < 0) continue;
-            const x = sx[n]! - (nx - cx);
-            const y = sy[n]! - (ny - cy);
-            if ((x === sx[k] && y === sy[k]) || !valid(x, y)) continue;
-            const dd = D(k, x, y, dist[k]!);
+            // The neighbour's source, stepped back through the neighbour's own transform.
+            const [ox, oy] = mapOffset(ta[n]!, tsc[n]!, tfl[n]!, cx - nx, cy - ny);
+            const x = sx[n]! + ox;
+            const y = sy[n]! + oy;
+            if ((x === sx[k] && y === sy[k] && ta[n] === ta[k] && tsc[n] === tsc[k] && tfl[n] === tfl[k]) || !validT(x, y, tsc[n]!)) continue;
+            const dd = D(k, x, y, dist[k]!, ta[n]!, tsc[n]!, tfl[n]!);
             if (dd < dist[k]!) {
               dist[k] = dd;
               sx[k] = x;
               sy[k] = y;
+              ta[k] = ta[n]!;
+              tsc[k] = tsc[n]!;
+              tfl[k] = tfl[n]!;
             }
           }
           // Random search around the current best, halving the window.
-          for (let rad = Math.max(W, H); rad >= 1; rad >>= 1) {
+          const full = Math.max(W, H);
+          for (let rad = full; rad >= 1; rad >>= 1) {
             const x = Math.round(sx[k]! + (rand() * 2 - 1) * rad);
             const y = Math.round(sy[k]! + (rand() * 2 - 1) * rad);
-            if (!valid(x, y)) continue;
-            const dd = D(k, x, y, dist[k]!);
+            // The transform is searched in the same shrinking window.
+            const shrink = rad / full;
+            const angle = maxRot > 0 ? Math.max(-maxRot, Math.min(maxRot, ta[k]! + (rand() * 2 - 1) * maxRot * shrink)) : 0;
+            const sc = opts.scale ? Math.max(SCALE_MIN, Math.min(SCALE_MAX, tsc[k]! * Math.exp((rand() * 2 - 1) * 0.35 * shrink))) : 1;
+            const flip = opts.mirror && rand() < 0.5 * shrink ? 1 - tfl[k]! : tfl[k]!;
+            if (!validT(x, y, sc)) continue;
+            const dd = D(k, x, y, dist[k]!, angle, sc, flip);
             if (dd < dist[k]!) {
               dist[k] = dd;
               sx[k] = x;
               sy[k] = y;
+              ta[k] = angle;
+              tsc[k] = sc;
+              tfl[k] = flip;
             }
           }
         }
@@ -243,10 +359,24 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
             if (px < 0 || px >= W) continue;
             const p = py * W + px;
             if (!L.hole[p]) continue;
-            const b = ((sy[k]! + dy) * W + (sx[k]! + dx)) * 3;
-            acc[p * 4] = acc[p * 4]! + I[b]! * wgt;
-            acc[p * 4 + 1] = acc[p * 4 + 1]! + I[b + 1]! * wgt;
-            acc[p * 4 + 2] = acc[p * 4 + 2]! + I[b + 2]! * wgt;
+            let r: number;
+            let g: number;
+            let bl: number;
+            if (generic) {
+              const [ox, oy] = mapOffset(ta[k]!, tsc[k]!, tfl[k]!, dx, dy);
+              const v = sample(sx[k]! + ox, sy[k]! + oy);
+              r = v[0]!;
+              g = v[1]!;
+              bl = v[2]!;
+            } else {
+              const b = ((sy[k]! + dy) * W + (sx[k]! + dx)) * 3;
+              r = I[b]!;
+              g = I[b + 1]!;
+              bl = I[b + 2]!;
+            }
+            acc[p * 4] = acc[p * 4]! + r * wgt;
+            acc[p * 4 + 1] = acc[p * 4 + 1]! + g * wgt;
+            acc[p * 4 + 2] = acc[p * 4 + 2]! + bl * wgt;
             acc[p * 4 + 3] = acc[p * 4 + 3]! + wgt;
           }
         }
@@ -255,14 +385,17 @@ export function inpaint(img: Float32Array, w: number, h: number, hole: Uint8Arra
         if (!L.hole[p] || acc[p * 4 + 3]! <= 0) continue;
         for (let c = 0; c < 3; c++) I[p * 3 + c] = acc[p * 4 + c]! / acc[p * 4 + 3]!;
       }
-      for (let k = 0; k < T; k++) dist[k] = D(k, sx[k]!, sy[k]!, Infinity);
+      for (let k = 0; k < T; k++) dist[k] = D(k, sx[k]!, sy[k]!, Infinity, ta[k]!, tsc[k]!, tfl[k]!);
     }
     // Carry the field and the filled hole up to the next finer level.
-    const field = new Int32Array(W * H * 2).fill(-1);
+    const field = new Float64Array(W * H * NNF).fill(-1);
     for (let k = 0; k < T; k++) {
-      const p = ty[k]! * W + tx[k]!;
-      field[p * 2] = sx[k]!;
-      field[p * 2 + 1] = sy[k]!;
+      const p = (ty[k]! * W + tx[k]!) * NNF;
+      field[p] = sx[k]!;
+      field[p + 1] = sy[k]!;
+      field[p + 2] = ta[k]!;
+      field[p + 3] = tsc[k]!;
+      field[p + 4] = tfl[k]!;
     }
     nnf = field;
     prevW = W;

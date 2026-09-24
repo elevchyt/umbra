@@ -34,6 +34,7 @@ export interface EngineClientEvents {
   onSpikes?: (pass: boolean, text: string) => void;
   onPsdSaved?: (name: string, buffer: ArrayBuffer) => void;
   onStyles?: (list: import('@umbra/engine').StylePreset[]) => void;
+  onCafState?: (msg: import('@umbra/engine').CafState) => void;
   onToolPresets?: (msg: { presets: import('@umbra/engine').ToolPresetImport[]; note?: string }) => void;
   onBrushes?: (msg: { groups: import('@umbra/engine').BrushGroup[]; tips: Record<string, import('@umbra/engine').TipBitmap>; defined?: import('@umbra/engine').BrushPreset; note?: string }) => void;
   onFonts?: (list: { family: string; styles: { style: string; postscript: string }[] }[], added?: number) => void;
@@ -149,6 +150,9 @@ export class EngineClient {
         break;
       case 'brushes':
         this.events.onBrushes?.(msg);
+        break;
+      case 'cafState':
+        this.events.onCafState?.(msg);
         break;
       case 'toolPresets':
         this.events.onToolPresets?.(msg);
@@ -410,7 +414,7 @@ export class EngineClient {
       if (this.dragAction && e.button === 0) {
         const p = toLocal(e);
         this.dragDown = true;
-        this.send(this.dragAction('down', p.x, p.y) as never);
+        this.send(this.dragAction('down', p.x, p.y, e.altKey) as never);
         return;
       }
       if (this.clickAction && e.button === 0) {
@@ -462,7 +466,7 @@ export class EngineClient {
       }
       if (this.dragDown && this.dragAction) {
         const p = toLocal(e);
-        this.send(this.dragAction('move', p.x, p.y) as never);
+        this.send(this.dragAction('move', p.x, p.y, e.altKey) as never);
         return;
       }
       if (this.typeDown) {
@@ -505,7 +509,7 @@ export class EngineClient {
       if (this.dragDown) {
         this.dragDown = false;
         const p = toLocal(e);
-        if (this.dragAction) this.send(this.dragAction('up', p.x, p.y) as never);
+        if (this.dragAction) this.send(this.dragAction('up', p.x, p.y, e.altKey) as never);
       }
       if (this.typeDown) {
         this.typeDown = false;
@@ -572,7 +576,7 @@ export class EngineClient {
   /** A tool that acts on a click (Magic Eraser): its message, given the click point. */
   clickAction: ((x: number, y: number) => unknown) | null = null;
   /** A tool whose whole drag goes to the engine as one message per phase (Patch, CA Move). */
-  dragAction: ((phase: 'down' | 'move' | 'up', x: number, y: number) => unknown) | null = null;
+  dragAction: ((phase: 'down' | 'move' | 'up', x: number, y: number, alt: boolean) => unknown) | null = null;
   private dragDown = false;
   brush: BrushParams = { ...DEFAULT_BRUSH };
   /** Paint blend mode, which unlike a layer's may also be 'behind' or 'clear'. */

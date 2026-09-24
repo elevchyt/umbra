@@ -353,6 +353,27 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
           }
         }
         break;
+      case 'cafBegin':
+        if (engine) {
+          engine.onCafState = (st) => {
+            const buf = st.preview?.pixels.buffer as ArrayBuffer | undefined;
+            post({ t: 'cafState', ...st }, buf ? [buf] : []);
+          };
+          if (!engine.cafBegin(msg.options)) post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
+      case 'cafOptions':
+        engine?.cafSetOptions(msg.options);
+        break;
+      case 'cafPaint':
+        engine?.cafPaint(msg.phase, msg.x, msg.y, msg.size, msg.subtract);
+        break;
+      case 'cafEnd':
+        if (engine) {
+          engine.cafEnd(msg.commit);
+          post({ t: 'doc', doc: engine.summary() });
+        }
+        break;
       case 'sharpenTip':
         engine?.sharpenTip();
         break;
