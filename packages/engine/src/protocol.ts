@@ -425,7 +425,9 @@ export type ToEngine =
   | { t: 'undo' }
   | { t: 'redo' }
   | { t: 'synthetic'; layers: number; width: number; height: number }
-  | { t: 'newDoc'; width: number; height: number }
+  | { t: 'newDoc'; width: number; height: number; name?: string; background?: 'white' | 'black' | 'transparent' }
+  /** File ▸ Close: leave no document open. */
+  | { t: 'closeDoc' }
   | {
       t: 'strokeBegin';
       brush: BrushParams;
@@ -444,7 +446,8 @@ export type ToEngine =
 export type FromEngine =
   | { t: 'ready'; caps: GpuCaps }
   | { t: 'stats'; stats: EngineStats }
-  | { t: 'doc'; doc: DocSummary }
+  /** Null while no document is open. */
+  | { t: 'doc'; doc: DocSummary | null }
   | { t: 'patterns'; list: PatternSummary[] }
   | { t: 'styles'; list: StylePreset[] }
   | { t: 'customShapes'; list: { id: string; name: string; path: Path }[]; error?: string }

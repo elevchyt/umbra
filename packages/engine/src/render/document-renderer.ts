@@ -369,6 +369,16 @@ export class DocumentRenderer {
     return out;
   }
 
+  /** No document open: the whole window is pasteboard. */
+  renderEmpty(view: ViewState, pasteboard: [number, number, number] = [0.157, 0.157, 0.157]): void {
+    const gl = this.gl;
+    const dpr = view.devicePixelRatio;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, Math.max(1, Math.round(view.width * dpr)), Math.max(1, Math.round(view.height * dpr)));
+    gl.clearColor(pasteboard[0], pasteboard[1], pasteboard[2], 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
   render(
     doc: Doc,
     view: ViewState,

@@ -311,6 +311,11 @@ export class Engine {
   dabs!: DabPainter;
   view: ViewState;
   doc: Doc = emptyDoc();
+  /**
+   * False while no document is open (at launch, and after File ▸ Close): `doc` is then an
+   * empty placeholder that is neither drawn nor reported, so the UI shows a bare workspace.
+   */
+  open = false;
   history: History;
   contextLost = false;
   /** Set when a stroke finished during the last frame, so the worker can push a doc update. */
@@ -516,6 +521,7 @@ export class Engine {
     this.warnings = [];
     this.doc = { ...emptyDoc(width, height, name), layers: [layer], activeLayerIds: [layer.id] };
     this.history = new History(this.doc, 'Open');
+    this.open = true;
     this.fitView(width, height);
   }
 
@@ -550,15 +556,49 @@ export class Engine {
     this.warnings = warnings;
     this.doc = doc;
     this.history = new History(doc, 'Open');
+    this.open = true;
     this.fitView(doc.width, doc.height);
   }
 
-  newDoc(width: number, height: number): void {
+  /**
+   * File ▸ New. With no `background` the document has no layers at all (scripts and tests
+   * build their own); otherwise it gets Photoshop's starting layer: a filled Background, or an
+   * empty Layer 1 for Transparent.
+   */
+  newDoc(width: number, height: number, name?: string, background?: 'white' | 'black' | 'transparent'): void {
     this.dropContents();
     this.warnings = [];
-    this.doc = emptyDoc(width, height);
+    let doc = emptyDoc(width, height, name);
+    if (background) {
+      let layer: Layer;
+      if (background === 'transparent') {
+        layer = makePixelLayer('Layer 1', Plane.empty(RGBA8));
+      } else {
+        // One shared uniform tile: tiles are immutable, and painting copies on write.
+        const v = background === 'white' ? 255 : 0;
+        const tile = Tile.uniform(RGBA8, [v, v, v, 255]);
+        const w = Plane.empty(RGBA8).writer();
+        for (let ty = 0; ty < Math.ceil(height / TILE_SIZE); ty++) {
+          for (let tx = 0; tx < Math.ceil(width / TILE_SIZE); tx++) w.put(tx, ty, tile);
+        }
+        layer = makePixelLayer('Background', w.commit());
+      }
+      doc = { ...doc, layers: [layer], activeLayerIds: [layer.id] };
+    }
+    this.doc = doc;
     this.history = new History(this.doc, 'New');
+    this.open = true;
     this.fitView(width, height);
+  }
+
+  /** File ▸ Close: back to no document at all. A closed document has nothing to recover. */
+  closeDoc(): void {
+    this.dropContents();
+    this.warnings = [];
+    this.doc = emptyDoc();
+    this.history = new History(this.doc, 'New');
+    this.open = false;
+    this.forgetJournal();
   }
 
   /**
@@ -607,6 +647,7 @@ export class Engine {
       activeLayerIds: layers.length ? [layers[layers.length - 1]!.id] : [],
     };
     this.history = new History(this.doc, 'New');
+    this.open = true;
     this.fitView(width, height);
   }
 
@@ -2230,9 +2271,8 @@ export class Engine {
     const rootHistory = this.parents.length ? this.parents[0]!.history : this.history;
     if (rootDoc === this.journalledDoc) return;
     if (rootDoc.layers.length === 0) return;
-    // Nothing to recover until the user has changed something: the default document is
-    // recreated on launch, and a freshly opened file is already on disk. Snapshotting either
-    // costs about two seconds of this thread (measured: a 2400×1600 six-layer document encodes
+    // Nothing to recover until the user has changed something: a new document is empty, and a
+    // freshly opened file is already on disk. Snapshotting either costs about two seconds of this thread (measured: a 2400×1600 six-layer document encodes
     // in ~1.9 s) for no benefit.
     if (rootHistory.list().length <= 1) return;
     if (now < this.journalDueAt) return;
@@ -2775,6 +2815,7 @@ export class Engine {
       this.warnings = [];
       this.doc = { ...emptyDoc(contents.width, contents.height, file.name), layers: [layer], activeLayerIds: [layer.id] };
       this.history = new History(this.doc, 'Open');
+      this.open = true;
       this.fitView(contents.width, contents.height);
       return true;
     }
@@ -5231,6 +5272,16 @@ export class Engine {
   frame(): EngineStats {
     const start = performance.now();
     if (this.contextLost) return this.stats(0);
+
+    if (!this.open) {
+      // Pointer samples still arrive (the canvas is live); discard them so none replay later.
+      this.ring.drain(this.samples);
+      this.pendingStroke = null;
+      this.renderer.renderEmpty(this.view);
+      this.lastPasses = 0;
+      this.lastInstances = 0;
+      return this.stats(performance.now() - start);
+    }
 
     this.processInput();
     this.airbrushTick();

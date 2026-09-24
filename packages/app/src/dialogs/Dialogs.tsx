@@ -146,13 +146,13 @@ const PRESETS: DocPreset[] = [
   { group: 'Art & Illustration', name: 'Poster, 2000×3000', w: 2000, h: 3000, ppi: 300 },
 ];
 
-export function NewDocumentDialog(props: { onCreate: (w: number, h: number, name: string) => void; onCancel: () => void }) {
+export function NewDocumentDialog(props: { onCreate: (w: number, h: number, name: string, background: 'white' | 'black' | 'transparent') => void; onCancel: () => void }) {
   const [name, setName] = createSignal('Untitled-1');
   const [w, setW] = createSignal(1920);
   const [h, setH] = createSignal(1080);
   const [ppi, setPpi] = createSignal(72);
   const [group, setGroup] = createSignal('Web');
-  const [background, setBackground] = createSignal('white');
+  const [background, setBackground] = createSignal<'white' | 'black' | 'transparent'>('white');
 
   const groups = [...new Set(PRESETS.map((p) => p.group))];
   const shown = createMemo(() => PRESETS.filter((p) => p.group === group()));
@@ -162,7 +162,7 @@ export function NewDocumentDialog(props: { onCreate: (w: number, h: number, name
       title="New Document"
       width={760}
       okLabel="Create"
-      onOk={() => props.onCreate(Math.round(w()), Math.round(h()), name())}
+      onOk={() => props.onCreate(Math.round(w()), Math.round(h()), name(), background())}
       onCancel={props.onCancel}
     >
       <div class="newdoc">

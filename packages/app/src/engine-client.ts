@@ -19,7 +19,7 @@ import { DEFAULT_BRUSH, type BrushParams, type DocSummary, type EngineStats, typ
 export interface EngineClientEvents {
   onReady?: (caps: GpuCaps) => void;
   onStats?: (stats: EngineStats) => void;
-  onDoc?: (doc: DocSummary) => void;
+  onDoc?: (doc: DocSummary | null) => void;
   onSampled?: (color: [number, number, number], toBackground: boolean) => void;
   onTransform?: (active: boolean) => void;
   onProbe?: (msg: { tag?: string } & import('@umbra/engine').ProbeReply) => void;

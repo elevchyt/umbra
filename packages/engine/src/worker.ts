@@ -34,6 +34,8 @@ function latestPreview(run: () => void): void {
 }
 
 function post(msg: FromEngine, transfer?: Transferable[]): void {
+  // With no document open the engine's placeholder is never reported, whichever message asked.
+  if (msg.t === 'doc' && engine && !engine.open) msg = { t: 'doc', doc: null };
   (self as unknown as Worker).postMessage(msg, transfer ?? []);
 }
 
@@ -848,8 +850,12 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
         if (engine) post({ t: 'doc', doc: engine.summary() });
         break;
       case 'newDoc':
-        engine?.newDoc(msg.width, msg.height);
+        engine?.newDoc(msg.width, msg.height, msg.name, msg.background);
         if (engine) post({ t: 'doc', doc: engine.summary() });
+        break;
+      case 'closeDoc':
+        engine?.closeDoc();
+        post({ t: 'doc', doc: null });
         break;
       case 'synthetic':
         engine?.addSyntheticLayers(msg.layers, msg.width, msg.height);

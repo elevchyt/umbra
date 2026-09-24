@@ -48,6 +48,9 @@ const TYPE_TOOLS = new Set(['typeHorizontal', 'typeVertical', 'typeMaskHorizonta
 /** The shape tools: their drags go through the same pointer channel to the engine. */
 const SHAPE_TOOL_IDS = new Set(['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape']);
 
+/** Menu commands (beyond Window, Help, Preferences and Presets) that work with no document open. */
+const WITHOUT_DOCUMENT = new Set(['file.new', 'file.open', 'file.openAs', 'file.openAsSmartObject', 'file.clearRecent', 'file.exit', 'edit.colorSettings', 'edit.keyboardShortcuts', 'edit.menus', 'edit.toolbar']);
+
 /** Commands that only make sense on a smart object, and when. */
 const SMART_ONLY: Record<string, (s: SmartSummary) => boolean> = {
   'so.newViaCopy': () => true,
@@ -140,6 +143,11 @@ export function Workspace() {
           // arrives by message, so it is trustworthy even when a hidden pane stalls frames.
           if (import.meta.env.DEV) (globalThis as Record<string, unknown>).__umbraDoc = d;
           store.setDoc(d);
+          if (!d) {
+            store.setTabs([]);
+            store.setActiveTab(null);
+            return;
+          }
           if (d.statusNote) store.setStatusMessage(d.statusNote);
           // Alt-click set a clone source: the active Clone Source slot keeps it.
           const slot = store.cloneSlots()[store.cloneSlot()];
@@ -225,7 +233,6 @@ export function Workspace() {
           if (m.loaded) lutLoaded(m.loaded);
         },
         onRecovery: (info) => setRecovery({ name: info.name, savedAt: info.savedAt }),
-        onNoRecovery: () => startDefaultDocument(),
         onSampled: (color, toBackground) => {
           // @umbra/core/color works in 0…1, which is also what the engine samples in.
           const rgb = { r: color[0], g: color[1], b: color[2] };
@@ -632,14 +639,10 @@ export function Workspace() {
           else send({ t: 'closeContents', save: false });
           break;
         }
-        store.setTabs([]);
-        store.setActiveTab(null);
-        send({ t: 'newDoc', width: 1920, height: 1080 });
+        send({ t: 'closeDoc' });
         break;
       case 'file.closeAll':
-        store.setTabs([]);
-        store.setActiveTab(null);
-        send({ t: 'newDoc', width: 1920, height: 1080 });
+        send({ t: 'closeDoc' });
         break;
       case 'file.exit':
         window.close();
@@ -1291,11 +1294,6 @@ export function Workspace() {
     setTimeout(() => store.setStatusMessage(null), 4000);
   }
 
-  /** The document a session starts with when there is nothing to recover. */
-  function startDefaultDocument(): void {
-    send({ t: 'synthetic', layers: 6, width: 2400, height: 1600 });
-  }
-
   /** Resolve a Fill dialog's Contents choice to a 0…1 RGB triple. */
   function fillColor(contents: string): [number, number, number] {
     const toUnit = (c: { r: number; g: number; b: number }): [number, number, number] => [c.r, c.g, c.b];
@@ -1557,6 +1555,8 @@ export function Workspace() {
     // Keyboard-only commands (D, X, Q, [ and ], Tab…) are not menu items and are always
     // live; only a MENU command can be "not built yet".
     if (!entry) return true;
+    // With no document open, only what makes or opens one, and the application-wide settings.
+    if (!store.doc() && !WITHOUT_DOCUMENT.has(cmd) && !/^(prefs|presets)\./.test(cmd) && entry.path[0] !== 'Window' && entry.path[0] !== 'Help') return false;
     // Built, but only meaningful in a state: there has to be a filter to repeat, a step to fade.
     if (cmd === 'filter.last') return !!store.doc()?.lastFilter;
     if (cmd === 'edit.fade') return !!store.doc()?.fadeName;
@@ -1729,11 +1729,9 @@ export function Workspace() {
       <Show when={store.dialog()?.id === 'newDocument'}>
         <NewDocumentDialog
           onCancel={store.closeDialog}
-          onCreate={(w, h, name) => {
+          onCreate={(w, h, name, background) => {
             store.closeDialog();
-            send({ t: 'newDoc', width: w, height: h });
-            store.setTabs([{ id: 1, name, dirty: false }]);
-            store.setActiveTab(1);
+            send({ t: 'newDoc', width: w, height: h, name, background });
           }}
         />
       </Show>
@@ -1779,7 +1777,6 @@ export function Workspace() {
             onCancel={() => {
               setRecovery(null);
               send({ t: 'discardRecovery' });
-              startDefaultDocument();
             }}
             onOk={() => {
               setRecovery(null);
@@ -1792,7 +1789,7 @@ export function Workspace() {
                 {new Date(r().savedAt).toLocaleString()}.
               </p>
               <p class="dim">
-                Cancel starts a new document instead and discards the autosave.
+                Cancel discards the autosave.
               </p>
             </div>
           </Dialog>
