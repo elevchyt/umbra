@@ -6,6 +6,7 @@ import { Dock } from '@umbra/ui/dock/Dock';
 import { rgbToCss } from '@umbra/core/color';
 import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, ADJUSTMENT_LABEL, defaultAdjustment, type Adjustment, type FillSummary, SPATIAL_LABEL, defaultSpatial, type SpatialAdjustment, screenPointAtDoc, type ViewState, FILTER_BY_ID, defaultsOf, type SmartSummary, DEFAULT_CHAR, DEFAULT_PARA, type AntiAlias, type BrushParams, RETOUCH_TOOLS } from '@umbra/engine';
 import { addImportedPresets } from '../brush/ToolPresets';
+import { SymmetryGuide } from './SymmetryGuide';
 import { ContentAwareFillWorkspace, openContentAwareFill } from '../brush/ContentAwareFill';
 import { AdjustmentDialog } from '../adjust/AdjustmentDialog';
 import { initialAdjustment } from '../adjust/initial';
@@ -1637,6 +1638,7 @@ export function Workspace() {
           <div class="doc-area" ref={docAreaRef} classList={{ 'with-rulers': store.extras.rulers }}>
             <canvas ref={canvasRef} class={cursorClass(store.activeTool())} />
             <SamplerMarkers />
+            <SymmetryGuide />
             <Show when={store.extras.rulers}>
               <div class="ruler ruler-h" />
               <div class="ruler ruler-v" />

@@ -2,7 +2,10 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ByteWriter, bool, en, list, long, obj, pct, px, ang, text, writeDescriptor, type DV } from './descriptor-writer.js';
-import { readTplFile } from './tpl.js';
+import { readTplFile, writeTplFile, type ToolPresetExport } from './tpl.js';
+import { DEFAULT_BRUSH, DEFAULT_SHAPE_DYNAMICS, DEFAULT_TEXTURE, NO_DYNAMIC, builtinTips } from '@umbra/kernels/brush';
+import { builtinPatterns } from '@umbra/kernels/fill';
+import { FOREGROUND_TO_TRANSPARENT } from '@umbra/kernels/gradient';
 
 /** A .tpl with the given presets (name, class, items), as Photoshop writes one. */
 function tpl(presets: [string, string, [string, DV][]][]): Uint8Array {
@@ -67,6 +70,67 @@ describe('.tpl', () => {
   });
 });
 
+describe('.tpl writing', () => {
+  it('round-trips every option family through write and read', () => {
+    const tips = builtinTips();
+    const pattern = builtinPatterns()[1]!;
+    const presets: ToolPresetExport[] = [
+      {
+        name: 'Chalk 40',
+        tool: 'brush',
+        brush: {
+          ...DEFAULT_BRUSH,
+          size: 40,
+          opacity: 0.6,
+          flow: 0.5,
+          mode: 'multiply',
+          tip: { kind: 'sampled', id: 'builtin:chalk' },
+          shapeDynamics: { ...DEFAULT_SHAPE_DYNAMICS, enabled: true, angle: { ...NO_DYNAMIC, jitter: 0.5 } },
+          texture: { ...DEFAULT_TEXTURE, enabled: true, patternId: pattern.id },
+        },
+      },
+      { name: 'Heal from pattern', tool: 'healingBrush', brush: { ...DEFAULT_BRUSH, size: 21 }, retouch: { aligned: true, impressionist: false, healSource: 'pattern', patternId: pattern.id } },
+      { name: 'BG Eraser', tool: 'backgroundEraser', brush: { ...DEFAULT_BRUSH, size: 30 }, retouch: { tolerance: 0.4, limits: 'findEdges', sampling: 'once', protectForeground: true } },
+      { name: 'Wand 12', tool: 'magicWand', select: { tolerance: 12, antialias: false, contiguous: false, sampleAllLayers: true } },
+      { name: 'Bucket 40', tool: 'paintBucket', brush: { opacity: 0.8, mode: 'screen' }, select: { tolerance: 40, antialias: true, contiguous: false, sampleAllLayers: false } },
+      { name: 'Fade', tool: 'gradient', gradient: { gradient: FOREGROUND_TO_TRANSPARENT([1, 0.5, 0]), style: 'radial', mode: 'overlay', opacity: 0.7, reverse: true, dither: false } },
+      { name: 'Title', tool: 'typeHorizontal', type: { font: 'NotoSans-Bold', family: 'Noto Sans', fontStyle: 'Bold', size: 36, align: 'center' } },
+      {
+        name: 'Star',
+        tool: 'polygon',
+        shape: {
+          mode: 'shape',
+          fill: { type: 'solid', color: [1, 0, 0] },
+          stroke: { enabled: true, style: { width: 4, align: 'inside', cap: 'round', join: 'bevel', miterLimit: 4, dashes: [2, 1], dashOffset: 0 }, content: { type: 'solid', color: [0, 0, 1] }, opacity: 0.5, blendMode: 'multiply' },
+          sides: 5,
+          star: 40,
+        },
+      },
+      { name: 'Heart', tool: 'customShape', shape: { mode: 'path', customShapeName: 'Heart' } },
+    ];
+    const bytes = writeTplFile(presets, tips, [pattern]);
+    const back = readTplFile(bytes, 'mine.tpl');
+    expect(back.presets.map((p) => [p.name, p.tool])).toEqual(presets.map((p) => [p.name, p.tool]));
+    for (const p of back.presets) expect(p.lost, p.name).toEqual([]);
+    expect(back.patterns.map((p) => p.id)).toEqual([pattern.id]);
+    const [chalk, heal, bg, wand, bucket, fade, title, star, heart] = back.presets;
+    expect(chalk!.brush).toMatchObject({ size: 40, opacity: 0.6, flow: 0.5, mode: 'multiply', shapeDynamics: { enabled: true }, texture: { enabled: true, patternId: pattern.id } });
+    // The sampled tip came along with it.
+    const tipId = (chalk!.brush!.tip as { id: string }).id;
+    expect(back.tips.get(tipId)?.data).toEqual(tips.get('builtin:chalk')!.data);
+    expect(heal!.retouch).toEqual({ aligned: true, impressionist: false, healSource: 'pattern', patternId: pattern.id });
+    expect(bg!.retouch).toEqual({ tolerance: 0.4, limits: 'findEdges', sampling: 'once', protectForeground: true });
+    expect(wand!.select).toEqual({ tolerance: 12, antialias: false, contiguous: false, sampleAllLayers: true });
+    expect(bucket).toMatchObject({ brush: { opacity: 0.8, mode: 'screen' }, select: { tolerance: 40, contiguous: false } });
+    expect(fade!.gradient).toMatchObject({ style: 'radial', mode: 'overlay', opacity: 0.7, reverse: true, dither: false });
+    expect(fade!.gradient!.gradient!.colorStops.length).toBe(presets[5]!.gradient!.gradient!.colorStops.length);
+    expect(title!.type).toEqual({ font: 'NotoSans-Bold', family: 'Noto Sans', fontStyle: 'Bold', size: 36, align: 'center' });
+    expect(star!.shape).toMatchObject({ mode: 'shape', fill: { type: 'solid', color: [1, 0, 0] }, sides: 5, star: 40 });
+    expect(star!.shape!.stroke).toMatchObject({ enabled: true, style: { width: 4, align: 'inside', cap: 'round', join: 'bevel', dashes: [2, 1] }, content: { type: 'solid', color: [0, 0, 1] }, opacity: 0.5, blendMode: 'multiply' });
+    expect(heart!.shape).toMatchObject({ mode: 'path', customShapeName: 'Heart' });
+  });
+});
+
 /** Photoshop's own tool presets, read in place when installed (see abr-corpus.test.ts). */
 function corpus(): string[] {
   const roots = process.env.UMBRA_TPL_CORPUS ? [process.env.UMBRA_TPL_CORPUS] : existsSync('/mnt') ? readdirSync('/mnt').map((d) => join('/mnt', d, 'Program Files/Adobe/Adobe Photoshop 2020')) : [];
@@ -99,6 +163,20 @@ describe.skipIf(files.length === 0)('.tpl corpus', () => {
         // No preset lost its brush outright.
         expect(p.lost.filter((l) => l.startsWith('brush (')), p.name).toEqual([]);
       }
+      // Written back and read again, every preset maps to the same tool and options.
+      // (Colours come back in 8 bits: Photoshop stores fractions of 0…255, we write whole ones.)
+      const again = readTplFile(writeTplFile(t.presets, t.tips, t.patterns), 'again.tpl');
+      const skip = new Set(['lost', 'classID', 'id', 'data']);
+      const same = (a: unknown, b: unknown, path: string): void => {
+        if (typeof a === 'number' && typeof b === 'number') return void expect(Math.abs(a - b), path).toBeLessThan(1 / 255);
+        if (a && b && typeof a === 'object' && typeof b === 'object') {
+          const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !skip.has(k));
+          for (const k of keys) same((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k], `${path}.${k}`);
+          return;
+        }
+        expect(b, path).toEqual(a);
+      };
+      t.presets.forEach((p, i) => same(p, again.presets[i], p.name));
     });
   }
 });

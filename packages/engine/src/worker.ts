@@ -333,6 +333,13 @@ self.onmessage = async (ev: MessageEvent<ToEngine>) => {
       case 'setCloneOverlay':
         engine?.setCloneOverlay(msg.overlay);
         break;
+      case 'exportTpl': {
+        if (!engine) break;
+        const bytes = engine.exportTpl(msg.presets);
+        const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        post({ t: 'psdSaved', name: msg.name, buffer }, [buffer]);
+        break;
+      }
       case 'importTpl':
         if (engine) {
           try {

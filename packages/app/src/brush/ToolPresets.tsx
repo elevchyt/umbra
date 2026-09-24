@@ -10,7 +10,7 @@ import { Icon } from '@umbra/ui/icons/Icon';
 import { Checkbox } from '@umbra/ui/widgets/controls';
 import { store } from '../state/store';
 import { TOOL_BY_ID } from '../tools/registry';
-import type { ToolPresetImport } from '@umbra/engine';
+import { FOREGROUND_TO_BACKGROUND, FOREGROUND_TO_TRANSPARENT, RETOUCH_TOOLS, type Gradient, type ToolPresetExport, type ToolPresetImport } from '@umbra/engine';
 
 interface ToolPreset {
   id: string;
@@ -96,14 +96,57 @@ export function addImportedPresets(list: readonly ToolPresetImport[]): number {
   return added.length;
 }
 
+const SHAPE_TOOLS = ['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape'];
+const SELECT_TOOLS = ['marqueeRect', 'marqueeEllipse', 'marqueeRow', 'marqueeColumn', 'lasso', 'lassoPolygon', 'lassoMagnetic', 'magicWand', 'quickSelect'];
+
+/** The gradient the Gradient tool would draw now: its preset from the colours, or its own. */
+function currentGradient(): Gradient {
+  const g = store.gradientOptions;
+  const fg = store.foreground();
+  const bg = store.background();
+  if (g.preset === 'custom' && g.custom) return JSON.parse(JSON.stringify(g.custom)) as Gradient;
+  if (g.preset === 'fgToTransparent') return FOREGROUND_TO_TRANSPARENT([fg.r, fg.g, fg.b]);
+  if (g.preset === 'blackToWhite') return FOREGROUND_TO_BACKGROUND([0, 0, 0], [1, 1, 1]);
+  return FOREGROUND_TO_BACKGROUND([fg.r, fg.g, fg.b], [bg.r, bg.g, bg.b]);
+}
+
+/** New Tool Preset: the current tool and whichever options it uses. */
 function snapshot(): ToolPreset {
   const tool = store.activeTool();
-  const shapeTools = ['rectangle', 'ellipse', 'triangle', 'polygon', 'line', 'customShape'];
   const p: ToolPreset = { id: `tp-${Date.now().toString(36)}`, name: `${TOOL_BY_ID.get(tool)?.name.replace(/ Tool$/, '') ?? tool} ${presets().length + 1}`, tool };
-  if (shapeTools.includes(tool)) p.shape = store.shapeOptions();
+  if (SHAPE_TOOLS.includes(tool)) p.shape = store.shapeOptions();
   else if (tool.startsWith('type')) p.type = store.typeOptions();
-  else p.brush = JSON.parse(JSON.stringify(store.brush));
+  else if (SELECT_TOOLS.includes(tool)) p.select = { ...store.selectOptions };
+  else if (tool === 'gradient') {
+    const g = store.gradientOptions;
+    p.gradient = { gradient: currentGradient(), style: g.style, mode: g.mode, opacity: g.opacity, reverse: g.reverse, dither: g.dither };
+  } else {
+    p.brush = JSON.parse(JSON.stringify(store.brush));
+    if ((RETOUCH_TOOLS as readonly string[]).includes(tool)) p.retouch = { ...store.retouchOptions() };
+    if (tool === 'paintBucket' || tool === 'magicEraser') p.select = { ...store.selectOptions };
+  }
   return p;
+}
+
+/** A preset as the engine saves it: a custom shape by its name, as Photoshop refers to it. */
+function toExport(p: ToolPreset): ToolPresetExport {
+  let shape = p.shape as (ToolPresetExport['shape'] & object) | undefined;
+  if (shape?.customShape) {
+    const name = store.customShapes().find((c) => c.id === shape!.customShape)?.name;
+    shape = { ...shape, ...(name ? { customShapeName: name } : {}) };
+  }
+  return JSON.parse(
+    JSON.stringify({
+      name: p.name,
+      tool: p.tool,
+      ...(p.brush ? { brush: p.brush } : {}),
+      ...(shape ? { shape } : {}),
+      ...(p.type ? { type: p.type } : {}),
+      ...(p.retouch ? { retouch: p.retouch } : {}),
+      ...(p.select ? { select: p.select } : {}),
+      ...(p.gradient ? { gradient: p.gradient } : {}),
+    }),
+  ) as ToolPresetExport;
 }
 
 export function ToolPresetList(props: { onPick?: () => void }) {
@@ -142,6 +185,15 @@ export function ToolPresetList(props: { onPick?: () => void }) {
       </div>
       <div class="panel-footer">
         <Checkbox checked={currentOnly()} label="Current Tool Only" onChange={setCurrentOnly} />
+        <button
+          type="button"
+          class="mini-icon"
+          title="Save Tool Presets… (.tpl, every preset in the list)"
+          disabled={!presets().length}
+          onClick={() => store.engine?.({ t: 'exportTpl', presets: presets().map(toExport), name: 'Tool Presets.tpl' } as never)}
+        >
+          <Icon name="newDocument" size={15} />
+        </button>
         <label class="mini-icon" title="Load Tool Presets… (.tpl)">
           <Icon name="folder" size={15} />
           <input

@@ -203,9 +203,13 @@ implementation.
       Diagonal, Wavy, Circle, Spiral, Parallel Lines, Radial, Mandala, and Selected Path (across
       the path chosen in the Paths panel). The options bar sets Segments, Size and Angle. The
       proportions of Wavy, Circle and Spiral are `[fit]`.
-- [ ] **Symmetry is placed at the canvas centre** and has no on-canvas guide you can drag
-      (Path symmetry follows its path). Past twice a Circle's radius, a mirror crosses the
-      centre.
+- [x] **The symmetry guide** (2026-09-24): while a painting tool has symmetry on, its axes (or
+      the wave, circle or spiral) show on the canvas. Handles move the centre, turn it (Shift
+      for 15° steps) and size the figure; the options bar's Size and Angle follow.
+- [ ] **The symmetry guide is not a path**: Photoshop keeps the symmetry as an editable path
+      in the Paths panel, with Free Transform's full box. Here it has three handles, and Path
+      symmetry shows the path only when a path tool is active. Past twice a Circle's radius, a
+      mirror crosses the centre.
 - [x] **Load Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel. It maps onto
       Umbra's tools and options:
       - brushes with all their dynamics and sampled tips
@@ -222,8 +226,11 @@ implementation.
       - Magnetic Lasso settings
       - a bucket's pattern fill
       - layer styles on shape presets
-- [ ] **Tool presets live with the app, not in a file**: they cannot be saved as `.tpl`, and a
-      loaded preset's sampled brush tip lasts only until the app is reloaded.
+- [x] **Save Tool Presets (`.tpl`)** (2026-09-24), from the Tool Presets panel: every preset,
+      with the sampled tips and patterns it uses, written as Photoshop does. New Tool Preset now
+      also keeps a selection tool's, the Gradient's and the retouching tools' options.
+- [ ] **A loaded preset's sampled brush tip lasts only until the app is reloaded**; the presets
+      themselves are kept with the app.
 - [x] **Edit ▸ Content-Aware Fill is Photoshop's workspace** (2026-09-24). The canvas shows the
       sampling area as a tinted overlay, which the Sampling Brush paints in or out (Alt swaps
       the two).

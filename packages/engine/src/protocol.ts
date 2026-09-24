@@ -10,7 +10,7 @@ import type { BlendMode } from '@umbra/core/blend';
 import type { GlobalLight, LayerEffects } from '@umbra/kernels/effects/types';
 import type { StylePreset } from '@umbra/kernels/effects/presets';
 import type { AdvancedBlending } from '@umbra/kernels/composite';
-import type { ToolPresetImport } from './tpl.js';
+import type { ToolPresetExport, ToolPresetImport } from './tpl.js';
 import type { LayerStyleProps, PathCommand, SmartCommand, SmartFilterOp, StyleCommand, TypeCommand, VectorMaskCommand, BrushLibraryOp, PatchOptions, CloneOverlay, CafOptions, CafState } from './engine.js';
 import type { BrushGroup, BrushPreset, TipBitmap } from '@umbra/kernels/brush';
 import type { RetouchOptions, RetouchToolId } from './retouch.js';
@@ -307,6 +307,7 @@ export type ToEngine =
   | { t: 'cafPaint'; phase: 'down' | 'move' | 'up'; x: number; y: number; size: number; subtract: boolean }
   | { t: 'cafEnd'; commit: boolean }
   | { t: 'importTpl'; bytes: Uint8Array; name: string }
+  | { t: 'exportTpl'; presets: ToolPresetExport[]; name: string }
   | { t: 'setCloneOverlay'; overlay: CloneOverlay | null }
   | { t: 'setCloneSource'; x: number; y: number; /** Document coordinates (a Clone Source slot), not screen. */ doc?: boolean }
   | { t: 'magicErase'; x: number; y: number; tolerance: number; contiguous: boolean; antiAlias: boolean; sampleAll: boolean; opacity: number }

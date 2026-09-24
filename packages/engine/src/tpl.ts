@@ -9,15 +9,17 @@
  * rest map key by key. What has nowhere to go is reported per preset.
  */
 import { createReader, readSignature, readUint32, readUnicodeString, readBytes, readPattern } from 'ag-psd/dist/psdReader';
-import { readVersionAndDescriptor, parseVectorContent, BlnM } from 'ag-psd/dist/descriptor';
+import { readVersionAndDescriptor, parseVectorContent, serializeVectorContent, BlnM } from 'ag-psd/dist/descriptor';
+import { createWriter, getWriterBuffer, writePattern } from 'ag-psd/dist/psdWriter';
 import type { PatternDef, FillContent } from '@umbra/kernels/fill';
 import type { Gradient, GradientStyle } from '@umbra/kernels/gradient';
 import type { BrushParams, TipBitmap } from '@umbra/kernels/brush';
 import type { RetouchOptions } from './retouch.js';
 import type { ShapeOptions } from './shape-tool.js';
-import { readAbrBrushDescriptors, displayName } from './abr.js';
-import { fromPsdFill } from './psd-adjust.js';
+import { readAbrBrushDescriptors, displayName, brushPresetItems, section, writeSamples } from './abr.js';
+import { fromPsdFill, toPsdFill } from './psd-adjust.js';
 import { strokeFromPsd } from './psd-vector.js';
+import { ByteWriter, dvFromParsed, writeDescriptor, type DV } from './descriptor-writer.js';
 
 type Desc = Record<string, unknown>;
 
@@ -357,4 +359,194 @@ function shapeOf(d: Desc, patterns: readonly PatternDef[], lost: string[]): Part
   if (typeof d.LnWd === 'number') out.weight = d.LnWd;
   if (d.customShape) out.customShapeName = displayName(String((d.customShape as Desc)['Nm  '] ?? ''));
   return out;
+}
+
+// ---- writing ------------------------------------------------------------------------------
+
+/** A tool preset to save: Umbra's tool and the options it keeps. */
+export type ToolPresetExport = Omit<ToolPresetImport, 'classID' | 'lost'>;
+
+/** Umbra's tool ids → Photoshop's tool classes (the first class for each tool). */
+const CLASS_OF: Record<string, string> = Object.fromEntries(
+  Object.entries(TOOL_OF)
+    .reverse()
+    .map(([cls, tool]) => [tool, cls]),
+);
+
+/** Our blend-mode names ('colorBurn') → the descriptor's ('BlnM.CBrn'); Normal where it has none. */
+function blendEnum(mode: string | undefined): string {
+  try {
+    return BlnM.encode((mode ?? 'normal').replace(/[A-Z]/g, (c) => ` ${c.toLowerCase()}`) as never) as string;
+  } catch {
+    return 'BlnM.Nrml';
+  }
+}
+
+const CONTENT_CLASS: Record<string, string> = { SoCo: 'solidColorLayer', GdFl: 'gradientLayer', PtFl: 'patternLayer' };
+
+/** A fill as a descriptor object (classed), for a shape's style or a stroke's content. */
+function contentDesc(content: FillContent): Desc {
+  const { key, descriptor } = serializeVectorContent(toPsdFill(content) as never) as unknown as { key: string; descriptor: Desc };
+  return { _classID: CONTENT_CLASS[key] ?? 'solidColorLayer', ...descriptor };
+}
+
+/**
+ * Save tool presets as Photoshop's .tpl (version 2): the presets' descriptors, with the
+ * sampled tips their brushes use and the patterns they refer to. The exact inverse of the
+ * reader above, so every option it maps survives the round trip.
+ */
+export function writeTplFile(presets: readonly ToolPresetExport[], tips: ReadonlyMap<string, TipBitmap>, patterns: readonly PatternDef[]): Uint8Array {
+  const usedTips = new Set<string>();
+  const usedPatterns = new Set<string>();
+  const descs = presets.map((p) => {
+    const d = presetDesc(p, patterns);
+    const b = p.brush;
+    if (b?.tip?.kind === 'sampled') usedTips.add(b.tip.id);
+    if (b?.dual?.enabled && b.dual.tip.kind === 'sampled') usedTips.add(b.dual.tip.id);
+    if (b?.texture?.enabled) usedPatterns.add(b.texture.patternId);
+    if (p.retouch?.patternId) usedPatterns.add(p.retouch.patternId);
+    for (const c of [p.shape?.fill, p.shape?.stroke?.content]) if (c?.type === 'pattern') usedPatterns.add(c.pattern.id);
+    return { name: p.name, ...d };
+  });
+  const w = new ByteWriter();
+  w.sig('8BTP');
+  w.u32(2);
+  w.u32(1);
+  const pad = (s: ByteWriter) => s.pad(4);
+  if (usedTips.size) section(w, 'samp', (s) => writeSamples(s, usedTips, tips));
+  const pats = patterns.filter((p) => usedPatterns.has(p.id));
+  if (pats.length) {
+    const pw = createWriter();
+    for (const p of pats) writePattern(pw, { name: p.name, id: p.id, x: 0, y: 0, bounds: { x: 0, y: 0, w: p.width, h: p.height }, data: p.data } as never);
+    const bytes = new Uint8Array(getWriterBuffer(pw));
+    section(w, 'tppa', (s) => {
+      s.bytes(bytes);
+      pad(s);
+    });
+  }
+  section(w, 'tptp', (s) => {
+    s.u32(descs.length);
+    for (const d of descs) {
+      s.u32(d.name.length + 1);
+      for (const c of d.name) s.u16(c.charCodeAt(0));
+      s.u16(0);
+      writeDescriptor(s, d.cls, d.items);
+    }
+    pad(s);
+  });
+  return w.result();
+}
+
+function presetDesc(p: ToolPresetExport, patterns: readonly PatternDef[]): { cls: string; items: [string, DV][] } {
+  const cls = CLASS_OF[p.tool ?? ''] ?? 'PbTl';
+  const o: Desc = {};
+  const b = p.brush;
+  const brushTool = b && (b.size !== undefined || b.tip !== undefined);
+  if (b?.opacity !== undefined) o.Opct = Math.round(b.opacity * 100);
+  if (b?.mode !== undefined) o['Md  '] = blendEnum(b.mode);
+  const patternRef = (id: string) => {
+    const pat = patterns.find((q) => q.id === id);
+    return { _classID: 'Ptrn', 'Nm  ': pat?.name ?? id, Idnt: id };
+  };
+  const r = p.retouch;
+  if (r) {
+    if (r.aligned !== undefined) o.StmA = r.aligned;
+    if (r.impressionist !== undefined) o.Imps = r.impressionist;
+    if (r.healSource !== undefined) o.StmS = r.healSource === 'pattern';
+    if (r.patternId) o.Ptrn = patternRef(r.patternId);
+    if (r.tolerance !== undefined) o.Tlrn = Math.round(r.tolerance * 100);
+    if (r.limits !== undefined) o.BECn = ['discontiguous', 'contiguous', 'findEdges'].indexOf(r.limits);
+    if (r.sampling !== undefined) o.BESm = ['continuous', 'once', 'backgroundSwatch'].indexOf(r.sampling);
+    if (r.protectForeground !== undefined) o.BEPr = r.protectForeground;
+  }
+  const sel = p.select;
+  if (sel) {
+    if (p.tool === 'paintBucket') {
+      if (sel.tolerance !== undefined) o.BckT = Math.round(sel.tolerance);
+      if (sel.antialias !== undefined) o.BckA = sel.antialias;
+      if (sel.contiguous !== undefined) o.Cntg = sel.contiguous;
+      if (sel.sampleAllLayers !== undefined) o.BckS = sel.sampleAllLayers;
+    } else {
+      if (sel.feather !== undefined) o.Fthr = { units: 'Pixels', value: sel.feather };
+      if (sel.antialias !== undefined) o.AntA = sel.antialias;
+      if (sel.tolerance !== undefined) o.Tlrn = Math.round(sel.tolerance);
+      if (sel.contiguous !== undefined) o.Cntg = sel.contiguous;
+      if (sel.sampleAllLayers !== undefined) o.Mrgd = sel.sampleAllLayers;
+    }
+  }
+  const g = p.gradient;
+  if (g) {
+    if (g.gradient) {
+      const c = contentDesc({ type: 'gradient', gradient: g.gradient, style: 'linear', angle: 90, scale: 100, reverse: false, offset: { x: 0, y: 0 } });
+      o.Grad = c.Grad;
+    }
+    if (g.style) o.GrdT = ['linear', 'radial', 'angle', 'reflected', 'diamond'].indexOf(g.style);
+    if (g.mode) o['Md  '] = blendEnum(g.mode);
+    if (g.opacity !== undefined) o.Opct = Math.round(g.opacity * 100);
+    if (g.reverse !== undefined) o.GrdR = g.reverse ? 1 : 0;
+    if (g.dither !== undefined) o.GrdD = g.dither ? 1 : 0;
+  }
+  const t = p.type;
+  if (t) {
+    const style: Desc = { _classID: 'TxtS' };
+    if (t.font) style.fontPostScriptName = t.font;
+    if (t.family) style.FntN = t.family;
+    if (t.fontStyle) style.FntS = t.fontStyle;
+    if (t.size !== undefined) style['Sz  '] = { units: 'Points', value: t.size };
+    o.textToolCharacterOptions = { _classID: 'textToolCharacterOptions', TxtS: style };
+    if (t.align) o.textToolParagraphOptions = { _classID: 'textToolParagraphOptions', paragraphStyle: { _classID: 'paragraphStyle', Algn: `Alg .${{ left: 'Left', center: 'Cntr', right: 'Rght' }[t.align]}` } };
+  }
+  const sh = p.shape;
+  if (sh) {
+    if (sh.mode) o.geometryToolMode = `geometryToolMode.${{ shape: 'Shp ', path: 'Path', pixels: 'Pxl ' }[sh.mode]}`;
+    const style: Desc = { _classID: 'shapeStyle' };
+    if (sh.fill) style.FlCn = contentDesc(sh.fill);
+    if (sh.stroke || sh.fill === null) {
+      const st = sh.stroke;
+      style.strokeStyle = {
+        _classID: 'strokeStyle',
+        strokeStyleVersion: 2,
+        strokeEnabled: !!st?.enabled,
+        fillEnabled: sh.fill !== null,
+        ...(st
+          ? {
+              strokeStyleLineWidth: { units: 'Pixels', value: st.style.width },
+              strokeStyleLineDashOffset: { units: 'Pixels', value: st.style.dashOffset },
+              strokeStyleMiterLimit: st.style.miterLimit + 0.0,
+              strokeStyleLineCapType: `strokeStyleLineCapType.${{ butt: 'strokeStyleButtCap', round: 'strokeStyleRoundCap', square: 'strokeStyleSquareCap' }[st.style.cap]}`,
+              strokeStyleLineJoinType: `strokeStyleLineJoinType.${{ miter: 'strokeStyleMiterJoin', round: 'strokeStyleRoundJoin', bevel: 'strokeStyleBevelJoin' }[st.style.join]}`,
+              strokeStyleLineAlignment: `strokeStyleLineAlignment.${{ inside: 'strokeStyleAlignInside', center: 'strokeStyleAlignCenter', outside: 'strokeStyleAlignOutside' }[st.style.align]}`,
+              strokeStyleLineDashSet: st.style.dashes.map((d) => ({ units: 'None', value: d })),
+              strokeStyleBlendMode: blendEnum(st.blendMode),
+              strokeStyleOpacity: { units: 'Percent', value: st.opacity * 100 },
+              strokeStyleContent: contentDesc(st.content),
+            }
+          : {}),
+      };
+    }
+    if (style.FlCn || style.strokeStyle) o.shapeStyle = style;
+    if (sh.sides !== undefined) o.sides = sh.sides;
+    if (sh.star !== undefined && sh.star > 0) {
+      o.indent = { units: 'Percent', value: sh.star };
+      o.doIndent = true;
+    }
+    if (sh.weight !== undefined) o.LnWd = sh.weight + 0.0;
+    if (sh.customShapeName) o.customShape = { _classID: 'customShape', 'Nm  ': sh.customShapeName };
+  }
+  const items: [string, DV][] = Object.entries(o).map(([k, v]) => [k, dvFromParsed(v, k)]);
+  // A painting tool's brush: the same items an .abr brush preset has, at the top level.
+  if (brushTool) {
+    const own = new Set(items.map(([k]) => k));
+    const brushItems = brushPresetItems({ id: '', name: '', params: { size: 25, ...b! } }, (id) => id.replace(/^.*:/, ''));
+    for (const [k, v] of brushItems) {
+      if (k === 'Nm  ' || own.has(k)) continue;
+      // Its tool options (flow, smoothing, pressure) go to the top level too.
+      if (k === 'toolOptions' && v.t === 'obj') {
+        for (const [tk, tv] of v.items) if (!own.has(tk) && tk !== 'Md  ' && tk !== 'Opct') items.push([tk, tv]);
+        continue;
+      }
+      items.push([k, v]);
+    }
+  }
+  return { cls, items };
 }

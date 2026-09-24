@@ -586,7 +586,7 @@ budget 16 ms). There is no Photoshop to A/B against, so healing and PatchMatch a
   - Healing is a Poisson membrane (Pérez 2003 / Georgiev 2004), solved coarse to fine.
   - Content-aware fills are PatchMatch (Barnes 2009) with Wexler EM voting.
 
-Parity 133/133; 873 tests (884 after the follow-ups). Nothing from M8 remains deferred.
+Parity 133/133; 873 tests (885 after the follow-ups). Nothing from M8 remains deferred.
 
 Follow-up (2026-09-24), each of these was deferred above and is now built:
 - **Physical tips.** Bristle, erodible and airbrush tips are generated from their settings
@@ -625,6 +625,15 @@ Follow-up (2026-09-24), each of these was deferred above and is now built:
     surroundings. With the option on, the error is under half of the plain fill's.
   - In the browser, a striped image with a disc removed matches untouched stripes pixel for
     pixel.
+- **The symmetry guide.** An SVG over the canvas, mapped through the view as the Color
+  Sampler markers are, with handles for the centre, the angle and the size. The curves are
+  the brush's own (`symmetryCurve`), so what the guide shows is what the stroke mirrors
+  across.
+- **Saving `.tpl`** (`writeTplFile`). It is the reader's exact inverse, and a painting
+  preset's brush is written with the same items an `.abr` preset has.
+  - Every option family survives a write and read.
+  - Photoshop 2020's own `.tpl` files, read, written and read again, map to the same tools
+    and options. Colours differ only by 8-bit rounding: Photoshop stores fractions of 0…255.
 
 **Findings.**
 1. **Healing needs a boundary where both images are known.** The membrane took its

@@ -404,6 +404,11 @@ function shapeDV(p: { size: number; angle?: number; roundness?: number; hardness
 }
 
 function presetDV(pr: BrushPreset, tipName: (id: string) => string): DV {
+  return obj('brushPreset', brushPresetItems(pr, tipName));
+}
+
+/** A brush preset's descriptor items (its name, tip, every section and its tool options). */
+export function brushPresetItems(pr: BrushPreset, tipName: (id: string) => string): [string, DV][] {
   const p = { ...DEFAULT_BRUSH, ...pr.params };
   const items: [string, DV][] = [
     ['Nm  ', text(pr.name)],
@@ -508,10 +513,11 @@ function presetDV(pr: BrushPreset, tipName: (id: string) => string): DV {
       ['useLegacy', bool(false)],
     ]),
   ]);
-  return obj('brushPreset', items);
+  return items;
 }
 
-function section(w: ByteWriter, type: string, write: (w: ByteWriter) => void): void {
+/** An `8BIM` section: its type, its length, then what `write` writes. */
+export function section(w: ByteWriter, type: string, write: (w: ByteWriter) => void): void {
   w.sig('8BIM');
   w.sig(type);
   const at = w.length;
@@ -531,29 +537,7 @@ export function writeAbrFile(presets: readonly BrushPreset[], tips: ReadonlyMap<
   const w = new ByteWriter();
   w.i16(6);
   w.i16(2);
-  section(w, 'samp', (s) => {
-    for (const id of used) {
-      const t = tips.get(id);
-      if (!t) continue;
-      const lenAt = s.length;
-      s.u32(0);
-      const start = s.length;
-      // Pascal string id, then 264 bytes Photoshop does not document (v6.2).
-      const idBytes = [...id].slice(0, 255).map((c) => c.charCodeAt(0) & 0xff);
-      s.u8(idBytes.length);
-      for (const b of idBytes) s.u8(b);
-      for (let i = 0; i < 264; i++) s.u8(0);
-      s.i32(0);
-      s.i32(0);
-      s.i32(t.height);
-      s.i32(t.width);
-      s.i16(8);
-      s.u8(0);
-      s.bytes(t.data);
-      s.patch32(lenAt, s.length - start);
-      s.pad(4);
-    }
-  });
+  section(w, 'samp', (s) => writeSamples(s, used, tips));
   const usedPatterns = patterns.filter((p) => presets.some((pr) => pr.params.texture?.enabled && pr.params.texture.patternId === p.id));
   if (usedPatterns.length) {
     const pw = createWriter();
@@ -578,4 +562,29 @@ export function readAbrBrushDescriptors(brushes: readonly Record<string, unknown
   if (samp) section(w, 'samp', (s) => s.bytes(samp));
   section(w, 'desc', (s) => writeDescriptor(s, 'null', [['Brsh', list(brushes.map((b) => dvFromParsed(b)))]]));
   return readAbrFile(w.result(), name);
+}
+
+/** Sampled tips as an ABR 'samp' section's body (v6.2): raw 8-bit, each padded to 4 bytes. */
+export function writeSamples(s: ByteWriter, ids: Iterable<string>, tips: ReadonlyMap<string, TipBitmap>): void {
+  for (const id of ids) {
+    const t = tips.get(id);
+    if (!t) continue;
+    const lenAt = s.length;
+    s.u32(0);
+    const start = s.length;
+    // Pascal string id, then 264 bytes Photoshop does not document (v6.2).
+    const idBytes = [...id].slice(0, 255).map((c) => c.charCodeAt(0) & 0xff);
+    s.u8(idBytes.length);
+    for (const b of idBytes) s.u8(b);
+    for (let i = 0; i < 264; i++) s.u8(0);
+    s.i32(0);
+    s.i32(0);
+    s.i32(t.height);
+    s.i32(t.width);
+    s.i16(8);
+    s.u8(0);
+    s.bytes(t.data);
+    s.patch32(lenAt, s.length - start);
+    s.pad(4);
+  }
 }

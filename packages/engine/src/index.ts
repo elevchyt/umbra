@@ -31,6 +31,7 @@ export {
   ERODIBLE_SHAPES,
   physicalTip,
   isPhysical,
+  symmetryCurve,
   renderDabs,
   beginStroke as beginBrushStroke,
   strokeTo as brushStrokeTo,
@@ -54,7 +55,7 @@ export {
 } from '@umbra/kernels/brush';
 export type { BrushLibraryOp, PatchOptions, CloneOverlay, CafOptions, CafState } from './engine.js';
 export { DEFAULT_CAF } from './engine.js';
-export type { ToolPresetImport } from './tpl.js';
+export type { ToolPresetImport, ToolPresetExport } from './tpl.js';
 export {
   FOREGROUND_TO_BACKGROUND,
   FOREGROUND_TO_TRANSPARENT,

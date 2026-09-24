@@ -158,7 +158,7 @@ import {
 import { readAbrFile, writeAbrFile } from './abr.js';
 import { DEFAULT_RETOUCH, RetouchStroke, readPixel, type RetouchOptions, type RetouchToolId, type Rgba } from './retouch.js';
 import * as HealCmd from './heal-tools.js';
-import { readTplFile, type ToolPresetImport } from './tpl.js';
+import { readTplFile, writeTplFile, type ToolPresetExport, type ToolPresetImport } from './tpl.js';
 import { heal } from '@umbra/kernels/heal';
 import { DUAL_MODES, TEXTURE_MODES, type DabStyle } from './render/dab.js';
 import { savePsd } from './psd-save.js';
@@ -3228,6 +3228,11 @@ export class Engine {
     for (const [id, tip] of t.tips) this.brushTips.set(id, tip);
     for (const p of t.patterns) if (!this.patternLibrary.some((q) => q.id === p.id)) this.patternLibrary.push(p);
     return t.presets;
+  }
+
+  /** Save Tool Presets… (.tpl): the presets with the sampled tips and patterns they use. */
+  exportTpl(presets: readonly ToolPresetExport[]): Uint8Array {
+    return writeTplFile(presets, this.brushTips, this.patternLibrary);
   }
 
   /** Export Selected Brushes…: presets (by id, or a whole group) with their tips and textures. */
