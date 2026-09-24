@@ -59,6 +59,19 @@ Blending Options with Blend If and knockout, the Styles panel with .asl librarie
 Layers, Scale Effects, Global Light — rendered identically by the GPU and the CPU reference,
 and saved to PSD.
 
+## Install (Linux)
+
+Download `Umbra-<version>-x86_64.AppImage` from the
+[latest release](https://github.com/elevchyt/umbra/releases/latest), make it executable and
+run it:
+
+```bash
+chmod +x Umbra-*-x86_64.AppImage && ./Umbra-*-x86_64.AppImage
+```
+
+The AppImage checks this repository's releases at launch (and on Help ▸ Check for Updates…),
+asks before downloading a new version, and replaces itself in place.
+
 ## Running it
 
 ```bash
@@ -78,6 +91,18 @@ Requires Node 24+ and pnpm. No Rust toolchain.
 pnpm test         # vitest
 pnpm typecheck    # all packages
 ```
+
+### Releasing
+
+```bash
+# bump "version" in packages/shell-electron/package.json (and the root package.json), then:
+pnpm release:linux   # → packages/shell-electron/release/
+gh release create vX.Y.Z packages/shell-electron/release/Umbra-X.Y.Z-x86_64.AppImage \
+  packages/shell-electron/release/latest-linux.yml --title "Umbra X.Y.Z" --notes "…"
+```
+
+Both files must be attached: `latest-linux.yml` is what installed copies read to find and
+verify the update.
 
 ## Layout
 

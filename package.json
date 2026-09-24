@@ -1,7 +1,7 @@
 {
   "name": "umbra-monorepo",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "engines": {
@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "pnpm --filter @umbra/shell-electron dev",
     "build": "pnpm --filter @umbra/app build && pnpm --filter @umbra/shell-electron build",
+    "release:linux": "pnpm --filter @umbra/shell-electron dist:linux",
     "typecheck": "pnpm -r --no-bail --filter '!@umbra/testkit' exec tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",

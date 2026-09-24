@@ -1,0 +1,31 @@
+# Desktop packaging. `pnpm release:linux` at the repo root builds the AppImage into release/;
+# the GitHub release must carry both the AppImage and latest-linux.yml, which is what the
+# in-app updater (src/updater.ts) reads to find and verify a new version.
+appId: io.github.elevchyt.umbra
+productName: Umbra
+executableName: umbra
+electronVersion: 44.4.3
+directories:
+  output: release
+  buildResources: build
+# main.js bundles everything it needs (electron-updater included), so no node_modules ship.
+files:
+  - dist/main.js
+  - dist/preload.cjs
+  - package.json
+extraResources:
+  - from: ../app/dist
+    to: renderer
+npmRebuild: false
+linux:
+  target: AppImage
+  category: Graphics
+  syncDesktopName: true
+  icon: build/icon.png
+  synopsis: Lightweight image editor with a Photoshop-compatible workflow
+  artifactName: Umbra-${version}-${arch}.${ext}
+publish:
+  provider: github
+  owner: elevchyt
+  repo: umbra
+  releaseType: release

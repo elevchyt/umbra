@@ -14,4 +14,8 @@ contextBridge.exposeInMainWorld('umbraShell', {
    */
   saveFile: (name: string, data: ArrayBuffer): Promise<string | null> =>
     ipcRenderer.invoke('umbra:save-file', name, data),
+  /** Whether this build can update itself (the AppImage can; dev runs cannot). */
+  canUpdate: (): Promise<boolean> => ipcRenderer.invoke('umbra:can-update'),
+  /** Help ▸ Check for Updates…: the main process runs the whole flow in native dialogs. */
+  checkForUpdates: (): Promise<void> => ipcRenderer.invoke('umbra:check-updates'),
 });

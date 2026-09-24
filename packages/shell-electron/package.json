@@ -1,6 +1,10 @@
 {
   "name": "@umbra/shell-electron",
-  "version": "0.0.0",
+  "version": "1.0.0",
+  "description": "Lightweight image editor with a Photoshop-compatible workflow",
+  "author": "elevchyt",
+  "homepage": "https://github.com/elevchyt/umbra",
+  "desktopName": "umbra.desktop",
   "private": true,
   "type": "module",
   "main": "dist/main.js",
@@ -9,10 +13,12 @@
     "start": "pnpm build && electron dist/main.js",
     "dev": "node dev.mjs",
     "spikes": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --spikes",
-    "parity": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --parity"
+    "parity": "pnpm --filter @umbra/app build && pnpm build && electron dist/main.js --parity",
+    "dist:linux": "pnpm --filter @umbra/app build && NODE_ENV=production node build.mjs && electron-builder --linux AppImage --publish never"
   },
   "devDependencies": {
     "electron": "^44.4.3",
+    "electron-updater": "^6.8.9",
     "esbuild": "^0.28.2"
   }
 }

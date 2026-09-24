@@ -389,10 +389,14 @@ export function ColorPickerDialog(props: {
 // ---- Small informational dialogs ---------------------------------------------------------
 
 export function AboutDialog(props: { onCancel: () => void }) {
+  // The desktop shell knows the release version; the web build has none to show.
+  const [version, setVersion] = createSignal<string | null>(null);
+  void (globalThis as Record<string, any>).umbraShell?.versions?.().then((v: { app?: string }) => setVersion(v.app ?? null));
   return (
     <Dialog title="About Umbra" width={380} onCancel={props.onCancel}>
       <div class="about">
         <div class="about-title">Umbra</div>
+        <Show when={version()}>{(v) => <p class="dim">Version {v()}</p>}</Show>
         <p class="dim">A lightweight image editor with a Photoshop-compatible workflow.</p>
         <p class="dim">
           Not affiliated with or endorsed by Adobe. "Photoshop" and "Adobe" are trademarks of

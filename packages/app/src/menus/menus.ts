@@ -783,6 +783,7 @@ export const MENUS: MenuDef[] = [
       { label: 'System Info…', cmd: 'help.systemInfo', done: true },
       { label: 'GPU Compatibility…', cmd: 'help.gpuInfo', done: true },
       sep,
+      { label: 'Check for Updates…', cmd: 'help.checkUpdates', done: true },
       { label: 'About Umbra…', cmd: 'help.about', done: true },
     ],
   },

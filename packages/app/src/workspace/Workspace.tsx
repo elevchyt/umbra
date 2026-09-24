@@ -111,6 +111,9 @@ export function Workspace() {
   const [transforming, setTransforming] = createSignal(false);
   const [recovery, setRecovery] = createSignal<{ name: string; savedAt: number } | null>(null);
   const [error, setError] = createSignal<string | null>(null);
+  // Only the AppImage can replace itself; everywhere else Check for Updates stays greyed out.
+  const [canUpdate, setCanUpdate] = createSignal(false);
+  void (globalThis as Record<string, any>).umbraShell?.canUpdate?.().then((ok: boolean) => setCanUpdate(!!ok));
 
   // ---- keymap -------------------------------------------------------------------------
   const keymap = new Keymap();
@@ -763,6 +766,9 @@ export function Workspace() {
         store.setStatusMessage('Preferences dialog arrives in M11; Shift+F1/F2 cycle the theme.');
         break;
 
+      case 'help.checkUpdates':
+        void (globalThis as Record<string, any>).umbraShell?.checkForUpdates?.();
+        break;
       case 'help.about':
         store.openDialog('about');
         break;
@@ -1573,6 +1579,7 @@ export function Workspace() {
     }
     if (cmd === 'so.convert' || cmd === 'filter.convertForSmart') return (store.doc()?.activeLayerIds.length ?? 0) > 0;
     if (cmd === 'file.placeEmbedded') return !!store.doc();
+    if (cmd === 'help.checkUpdates') return canUpdate();
     return !!entry.done;
   };
 

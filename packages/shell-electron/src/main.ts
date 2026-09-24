@@ -3,10 +3,11 @@ import { writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, normalize, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { canUpdate, checkForUpdates } from './updater.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-/** Renderer bundle produced by `@umbra/app`. */
-const APP_ROOT = join(here, '..', '..', 'app', 'dist');
+/** Renderer bundle produced by `@umbra/app`; a packaged build carries it as a resource. */
+const APP_ROOT = app.isPackaged ? join(process.resourcesPath, 'renderer') : join(here, '..', '..', 'app', 'dist');
 
 const DEV_URL = process.env.UMBRA_DEV_URL ?? '';
 const SPIKES = process.argv.includes('--spikes');
@@ -155,7 +156,11 @@ void app.whenReady().then(async () => {
     return filePath;
   });
 
+  ipcMain.handle('umbra:can-update', () => canUpdate());
+  ipcMain.handle('umbra:check-updates', () => checkForUpdates(true));
+
   ipcMain.handle('umbra:versions', () => ({
+    app: app.getVersion(),
     electron: process.versions.electron,
     chrome: process.versions.chrome,
     node: process.versions.node,
@@ -182,7 +187,9 @@ void app.whenReady().then(async () => {
     return;
   }
 
-  await createWindow();
+  const win = await createWindow();
+  // Check once the window is up, so a slow network never delays the first paint.
+  if (!DEV_URL) win.once('show', () => setTimeout(() => void checkForUpdates(false), 3000));
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
